@@ -2,7 +2,7 @@
 
 A natural language crime intelligence platform for Karnataka State Police. Officers type a question in plain English, the system converts it to a MySQL query using an LLM, runs it against the crime database, and streams back a formatted answer with tabular results.
 
-> See [Docs.md](Docs.md) for full technical documentation — every file, function, and data flow.
+> See [Docs.md](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md) for full technical documentation — every file, function, and data flow.
 
 ---
 
@@ -93,7 +93,7 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
             └── main.css         # Government portal styling (warm cream + coral)
 ```
 
-> See [Docs.md §2](Docs.md#2-backend-architecture) and [Docs.md §5](Docs.md#5-frontend-architecture) for what each file does.
+> See [Docs.md §2](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#2-backend-architecture) and [Docs.md §5](Docs.md#5-frontend-architecture) for what each file does.
 
 ---
 
@@ -293,7 +293,7 @@ The system uses a **two-LLM pipeline**:
 4. **Query Execution** — runs against the MySQL database with a 5-second timeout
 5. **Answer Formatting** — Qwen 2.5-14B Instruct converts raw results into a professional natural-language answer
 
-> See [Docs.md §4.2](Docs.md#42-ask-a-question-full-pipeline) for the complete end-to-end flow.
+> See [Docs.md §4.2](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#42-ask-a-question-full-pipeline) for the complete end-to-end flow.
 
 ---
 
@@ -307,7 +307,7 @@ The system uses a **two-LLM pipeline**:
 | `GET` | `/api/chat/stream` | Yes | SSE streaming chat (production path) |
 | `GET` | `/health` | No | Service health check |
 
-> See [Docs.md §3.18](Docs.md#318-backendrouterschatpy) and [Docs.md §3.19](Docs.md#319-backendroutersauthpy) for request/response details.
+> See [Docs.md §3.18](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#318-backendrouterschatpy) and [Docs.md §3.19](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#319-backendroutersauthpy) for request/response details.
 
 ---
 
@@ -350,7 +350,7 @@ The seeder creates these officers (password is always `<badge_number>123`):
 | `case_relationships` | Links between entities (for network graph) |
 | `evidence_media` | Media files attached to FIRs |
 
-> Note: 4 case types (`robbery`, `murder`, `domestic_violence`, `other`) exist in `fir_master` but have no dedicated child tables. See [Docs.md §3.4](Docs.md#34-backendschemasql) for details.
+> Note: 4 case types (`robbery`, `murder`, `domestic_violence`, `other`) exist in `fir_master` but have no dedicated child tables. See [Docs.md §3.4](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#34-backendschemasql) for details.
 
 ---
 
@@ -419,4 +419,18 @@ Update `ALLOWED_ORIGINS` in your production `.env` to your Catalyst Slate URL in
 
 ## License
 
-Internal use — Karnataka State Police.
+Copyright (C) 2024 adarsh.v.h <adarshvh2005@gmail.com>
+
+This project is licensed under the **GNU Affero General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
+
+### What this means:
+
+- **Free to use, modify, and distribute** — you can run, study, and adapt this software
+- **Copyleft** — any modified version must also be released under AGPL v3
+- **Network use clause** — if you run this as a service (SaaS), you must share your source code
+- **Patent protection** — contributors grant patent rights to users
+- **No warranty** — the software is provided "as is"
+
+### For Karnataka State Police:
+
+This license ensures the software remains open and transparent for law enforcement use, while preventing any party from making it proprietary. If the KSP incorporates this into production, all future modifications must remain open source under the same license.
