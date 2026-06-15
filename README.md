@@ -114,8 +114,8 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
 ### 1. Clone and enter the project
 
 ```bash
-git clone <repo-url>
-cd Dataathon
+git clone https://github.com/adarsh-v-h/AgenticAI-KSP.git 
+cd AgenticAI-KSP
 ```
 
 ### 2. Create a Python virtual environment
