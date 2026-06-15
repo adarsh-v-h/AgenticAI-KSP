@@ -438,6 +438,19 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "tables": {"fir_master", "officers"},
+        "q": "Give me cases handled by Harish Kumar.",
+        "sql": (
+            "SELECT f.fir_id, f.fir_number, f.case_type, f.incident_location,\n"
+            "       f.date_filed, f.status\n"
+            "FROM fir_master AS f\n"
+            "JOIN officers AS o ON o.officer_id = f.investigating_officer_id\n"
+            "WHERE o.full_name LIKE '%Harish Kumar%'\n"
+            "ORDER BY f.date_filed DESC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
         "tables": {"fir_master"},
         "q": "Break down all cases by type with counts.",
         "sql": (
@@ -456,6 +469,40 @@ _FEW_SHOT_BANK: list[dict] = [
             "WHERE case_type = 'assault'\n"
             "  AND incident_location LIKE '%Koramangala%'\n"
             "ORDER BY date_filed DESC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "tables": {"fir_master", "accused"},
+        "q": "Show accused who appear in more than one open FIR.",
+        "sql": (
+            "SELECT a.full_name, COUNT(DISTINCT a.fir_id) AS open_fir_count\n"
+            "FROM accused AS a\n"
+            "WHERE a.fir_id IN (\n"
+            "    SELECT f.fir_id\n"
+            "    FROM fir_master AS f\n"
+            "    WHERE f.status = 'open'\n"
+            ")\n"
+            "GROUP BY a.full_name\n"
+            "HAVING COUNT(DISTINCT a.fir_id) > 1\n"
+            "ORDER BY open_fir_count DESC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "tables": {"fir_master", "accused"},
+        "q": "Which accused have been involved in more cases than the average accused?",
+        "sql": (
+            "WITH accused_counts AS (\n"
+            "    SELECT full_name, COUNT(DISTINCT fir_id) AS fir_count\n"
+            "    FROM accused\n"
+            "    WHERE full_name IS NOT NULL\n"
+            "    GROUP BY full_name\n"
+            ")\n"
+            "SELECT full_name, fir_count\n"
+            "FROM accused_counts\n"
+            "WHERE fir_count > (SELECT AVG(fir_count) FROM accused_counts)\n"
+            "ORDER BY fir_count DESC\n"
             "LIMIT 50"
         ),
     },

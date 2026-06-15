@@ -5,6 +5,9 @@ Order of operations:
   1. schema_linker.select_relevant_tables(question)
   2. sql_generator.generate_sql(question, tables, history)   [retry loop inside]
   3. db.connection.execute_query(sql)
+       — on MySQL execution error, call
+         sql_generator.correct_sql_after_execution_error(...) and re-execute,
+         provided we still have budget under the shared MAX_ATTEMPTS=2 cap.
   4. media_resolver.resolve_media(results)
   5. graph_available probe (single COUNT against case_relationships)
   6. answer_formatter.format_answer(...)
@@ -16,9 +19,15 @@ import time
 from dataclasses import dataclass, field
 
 from pipeline.schema_linker import select_relevant_tables
-from llm.sql_generator import generate_sql, SQLGenerationError, CannotAnswerError
+from llm.sql_generator import (
+    generate_sql,
+    correct_sql_after_execution_error,
+    SQLGenerationError,
+    CannotAnswerError,
+    MAX_ATTEMPTS,
+)
 from db.connection import execute_query
-from pipeline.media_resolver import resolve_media
+from pipeline.media_resolver import resolve_media, collect_fir_ids
 from llm.answer_formatter import format_answer
 from llm.client import LLMError
 
@@ -37,31 +46,18 @@ class PipelineResponse:
     error: str | None = None
 
 
+# Generic "we couldn't run the query" message shown in place of any raw
+# MySQL/exception details. Kept short so the streaming UI doesn't repeat
+# itself too much; the answer-formatter explainer is the longer fallback
+# in `answer_text`.
+_GENERIC_DB_ERROR = "I couldn't run that query. Try rephrasing."
+
+
 def _has_fir_id(results: list[dict]) -> bool:
     if not results:
         return False
     first = results[0]
     return isinstance(first, dict) and "fir_id" in first
-
-
-def _collect_fir_ids(results: list[dict]) -> list[int]:
-    seen: set[int] = set()
-    out: list[int] = []
-    for row in results:
-        if not isinstance(row, dict):
-            continue
-        v = row.get("fir_id")
-        if v is None:
-            continue
-        try:
-            iv = int(v)
-        except (ValueError, TypeError):
-            continue
-        if iv in seen:
-            continue
-        seen.add(iv)
-        out.append(iv)
-    return out
 
 
 async def _check_graph_available(fir_ids: list[int]) -> bool:
@@ -85,11 +81,15 @@ async def _check_graph_available(fir_ids: list[int]) -> bool:
 
 
 async def run_pipeline(
-    question: str, history: list[dict] | None = None
+    question: str, history: list[dict] | None = None, officer: dict | None = None
 ) -> PipelineResponse:
     """
     Run the full pipeline. This function never raises — every failure path
     fills `error` (and a user-friendly `answer_text`) on the response.
+
+    `officer`, when provided, carries the authenticated officer's JWT payload
+    (officer_id, badge_number) so first-person questions ("cases I am handling")
+    resolve to the correct investigating_officer_id.
     """
     history = history or []
     start = time.monotonic()
@@ -106,10 +106,13 @@ async def run_pipeline(
         )
         return response
 
-    # 2. SQL generation (with retry loop)
+    # 2. SQL generation (with retry loop). attempts_used counts toward the
+    #    shared MAX_ATTEMPTS budget; if the initial generation already burned
+    #    a correction call (validation failure → corrected), we won't fire a
+    #    second correction on execution failure.
     try:
-        sql = await generate_sql(
-            question=question, table_names=tables, history=history
+        sql, attempts_used = await generate_sql(
+            question=question, table_names=tables, history=history, officer=officer
         )
     except CannotAnswerError:
         elapsed = time.monotonic() - start
@@ -147,17 +150,58 @@ async def run_pipeline(
 
     response.sql_generated = sql
 
-    # 3. Execute SQL
+    # 3. Execute SQL — with one corrective retry on MySQL exceptions, but only
+    #    if we still have budget under the MAX_ATTEMPTS=2 cap.
+    results = None
     try:
         results = await execute_query(sql)
-    except Exception as e:
-        _log(f"db execute_query failed: {e}")
-        response.error = f"Database query failed: {e}"
-        response.answer_text = (
-            "The database couldn't run that query. It may be malformed — please "
-            "rephrase your question."
-        )
-        return response
+    except Exception as exec_err:
+        # Always log the full exception (including raw MySQL tuple) for ops.
+        _log(f"db execute_query failed (attempt 1): {exec_err!r}")
+
+        if attempts_used >= MAX_ATTEMPTS:
+            # No budget left — surface a clean, scrubbed message.
+            _log(
+                "Skipping execution-error correction: SQL chain budget "
+                f"exhausted (attempts_used={attempts_used})."
+            )
+            response.error = _GENERIC_DB_ERROR
+            response.answer_text = _GENERIC_DB_ERROR
+            return response
+
+        # Try one corrective LLM call.
+        try:
+            corrected_sql = await correct_sql_after_execution_error(
+                original_sql=sql,
+                db_error=str(exec_err),
+                table_names=tables,
+                officer=officer,
+            )
+        except SQLGenerationError as ce:
+            _log(f"execution-error correction failed: {ce}")
+            response.error = _GENERIC_DB_ERROR
+            response.answer_text = _GENERIC_DB_ERROR
+            return response
+        except LLMError as ce:
+            _log(f"execution-error correction LLM error: {ce}")
+            response.error = _GENERIC_DB_ERROR
+            response.answer_text = _GENERIC_DB_ERROR
+            return response
+        except Exception as ce:
+            _log(f"execution-error correction unexpected error: {ce!r}")
+            response.error = _GENERIC_DB_ERROR
+            response.answer_text = _GENERIC_DB_ERROR
+            return response
+
+        response.sql_generated = corrected_sql
+
+        try:
+            results = await execute_query(corrected_sql)
+        except Exception as retry_err:
+            _log(f"db execute_query failed (attempt 2 / corrected): {retry_err!r}")
+            response.error = _GENERIC_DB_ERROR
+            response.answer_text = _GENERIC_DB_ERROR
+            return response
 
     response.table_data = results
 
@@ -165,7 +209,7 @@ async def run_pipeline(
     media: list[dict] = []
     fir_ids: list[int] = []
     if results and _has_fir_id(results):
-        fir_ids = _collect_fir_ids(results)
+        fir_ids = collect_fir_ids(results)
         try:
             media = await resolve_media(results)
         except Exception as e:

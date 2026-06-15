@@ -59,13 +59,12 @@ backend/
 │   ├── media_resolver.py      # Evidence media lookup
 │   └── schema_linker.py       # Keyword-based table selector
 ├── conversation/
-│   └── history.py             # Conversation history (NoSQL + in-memory fallback)
-├── cache/
-│   └── catalyst_cache.py      # Cache wrappers (Catalyst + local fallback)
+│   ├── history.py             # Conversation history (NoSQL + in-memory fallback)
+│   └── session_store.py       # Session metadata + title generation (NoSQL + fallback)
 ├── auth/
 │   └── simple_auth.py         # JWT auth (dev) with Catalyst Auth swap path
 └── routers/
-    ├── chat.py                # POST /api/chat + GET /api/chat/stream (SSE)
+    ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
     └── auth.py                # POST /api/auth/login + /api/auth/logout
 ```
 
@@ -111,7 +110,8 @@ backend/
 
 | Name | Description |
 |------|-------------|
-| `REQUIRED_VARS` | List of 22 environment variable names that must be present at startup |
+| `REQUIRED_VARS` | Environment variable names that must be present at startup (a core code path depends on each). Missing any raises a startup error. |
+| `OPTIONAL_VARS` | Variable names reserved for not-yet-implemented integrations (Stratus, Zia, SmartBrowz, vision model, and identity values like `CATALYST_PROJECT_ID`/`CATALYST_BASE_URL`). Documented in `.env.example` but **not** required — they never block startup. |
 
 **Functions:**
 
@@ -368,7 +368,7 @@ Attempt 2:
 | Function | Description |
 |----------|-------------|
 | `_has_fir_id(results)` | Checks if the first result row contains a `fir_id` key |
-| `_collect_fir_ids(results)` | Extracts unique integer `fir_id` values from all result rows |
+| `collect_fir_ids(results)` | Imported from `media_resolver` — extracts unique integer `fir_id` values from all result rows. Shared so the extraction logic lives in one place. |
 | `_check_graph_available(fir_ids)` | Runs a COUNT query against `case_relationships` to check if any of the given FIRs have relationship data. Returns `True` if count > 0. |
 | `run_pipeline(question, history) -> PipelineResponse` | **The main pipeline.** Never raises — every error is caught and converted to a user-friendly `answer_text` + `error` field. Steps: |
 
@@ -424,7 +424,7 @@ Attempt 2:
 
 | Function | Description |
 |----------|-------------|
-| `_collect_fir_ids(results) -> list[int]` | Extracts unique integer `fir_id` values from result rows (identical logic to the one in `query_pipeline.py`). |
+| `collect_fir_ids(results) -> list[int]` | Extracts unique integer `fir_id` values from result rows. **Shared** with `query_pipeline.py` (imported there) so the logic exists in exactly one place. |
 | `resolve_media(results) -> list[dict]` | (1) Collects `fir_id`s from results. (2) Builds a parameterized `IN` query against `evidence_media`. (3) Executes one DB query. (4) Returns list of `{media_type, url, description, fir_id}`. URLs are placeholders (`/api/media/{stratus_file_id}`) until real Stratus integration in Step 5. Returns `[]` if no `fir_id` column or no matches. |
 
 ---
@@ -480,29 +480,28 @@ Attempt 2:
 
 ---
 
-### 3.16 `backend/cache/catalyst_cache.py`
+### 3.16 `backend/conversation/session_store.py`
 
-**Purpose:** Wraps Catalyst Cache API with in-process fallback. Used for schema string caching (optional optimization).
+**Purpose:** Stores per-session metadata (title, timestamps, message count) in a Catalyst NoSQL `session_metadata` collection, with an in-memory fallback that mirrors `conversation/history.py`. Also owns session-title generation. Backs the chat-history sidebar.
 
 **Constants:**
-- `_CACHE_TIMEOUT = 3.0` — seconds
-- `_LOCAL_TTL_FALLBACK_SECS = 3600` — 1 hour
+- `_NOSQL_TIMEOUT = 5.0` — seconds
+- `_TITLE_STOP_WORDS` — common words stripped before picking title keywords
+- `_TITLE_MAX_WORDS = 8`, `_TITLE_MAX_LENGTH = 60`, `_TITLE_FALLBACK = "New chat"`
 
 **Module-level state:**
-- `_local_cache: dict[str, tuple[float, str]]` — in-process LRU with expiry timestamps
-- `_local_lock: asyncio.Lock` — guards concurrent access to `_local_cache` in async context
+- `_local_sessions: dict[str, dict]` — in-memory fallback keyed by session_id
+- `_local_lock: asyncio.Lock` — guards concurrent access
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `_local_get(key)` | Thread-safe read from `_local_cache`. Checks TTL expiry. Returns `None` on miss/expiry. |
-| `_local_set(key, value, ttl)` | Thread-safe write to `_local_cache` with expiry timestamp. |
-| `cache_get(key) -> str \| None` | GETs from Catalyst Cache. Parses `data.value` or top-level `value`. Falls back to `_local_get()` on error. Never raises. |
-| `cache_set(key, value, ttl_seconds)` | Updates local cache first, then PUTs to Catalyst Cache. Never raises. |
-| `_schema_cache_key(table_names)` | Builds URL-safe cache key: `schema_` + sorted joined table names (slashes replaced with underscores). |
-| `get_cached_schema(table_names)` | Convenience wrapper: `cache_get(_schema_cache_key(table_names))` |
-| `set_cached_schema(table_names, schema_str)` | Convenience wrapper: `cache_set(...)` with 1-hour TTL |
+| `create_session(document) -> dict` | Persists a new `session_metadata` document (writes in-memory first, then POSTs to NoSQL). Never raises. |
+| `get_session(session_id) -> dict \| None` | Fetches one session document; falls back to in-memory on NoSQL error. Never raises. |
+| `update_session(session_id, updates) -> dict \| None` | Merges `updates` into an existing document and PUTs it (creating it on 404). Returns `None` when no session exists. Never raises. |
+| `list_sessions(officer_id) -> list[dict]` | Returns all of an officer's sessions ordered by `updated_at` DESC. Filters/sorts in Python since NoSQL may not support filtered queries. Never raises. |
+| `generate_title(message) -> str` | Derives a 3–8 word, ≤60-char human-readable title from the first user message; falls back to `"New chat"`. |
 
 ---
 
@@ -531,6 +530,7 @@ Attempt 2:
 
 ### 3.18 `backend/routers/chat.py`
 
+
 **Purpose:** Chat API endpoints — the main user-facing routes.
 
 **Pydantic models:**
@@ -539,12 +539,20 @@ Attempt 2:
 |-------|--------|
 | `ChatRequest` | `question: str` (1-500 chars), `session_id: str` (1-128 chars) |
 | `ChatResponse` | `answer_text`, `table_data`, `media_attachments`, `sql_generated`, `graph_available`, `error` |
+| `SessionMetadata` | `session_id`, `title`, `created_at`, `updated_at`, `message_count` |
+| `SessionListResponse` | `sessions: list[SessionMetadata]` |
+| `Message` | `message_id`, `role`, `content`, `timestamp`, `sql?` |
+| `MessagesResponse` | `messages: list[Message]`, `has_more: bool` |
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
+| `_error(status_code, code, error)` | Builds an `HTTPException` whose `detail` follows the structured `{"error", "code"}` shape and logs it to stderr. |
 | `_sse(event) -> str` | Formats a dict as an SSE `data:` line with `\n\n` terminator |
+| `list_chat_sessions(officer)` | `GET /api/chat/sessions` — lists the officer's sessions newest-first. Always HTTP 200 (NoSQL failures fall back to in-memory). |
+| `create_chat_session(officer)` | `POST /api/chat/sessions` — creates a new session, returns `SessionMetadata` with HTTP 201. |
+| `get_session_messages(session_id, limit, before_message_id, officer)` | `GET /api/chat/sessions/{id}/messages` — paginated, newest-first message page. 404 only when metadata exists and belongs to another officer (legacy sessions without metadata are allowed). |
 | `chat(request, officer)` | `POST /api/chat` — non-streaming endpoint (testing/fallback). Fetches history, runs pipeline, saves turn. Always returns HTTP 200 with `ChatResponse`. |
 | `chat_stream(question, session_id, officer)` | `GET /api/chat/stream` — SSE streaming endpoint. Protected by `get_current_officer_sse` (header or query param). Returns `StreamingResponse` with `text/event-stream` media type. |
 | `_tokenize(text) -> list[str]` | Splits text into space-preserving tokens for word-by-word streaming. Each token (except last) includes trailing space. |
@@ -1050,4 +1058,4 @@ All history and cache functions **never raise**. Failures are logged to stderr a
 
 All logging goes to `sys.stderr` via `print(..., file=sys.stderr)`. No sensitive data is logged (no officer names, FIR numbers, or query content — only timestamps, route names, latency, and status codes).
 
-**Consistent `_log` pattern:** Most backend files define a module-level `_log(msg)` helper that writes to stderr with `flush=True`. This is used throughout the codebase for non-fatal warnings (cache misses, history fallbacks, pipeline timing) and keeps logging code DRY. Files that use this pattern: `sql_generator.py`, `query_pipeline.py`, `routers/chat.py`, `routers/auth.py`, `conversation/history.py`, `cache/catalyst_cache.py`.
+**Consistent `_log` pattern:** Most backend files define a module-level `_log(msg)` helper that writes to stderr with `flush=True`. This is used throughout the codebase for non-fatal warnings (history fallbacks, pipeline timing) and keeps logging code DRY. Files that use this pattern: `sql_generator.py`, `query_pipeline.py`, `routers/chat.py`, `routers/auth.py`, `conversation/history.py`, `conversation/session_store.py`.

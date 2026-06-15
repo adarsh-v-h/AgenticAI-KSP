@@ -33,5 +33,9 @@ async def format_answer(
         model_key="MODEL_ANSWER",
         prompt=user_prompt,
         system_prompt=system_prompt,
-        max_tokens=1500,
+        # max_tokens is the TOTAL budget (input + output) in QuickML. The
+        # answer prompt embeds up to 50 rows of JSON results, which can run to
+        # a few thousand input tokens, so this must be large enough to hold the
+        # prompt PLUS the generated summary. 8000 comfortably covers both.
+        max_tokens=8000,
     )

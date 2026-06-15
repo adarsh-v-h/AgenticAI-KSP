@@ -8,8 +8,12 @@ Step 5 will swap the placeholder URL for a real Catalyst Stratus signed URL.
 from db.connection import execute_query
 
 
-def _collect_fir_ids(results: list[dict]) -> list[int]:
-    """Pull unique, valid integer fir_ids from query results."""
+def collect_fir_ids(results: list[dict]) -> list[int]:
+    """Pull unique, valid integer fir_ids from query results.
+
+    Shared by both the media resolver and the query pipeline's graph-availability
+    probe so the extraction logic lives in exactly one place.
+    """
     seen: set[int] = set()
     out: list[int] = []
     for row in results:
@@ -46,7 +50,7 @@ async def resolve_media(results: list[dict]) -> list[dict]:
     if not results:
         return []
 
-    fir_ids = _collect_fir_ids(results)
+    fir_ids = collect_fir_ids(results)
     if not fir_ids:
         return []
 

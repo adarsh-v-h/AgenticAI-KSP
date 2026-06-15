@@ -82,6 +82,24 @@ def sanitize_sql(sql: str) -> str:
     return text.strip()
 
 
+def _extract_cte_names(sql: str) -> list[str]:
+    """
+    Pull names defined in a `WITH name AS (...)` clause (including chained
+    `, name2 AS (...)`). Returns identifiers in lowercase.
+    """
+    # Match the `WITH` keyword, then capture each `<ident> AS (` opener.
+    if not re.match(r"^\s*WITH\b", sql, flags=re.IGNORECASE):
+        return []
+    # Walk only the prefix up to the first top-level SELECT/INSERT/etc.
+    # We accept any `<ident> AS (` after WITH/comma; the regex is permissive
+    # because the validator's job here is to whitelist, not to parse.
+    pattern = re.compile(
+        r"(?:\bWITH\b|,)\s*([`\"]?[a-zA-Z_][a-zA-Z0-9_]*[`\"]?)\s+AS\s*\(",
+        re.IGNORECASE,
+    )
+    return [m.strip("`\"").lower() for m in pattern.findall(sql)]
+
+
 def _extract_tables(sql: str) -> list[str]:
     """
     Pull out table names that appear after FROM and JOIN clauses.
@@ -143,13 +161,16 @@ def validate_sql(sql: str, allowed_tables: list[str] | None = None) -> Validatio
 
     # Table allow-list check.
     referenced = _extract_tables(cleaned)
+    cte_names = {n for n in _extract_cte_names(cleaned)}
     if referenced:
         allowed = {t.lower() for t in allowed_tables}
         for tbl in referenced:
-            if tbl.lower() not in allowed:
-                return ValidationResult(
-                    False, f"Unknown table referenced: '{tbl}'."
-                )
+            tbl_lower = tbl.lower()
+            if tbl_lower in allowed or tbl_lower in cte_names:
+                continue
+            return ValidationResult(
+                False, f"Unknown table referenced: '{tbl}'."
+            )
 
     return ValidationResult(True, None)
 
@@ -171,6 +192,14 @@ if __name__ == "__main__":
             True,
         ),
         ("SELECT * FROM fir_master WHERE 1=1", False),  # injection-y
+        (
+            "SELECT a.full_name FROM accused a WHERE a.fir_id IN (SELECT f.fir_id FROM fir_master f WHERE f.status = 'open')",
+            True,
+        ),
+        (
+            "WITH ac AS (SELECT full_name, COUNT(*) AS c FROM accused GROUP BY full_name) SELECT full_name FROM ac WHERE c > 1",
+            True,
+        ),
     ]
 
     failed = 0

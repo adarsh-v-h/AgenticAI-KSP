@@ -31,15 +31,20 @@ async def ping_model(model_key: str) -> bool:
             "model": model_name,
             "prompt": "Say OK.",
             "system_prompt": "You are a helpful assistant.",
-            "max_tokens": 1000,
-            "temperature": 1,
+            # NOTE: QuickML treats max_tokens as the TOTAL context budget
+            # (input + output), and rejects the request if the input alone
+            # exceeds it. The fixed prompt overhead is ~200 tokens, so this
+            # must stay comfortably above that — a tiny value (e.g. 5) makes
+            # the ping always fail with "input exceeds max context length".
+            "max_tokens": 512,
+            "temperature": 0,
             "top_p": 0.95,
             "top_k": 120,
         }
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url, json=payload, headers=_llm_headers(), timeout=120.0
+                url, json=payload, headers=_llm_headers(), timeout=30.0
             )
             data = response.json()
             if response.status_code == 200 and data.get("response"):
@@ -67,7 +72,10 @@ async def call_llm(
         model_key: env var name — "MODEL_SQL" or "MODEL_ANSWER"
         prompt: the user/task prompt
         system_prompt: the system instruction
-        max_tokens: max output tokens (default 2000)
+        max_tokens: TOTAL context budget (input + output), per QuickML
+            semantics — NOT just the output length. QuickML rejects the
+            request if the input alone exceeds this value. Callers must size
+            it to fit their prompt plus the desired completion. Default 4000.
 
     Returns:
         The model's response text as a string.

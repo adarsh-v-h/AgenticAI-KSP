@@ -72,15 +72,13 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
 │   ├── auth/
 │   │   ├── __init__.py
 │   │   └── simple_auth.py       # JWT auth for local dev
-│   ├── cache/
-│   │   ├── __init__.py
-│   │   └── catalyst_cache.py    # Cache wrappers (Catalyst + local fallback)
 │   ├── conversation/
 │   │   ├── __init__.py
-│   │   └── history.py           # Conversation history (NoSQL + in-memory fallback)
+│   │   ├── history.py           # Conversation history (NoSQL + in-memory fallback)
+│   │   └── session_store.py     # Session metadata + title generation (NoSQL + fallback)
 │   └── routers/
 │       ├── __init__.py
-│       ├── chat.py              # POST /api/chat + GET /api/chat/stream (SSE)
+│       ├── chat.py              # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
 │       └── auth.py              # POST /api/auth/login + /api/auth/logout
 │
 └── frontend/
@@ -95,7 +93,12 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
         │   └── chat.js          # SSE stream consumer via fetch + ReadableStream
         ├── components/
         │   ├── LoginPage.jsx    # Badge number + password form
-        │   ├── ChatWindow.jsx   # Main chat interface
+        │   ├── ChatWindow.jsx   # Main chat interface + session orchestration
+        │   ├── ChatHistorySidebar.jsx # Collapsible session-history sidebar
+        │   ├── SessionList.jsx  # Scrollable list of an officer's sessions
+        │   ├── SessionItem.jsx  # Single session row (title, time, count)
+        │   ├── NewChatButton.jsx # "New chat" action button
+        │   ├── OfficerInfo.jsx  # Officer identity footer in the sidebar
         │   ├── MessageBubble.jsx # Single message renderer
         │   └── TableRenderer.jsx # HTML table from JSON query results
         ├── hooks/
@@ -113,8 +116,7 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
 3. **A Zoho Catalyst project** with the following services enabled:
    - **QuickML** — for LLM serving (Qwen models)
    - **Data Store** — MySQL-compatible relational database
-   - **NoSQL** — document store for conversation history
-   - **Cache** — key-value cache (optional, has local fallback)
+   - **NoSQL** — document store for conversation history and session metadata
 
 ---
 
@@ -140,7 +142,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-This installs: FastAPI, uvicorn, aiomysql, httpx, python-dotenv, python-jose (JWT), python-multipart, sse-starlette, pydantic.
+This installs: FastAPI, uvicorn, aiomysql, httpx, python-dotenv, python-jose (JWT), and pydantic.
 
 ### 4. Set up your Zoho Catalyst project
 
@@ -150,8 +152,7 @@ If you don't have a Catalyst project yet:
 2. Create a new project
 3. Enable **QuickML** from the Services section
 4. Enable **Data Store** — create a MySQL database named `ksp_crime_db`
-5. Enable **NoSQL** — create a table called `conversation_history` with a string field `history`
-6. Enable **Cache** (optional — the app has a local in-memory fallback)
+5. Enable **NoSQL** — create two tables: `conversation_history` (string field `history`) and `session_metadata` (for the chat-history sidebar)
 
 ### 5. Get your Catalyst credentials
 
@@ -164,7 +165,6 @@ You need these values from the Catalyst console:
 | `CATALYST_API_TOKEN` | API Console → Generate OAuth Token (see below) |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | Data Store → Connection Details |
 | `NOSQL_BASE_URL` | NoSQL → API endpoint (follows pattern in .env.example) |
-| `CACHE_BASE_URL` | Cache → API endpoint (follows pattern in .env.example) |
 
 **Generating a Catalyst API token:**
 
@@ -314,6 +314,9 @@ The system uses a **two-LLM pipeline**:
 | `POST` | `/api/auth/logout` | Yes | Stateless logout |
 | `POST` | `/api/chat` | Yes | Non-streaming chat (for testing) |
 | `GET` | `/api/chat/stream` | Yes | SSE streaming chat (production path) |
+| `GET` | `/api/chat/sessions` | Yes | List the officer's chat sessions (newest first) |
+| `POST` | `/api/chat/sessions` | Yes | Create a new chat session |
+| `GET` | `/api/chat/sessions/{id}/messages` | Yes | Paginated message history for a session |
 | `GET` | `/health` | No | Service health check |
 
 > See [Support Documents/Docs.md §3.18](Support%20Documents/Docs.md#318-backendrouterschatpy) and [Support Documents/Docs.md §3.19](Support%20Documents/Docs.md#319-backendroutersauthpy) for request/response details.
@@ -407,7 +410,7 @@ Update `ALLOWED_ORIGINS` in your production `.env` to your Catalyst Slate URL in
 ## Troubleshooting
 
 **Server crashes on startup with missing env vars:**
-- Check your `.env` file has all 22 required variables (see `.env.example`)
+- Check your `.env` file has all the REQUIRED variables (see `.env.example` — variables marked OPTIONAL won't block startup)
 - The server lists every missing variable in the error message
 
 **Health check shows `"degraded"`:**
