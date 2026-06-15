@@ -11,3 +11,4 @@ venv/
 .obsidian/
 .idea/
 .phases/
+.vscode/
