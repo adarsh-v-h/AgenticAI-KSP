@@ -14,6 +14,8 @@ from config.settings import validate_settings, get
 from db.connection import create_pool, close_pool
 from llm.client import ping_model
 from routers.chat import router as chat_router
+from routers.auth import router as auth_router
+from conversation.history import init_nosql_table
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +37,13 @@ async def lifespan(app: FastAPI):
         print(f"WARNING: DB connection check failed: {e}", file=sys.stderr)
         app.state.db_ok = False
 
+    # 4. Probe Catalyst NoSQL so we surface auth/path issues at startup.
+    # Failure is non-fatal — history.py falls back to in-memory storage.
+    try:
+        await init_nosql_table()
+    except Exception as e:
+        print(f"WARNING: NoSQL init failed (history will use in-memory store): {e}", file=sys.stderr)
+
     yield
 
     # ── SHUTDOWN ──
@@ -43,7 +52,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="KSP Crime Intelligence API",
-    version="0.2.0-step2",
+    version="0.3.0-step3",
     docs_url="/docs",       # keep Swagger available during dev
     redoc_url=None,
     lifespan=lifespan
@@ -58,6 +67,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
+app.include_router(auth_router)
 app.include_router(chat_router)
 
 
