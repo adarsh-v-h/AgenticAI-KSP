@@ -2,7 +2,7 @@
 
 A natural language crime intelligence platform for Karnataka State Police. Officers type a question in plain English, the system converts it to a MySQL query using an LLM, runs it against the crime database, and streams back a formatted answer with tabular results.
 
-> See [Docs.md](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md) for full technical documentation — every file, function, and data flow.
+> See [Support Documents/Docs.md](Support%20Documents/Docs.md) for full technical documentation — every file, function, and data flow.
 
 ---
 
@@ -39,36 +39,47 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
 ## Project Structure
 
 ```
-├── BLUEPRINT.md                 # Original project specification
-├── DESIGN.md                    # Frontend design spec (colors, typography, layout)
-├── Docs.md                      # Full technical documentation
-├── TwoToThree.md                # Step 3 implementation guide
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variable template
+├── LICENSE                      # AGPL v3 license
+│
+├── Support Documents/
+│   ├── BLUEPRINT.md             # Original project specification
+│   ├── DESIGN.md                # Frontend design spec (colors, typography, layout)
+│   └── Docs.md                  # Full technical documentation
 │
 ├── backend/
 │   ├── main.py                  # FastAPI app, startup lifecycle, health check
 │   ├── Dockerfile               # Container for Catalyst AppSail
-│   ├── config/settings.py       # Env var loading and validation
+│   ├── config/
+│   │   └── settings.py          # Env var loading and validation
 │   ├── db/
 │   │   ├── connection.py        # MySQL connection pool (aiomysql)
 │   │   ├── schema.sql           # DDL for all 13 tables
-│   │   ├── seed.py              # Synthetic data generator (220 FIRs)
-│   │   └── schema_catalog.py    # Table metadata, schema builder, few-shot examples
+│   │   ├── schema_catalog.py    # Table metadata, schema builder, few-shot examples
+│   │   └── seed.py              # Synthetic data generator (220 FIRs)
 │   ├── llm/
 │   │   ├── client.py            # HTTP client for Catalyst QuickML
 │   │   ├── sql_generator.py     # SQL generation with self-correction loop
 │   │   ├── answer_formatter.py  # Result-to-text formatting
 │   │   └── prompts.py           # System prompts and prompt builders
 │   ├── pipeline/
+│   │   ├── __init__.py
 │   │   ├── query_pipeline.py    # Main orchestrator (NL → SQL → answer)
 │   │   ├── sql_validator.py     # SQL safety validation
 │   │   ├── media_resolver.py    # Evidence media lookup
 │   │   └── schema_linker.py     # Keyword-based table selector
-│   ├── conversation/history.py  # Conversation history (NoSQL + in-memory fallback)
-│   ├── cache/catalyst_cache.py  # Cache wrappers (Catalyst + local fallback)
-│   ├── auth/simple_auth.py      # JWT auth for local dev
+│   ├── auth/
+│   │   ├── __init__.py
+│   │   └── simple_auth.py       # JWT auth for local dev
+│   ├── cache/
+│   │   ├── __init__.py
+│   │   └── catalyst_cache.py    # Cache wrappers (Catalyst + local fallback)
+│   ├── conversation/
+│   │   ├── __init__.py
+│   │   └── history.py           # Conversation history (NoSQL + in-memory fallback)
 │   └── routers/
+│       ├── __init__.py
 │       ├── chat.py              # POST /api/chat + GET /api/chat/stream (SSE)
 │       └── auth.py              # POST /api/auth/login + /api/auth/logout
 │
@@ -92,8 +103,6 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
         └── styles/
             └── main.css         # Government portal styling (warm cream + coral)
 ```
-
-> See [Docs.md §2](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#2-backend-architecture) and [Docs.md §5](Docs.md#5-frontend-architecture) for what each file does.
 
 ---
 
@@ -293,7 +302,7 @@ The system uses a **two-LLM pipeline**:
 4. **Query Execution** — runs against the MySQL database with a 5-second timeout
 5. **Answer Formatting** — Qwen 2.5-14B Instruct converts raw results into a professional natural-language answer
 
-> See [Docs.md §4.2](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#42-ask-a-question-full-pipeline) for the complete end-to-end flow.
+> See [Support Documents/Docs.md §4.2](Support%20Documents/Docs.md#42-ask-a-question-full-pipeline) for the complete end-to-end flow.
 
 ---
 
@@ -307,7 +316,7 @@ The system uses a **two-LLM pipeline**:
 | `GET` | `/api/chat/stream` | Yes | SSE streaming chat (production path) |
 | `GET` | `/health` | No | Service health check |
 
-> See [Docs.md §3.18](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#318-backendrouterschatpy) and [Docs.md §3.19](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#319-backendroutersauthpy) for request/response details.
+> See [Support Documents/Docs.md §3.18](Support%20Documents/Docs.md#318-backendrouterschatpy) and [Support Documents/Docs.md §3.19](Support%20Documents/Docs.md#319-backendroutersauthpy) for request/response details.
 
 ---
 
@@ -350,7 +359,7 @@ The seeder creates these officers (password is always `<badge_number>123`):
 | `case_relationships` | Links between entities (for network graph) |
 | `evidence_media` | Media files attached to FIRs |
 
-> Note: 4 case types (`robbery`, `murder`, `domestic_violence`, `other`) exist in `fir_master` but have no dedicated child tables. See [Docs.md §3.4](https://github.com/adarsh-v-h/AgenticAI-KSP/blob/main/Docs.md#34-backendschemasql) for details.
+> Note: 4 case types (`robbery`, `murder`, `domestic_violence`, `other`) exist in `fir_master` but have no dedicated child tables. See [Support Documents/Docs.md §3.4](Support%20Documents/Docs.md#34-backendschemasql) for details.
 
 ---
 
