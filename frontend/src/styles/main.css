@@ -52,6 +52,14 @@
   --r-lg: 12px;
   --r-xl: 16px;
   --r-pill: 9999px;
+
+  /* Layout aliases used by the redesigned shell (map onto the brand palette
+     above so the two-panel layout stays consistent with the existing theme). */
+  --border: var(--hairline);
+  --surface-hover: rgba(20, 20, 19, 0.05);
+  --text-primary: var(--ink);
+  --text-secondary: var(--muted);
+  --text-tertiary: var(--muted-soft);
 }
 
 * {
@@ -223,66 +231,470 @@ textarea {
   font-size: 14px;
 }
 
-/* ---------- Chat shell ---------- */
+/* ---------- App shell — sidebar + main ---------- */
 
-.chat-shell {
+.app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+/* Sidebar */
+.sidebar {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--canvas);
+  background: var(--surface-cream-strong);
+  border-right: 1px solid var(--border);
+  transition: width 0.2s ease;
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
 }
 
-.topbar {
+/* While dragging the resize handle, disable the width easing so the sidebar
+   tracks the pointer 1:1 instead of lagging behind. */
+.sidebar.resizing {
+  transition: none;
+}
+
+/* Drag-to-resize handle — a thin invisible strip on the sidebar's right edge.
+   Widens its hit area beyond the visible border and reveals a subtle accent
+   line on hover/drag, mirroring Claude's resizable sidebar feel. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 50;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar.resizing .sidebar-resize-handle {
+  background: var(--primary);
+  opacity: 0.5;
+}
+
+.sidebar.expanded {
+  width: 260px;
+}
+
+.sidebar.collapsed {
+  width: 56px;
+}
+
+/* Sidebar top row — collapse toggle + new chat */
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 10px;
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed .sidebar-top {
+  flex-direction: column;
+  padding: 12px 8px;
+  gap: 4px;
+}
+
+/* Sidebar icon buttons — collapse toggle, new chat */
+.sidebar-icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.sidebar-icon-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* New chat row — icon + label, full-width clickable row */
+.new-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 10px 4px;
+  padding: 8px 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.new-chat-row:hover {
+  background: var(--surface-hover);
+}
+
+.new-chat-row__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* Collapsed: center the new-chat row to a single icon */
+.sidebar.collapsed .new-chat-row {
+  justify-content: center;
+  margin: 0 8px 4px;
+  padding: 8px 0;
+}
+
+/* "Recents" section label above the session list */
+.recents-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  padding: 8px 12px 4px;
+  letter-spacing: 0.2px;
+}
+
+/* Session list — takes remaining space, scrolls */
+.session-list-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 8px;
+}
+
+.sidebar.collapsed .session-list-container {
+  display: none;
+}
+
+/* Sidebar bottom — officer info + sign out */
+.sidebar-bottom {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 10px;
+}
+
+/* Officer row — avatar + name + sign out */
+.officer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  position: relative;
+}
+
+.officer-row:hover {
+  background: var(--surface-hover);
+}
+
+/* Officer avatar circle */
+.officer-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Officer name and rank — hidden when collapsed */
+.officer-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.officer-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.officer-rank {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.sidebar.collapsed .officer-info {
+  display: none;
+}
+
+/* Officer popup menu (sign out) */
+.officer-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+}
+
+.officer-popup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.officer-popup-item:hover {
+  background: var(--surface-hover);
+}
+
+.officer-popup-item.danger {
+  color: #c0392b;
+}
+
+/* Main content area */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ---------- Welcome screen (new chat) ---------- */
+
+/* Centers the greeting, chips, and composer together as one group, both
+   vertically and horizontally within the main content area. */
+.welcome-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 32px;
+  min-height: 0;
+}
+
+.welcome-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.welcome-heading {
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: center;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.welcome-subheading {
+  font-size: 20px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-top: 12px;
+}
+
+/* Suggestion chips row */
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 560px;
+}
+
+/* In the welcome group the composer sits directly below the chips. */
+.welcome-screen .composer-area {
+  width: 100%;
+  padding: 0;
+}
+
+/* ---------- Chat area (active conversation) ---------- */
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.messages-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.messages-inner {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ---------- Composer (input box at bottom) ---------- */
+
+.composer-area {
+  flex-shrink: 0;
+  padding: 16px 24px 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.composer-inner {
+  width: 100%;
+  max-width: 720px;
+}
+
+.composer-box {
+  border: 1px solid var(--surface-cream-strong);
+  border-radius: var(--r-xl);
+  background: var(--surface-cream-strong);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s;
+}
+
+.composer-box:focus-within {
+  border-color: var(--primary);
+}
+
+.composer-textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  resize: none;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--text-primary);
+  outline: none;
+  min-height: 24px;
+  max-height: 160px;
+  overflow-y: hidden;
+  line-height: 1.5;
+}
+
+.composer-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.composer-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--hairline);
-  background: var(--canvas);
 }
 
-.topbar__brand {
+.composer-left-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
 }
 
-.topbar__mark {
-  color: var(--primary);
-  font-size: 18px;
-}
-
-.topbar__titles {
+.composer-action-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  cursor: pointer;
   display: flex;
-  flex-direction: column;
-  line-height: 1.2;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: all 0.15s;
 }
 
-.topbar__title {
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--ink);
+.composer-action-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
 }
 
-.topbar__subtitle {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
+.composer-action-btn.not-yet {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
-.topbar__actions {
+.composer-action-btn.not-yet:hover {
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: var(--primary-active);
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ---------- Chat scroll area ---------- */
-
-.chat-scroll {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 24px;
-}
 
 .chat-empty {
   max-width: 720px;
@@ -312,23 +724,26 @@ textarea {
 
 .suggestion-chip {
   appearance: none;
-  cursor: pointer;
-  border: 1px solid var(--hairline);
-  background: var(--surface-card);
-  color: var(--ink);
-  border-radius: var(--r-pill);
   padding: 8px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-cream-strong);
   font-size: 13px;
-  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
 }
 
 .suggestion-chip:hover:not(:disabled) {
-  background: var(--surface-cream-strong);
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--canvas);
 }
 
 .suggestion-chip:disabled {
   cursor: not-allowed;
-  color: var(--muted-soft);
+  opacity: 0.5;
 }
 
 .chat-messages {
@@ -520,170 +935,11 @@ textarea {
   color: var(--muted);
 }
 
-/* ---------- Composer ---------- */
+/* ---------- Chat history sidebar (legacy styles removed) ---------- */
 
-.composer {
-  border-top: 1px solid var(--hairline);
-  background: var(--canvas);
-  padding: 12px 24px 16px;
-}
-
-.composer__status {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-
-.composer__row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  max-width: 880px;
-  margin: 0 auto;
-}
-
-.composer__input {
-  flex: 1;
-  resize: none;
-  min-height: 44px;
-  max-height: 160px;
-  padding: 12px 14px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--hairline);
-  background: var(--canvas);
-  font-size: 15px;
-  line-height: 1.5;
-  outline: none;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.composer__input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.18);
-}
-
-.composer__input:disabled {
-  background: var(--surface-soft);
-  color: var(--muted);
-}
-
-.composer__hint {
-  max-width: 880px;
-  margin: 6px auto 0;
-  font-size: 12px;
-  color: var(--muted-soft);
-}
-
-/* ---------- Chat history sidebar ---------- */
-
-/*
- * App layout: sidebar + chat shell side by side, filling the viewport.
- * The chat shell flexes to fill the remaining space; min-width:0 lets its
- * inner content (tables, long lines) shrink instead of forcing overflow.
- */
-.app-layout {
-  display: flex;
-  height: 100vh;
-}
-
-.app-layout .chat-shell {
-  height: 100%;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* Sidebar container — expanded width, full-height vertical column. */
-.chat-sidebar {
-  flex-shrink: 0;
-  width: 280px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-soft);
-  border-right: 1px solid var(--hairline);
-}
-
-/* Collapsed rail — minimal width, only the header/toggle shows. */
-.chat-sidebar--collapsed {
-  width: 56px;
-}
-
-/* Header: New chat button + collapse toggle. */
-.chat-sidebar__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-/* The collapsed rail centres its single toggle control. */
-.chat-sidebar--collapsed .chat-sidebar__header {
-  justify-content: center;
-}
-
-/* Middle area: the scrollable session list. */
-.chat-sidebar__session-list {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-/* Footer: officer info, pinned below the session list. */
-.chat-sidebar__footer {
-  border-top: 1px solid var(--hairline);
-  padding: 12px;
-}
-
-/* Small icon button for collapse/expand. */
-.chat-sidebar__toggle {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--r-md);
-  font-size: 16px;
-  line-height: 1;
-  flex-shrink: 0;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-
-.chat-sidebar__toggle:hover {
-  background: var(--surface-card);
-  color: var(--ink);
-}
-
-/* New chat button — prominent, full-width, left-aligned with its icon. */
-.new-chat-button {
-  flex: 1 1 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  background: var(--surface-card);
-  font-weight: 500;
-}
-
-.new-chat-button:hover:not(:disabled) {
-  background: var(--surface-cream-strong);
-}
-
-.new-chat-button__icon {
-  font-size: 16px;
-  line-height: 1;
-  color: var(--primary);
-}
-
-.new-chat-button__label {
-  font-size: 14px;
-}
+/* The two-panel shell, sidebar, session list, officer row, and composer styles
+   now live in the App shell section above. Session item styles are retained
+   below since SessionList/SessionItem still use them. */
 
 /* Session list column. */
 .session-list {
@@ -696,7 +952,7 @@ textarea {
 .session-item {
   appearance: none;
   border: 0;
-  border-left: 3px solid transparent;
+  border-left: 2px solid transparent;
   background: transparent;
   cursor: pointer;
   width: 100%;
@@ -710,11 +966,11 @@ textarea {
 }
 
 .session-item:hover {
-  background: var(--surface-card);
+  background: var(--surface-hover);
 }
 
 .session-item--active {
-  background: var(--surface-cream-strong);
+  background: var(--surface-hover);
   border-left-color: var(--primary);
 }
 
@@ -744,118 +1000,6 @@ textarea {
 .session-item__time,
 .session-item__count {
   white-space: nowrap;
-}
-
-/* Officer info footer — avatar + name/rank. */
-.officer-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.officer-info__avatar {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-pill);
-  background: var(--surface-cream-strong);
-  color: var(--body-strong);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.officer-info__details {
-  min-width: 0;
-}
-
-.officer-info__name {
-  font-weight: 500;
-  color: var(--ink);
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.officer-info__rank {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* ---------- Chat history sidebar — responsive ---------- */
-
-/*
- * Smooth collapse/expand animation (Req 14.5). The sidebar animates both its
- * width (desktop rail ↔ panel) and its transform (mobile off-canvas slide).
- * Kept subtle at 200ms so layout shifts feel responsive rather than sluggish.
- */
-.chat-sidebar {
-  transition: width 200ms ease, transform 200ms ease;
-}
-
-/*
- * Narrow viewports (< 768px): the sidebar leaves the normal layout flow and
- * floats above the chat as an overlay (Req 14.1). Because it is position:fixed
- * it no longer reserves horizontal space, so `.chat-shell` naturally fills the
- * full viewport width and the `.app-layout` flex row keeps working.
- *
- * Collapsed-on-mobile approach (Req 14.4): we KEEP the slim 56px rail visible
- * rather than sliding it fully off-canvas. The collapsed component still renders
- * the hamburger (☰) toggle, so leaving the rail on screen guarantees users
- * always have an affordance to reopen the sidebar. When EXPANDED the sidebar
- * grows to its 280px overlay panel and casts a shadow for elevation. Session
- * selection auto-collapses the sidebar back to the rail (handled in JS), which
- * satisfies the "auto-close on select" behaviour (Req 14.2).
- *
- * Backdrop approach: the components don't render a dedicated backdrop element,
- * so to avoid a JS change we attach a visual-only scrim via an `::after`
- * pseudo-element on the EXPANDED sidebar. It dims the chat area to the right of
- * the panel for visual focus. It is pointer-events:none so it never traps
- * clicks — users dismiss the overlay by selecting a session or tapping the
- * collapse toggle, both of which already collapse the sidebar.
- */
-@media (max-width: 767px) {
-  .chat-sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100vh;
-    z-index: 100;
-    width: 280px;
-    box-shadow: 0 0 24px rgba(20, 20, 19, 0.18);
-  }
-
-  /* Collapsed: keep the slim rail on screen so the hamburger stays reachable. */
-  .chat-sidebar--collapsed {
-    width: 56px;
-    box-shadow: none;
-  }
-
-  /* Visual-only backdrop scrim for the expanded overlay (no JS, no click trap). */
-  .chat-sidebar:not(.chat-sidebar--collapsed)::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 280px;
-    right: 0;
-    bottom: 0;
-    background: rgba(20, 20, 19, 0.32);
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  /* Larger tap target for the toggle on touch devices. */
-  .chat-sidebar__toggle {
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
-  }
 }
 
 /* ---------- Chat history sidebar — states (loading / empty / errors) ---------- */

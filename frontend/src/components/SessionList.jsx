@@ -21,11 +21,16 @@ import SessionItem from './SessionItem.jsx'
 function SessionList({
   sessions = [],
   activeSessionId,
+  onSelect,
   onSelectSession,
   isLoading = false,
   error = null,
   onRetry,
 }) {
+  // Accept either `onSelect` (new sidebar) or `onSelectSession` (legacy) so
+  // both call sites keep working.
+  const handleSelect = onSelect || onSelectSession
+
   if (error) {
     return (
       <div className="session-list session-list__error" role="alert">
@@ -62,7 +67,7 @@ function SessionList({
           key={session.session_id}
           session={session}
           isActive={session.session_id === activeSessionId}
-          onClick={onSelectSession}
+          onClick={handleSelect}
         />
       ))}
     </div>

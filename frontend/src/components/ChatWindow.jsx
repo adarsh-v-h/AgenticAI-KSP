@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AuthError, createSession, fetchMessages, fetchSessions, startChatStream } from '../api/chat.js'
+import { AuthError, fetchMessages, fetchSessions, startChatStream } from '../api/chat.js'
 import MessageBubble from './MessageBubble.jsx'
-import ChatHistorySidebar from './ChatHistorySidebar.jsx'
+import SessionList from './SessionList.jsx'
+import WelcomeScreen from './WelcomeScreen.jsx'
+import Composer from './Composer.jsx'
+import OfficerRow from './OfficerRow.jsx'
+import { IconSidebarOpen, IconSidebarClose, IconNewChat } from './Icons.jsx'
 
 // localStorage key for persisting the sidebar collapsed state across reloads
 // (Requirements 8.4, 8.5).
 const SIDEBAR_COLLAPSED_KEY = 'chs.sidebarCollapsed'
+
+// localStorage key + bounds for the drag-to-resize sidebar width. The expanded
+// sidebar can be dragged between MIN and MAX px; the chosen width is persisted
+// so it survives reloads, mirroring the collapse-state persistence.
+const SIDEBAR_WIDTH_KEY = 'chs.sidebarWidth'
+const SIDEBAR_MIN_WIDTH = 220
+const SIDEBAR_MAX_WIDTH = 480
+const SIDEBAR_DEFAULT_WIDTH = 260
 
 // Number of messages loaded per page for bottom-to-top pagination. The initial
 // session load fetches the 50 most recent messages (Requirement 4.1), and the
@@ -24,6 +36,20 @@ function readSidebarCollapsed() {
   }
 }
 
+// Lazy initializer for the expanded sidebar width: read the persisted value,
+// clamp it into [MIN, MAX], and fall back to the default when missing/invalid.
+function readSidebarWidth() {
+  if (typeof window === 'undefined' || !window.localStorage) return SIDEBAR_DEFAULT_WIDTH
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WIDTH_KEY)
+    const parsed = Number.parseInt(raw, 10)
+    if (Number.isNaN(parsed)) return SIDEBAR_DEFAULT_WIDTH
+    return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed))
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH
+  }
+}
+
 function newSessionId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
   return 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -32,13 +58,6 @@ function newSessionId() {
 function newMessageId() {
   return 'm-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
-
-const SAMPLE_QUESTIONS = [
-  'How many theft cases are open?',
-  'Show me all cases involving Mahesh Gowda',
-  'List all vehicle theft cases with the registration number',
-  'Who are the top 5 repeat offenders?',
-]
 
 export default function ChatWindow({ officer, onLogout }) {
   const [activeSessionId, setActiveSessionId] = useState(() => newSessionId())
@@ -72,6 +91,13 @@ export default function ChatWindow({ officer, onLogout }) {
   // Sidebar collapse state, restored from localStorage on mount and persisted
   // whenever it changes (see effects below).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed)
+  // Expanded sidebar width (px), drag-resizable between MIN and MAX. Persisted
+  // to localStorage so the officer's chosen width survives reloads.
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
+  // True while the officer is actively dragging the resize handle. Used to add
+  // a global cursor/selection guard and to disable the width transition so the
+  // drag tracks the pointer 1:1 instead of easing behind it.
+  const [isResizing, setIsResizing] = useState(false)
 
   // Per-session pagination state, keyed by session_id with value
   // {hasMore, oldestMessageId}. We use a ref (not state) because pagination is
@@ -189,6 +215,56 @@ export default function ChatWindow({ officer, onLogout }) {
       // Ignore storage write failures (e.g. private mode / quota).
     }
   }, [sidebarCollapsed])
+
+  // Persist the expanded sidebar width whenever it settles to a new value so
+  // the officer's drag-chosen width survives reloads.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
+    } catch {
+      // Ignore storage write failures (e.g. private mode / quota).
+    }
+  }, [sidebarWidth])
+
+  // Drag-to-resize: begin a resize gesture from the handle on the sidebar's
+  // right edge. We attach window-level move/up listeners so the drag keeps
+  // tracking even when the pointer leaves the thin handle, and clamp the new
+  // width into [MIN, MAX]. A `userSelect: none` + col-resize cursor are applied
+  // to the body for the duration so text isn't selected mid-drag.
+  const handleResizeStart = useCallback((e) => {
+    e.preventDefault()
+    setIsResizing(true)
+
+    const onMove = (moveEvent) => {
+      const clientX = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX
+      const next = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, clientX))
+      setSidebarWidth(next)
+    }
+
+    const onUp = () => {
+      setIsResizing(false)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onMove)
+    window.addEventListener('touchend', onUp)
+  }, [])
+
+  // Double-clicking the handle resets the sidebar to its default width — a small
+  // affordance that mirrors common resizable-panel behavior.
+  const handleResizeReset = useCallback(() => {
+    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
+  }, [])
 
   // Auto-dismiss the session-creation error toast after ~5s (Req 15.3). The
   // officer can also dismiss it manually via the toast's close button. We clear
@@ -498,8 +574,22 @@ export default function ChatWindow({ officer, onLogout }) {
   // logs out; any other error is logged and surfaced via a minimal transient
   // `sessionError` (full UI in task 11.2). We do NOT clear messages or switch
   // sessions on the failure path.
-  const handleNewChat = useCallback(async () => {
-    // (1) Cancel any active stream and reset streaming state.
+  // Start a new chat (UI-only for now — no backend session is created until the
+  // officer actually sends a prompt). Behavior:
+  //   - If the current chat is already empty (no messages), this is a no-op so
+  //     repeatedly pressing "New chat" keeps the officer on the same blank chat
+  //     rather than spawning duplicates.
+  //   - Otherwise, cancel any stream, generate a fresh client-side session id,
+  //     and reset the view to a blank welcome screen. The session is only
+  //     registered in the sidebar (under "Recents") once the first prompt runs
+  //     — bumpSessionMetadata injects it with a title derived from that prompt.
+  const handleNewChat = useCallback(() => {
+    // Already on a blank, idle chat — keep the officer here (no duplicate).
+    if (messages.length === 0 && !isStreaming) {
+      return
+    }
+
+    // Cancel any active stream and reset streaming state.
     if (isStreaming) {
       cancelRef.current?.()
       cancelRef.current = null
@@ -507,41 +597,18 @@ export default function ChatWindow({ officer, onLogout }) {
       setStatusText('')
     }
 
-    // Clear any stale session error from a previous failed attempt.
     setSessionError(null)
 
-    // (2) Create the session on the backend.
-    let newSession
-    try {
-      newSession = await createSession()
-    } catch (err) {
-      if (err instanceof AuthError) {
-        onLogout()
-      } else {
-        // Full error UI arrives in task 11.2; log + minimal transient state for
-        // now. Retain the current Active_Session (Req 15.3).
-        console.error('ChatWindow: failed to create session', err)
-        setSessionError('Failed to create a new chat. Please try again.')
-      }
-      return
-    }
-
-    // (3) Surface the new session in the sidebar immediately (newest-first).
-    setSessions((prev) => [newSession, ...prev])
-
-    // (4) Make it active and reset the chat view + composer. A brand-new
-    // session has no history, so pagination starts empty. setPagination keeps
-    // activeHasMore in sync once we mark the session active below.
-    activeSessionIdRef.current = newSession.session_id
-    setActiveSessionId(newSession.session_id)
-    setPagination(newSession.session_id, {
-      hasMore: false,
-      oldestMessageId: null,
-    })
+    // Fresh client-side session id; not persisted until the first prompt.
+    const freshId = newSessionId()
+    activeSessionIdRef.current = freshId
+    setActiveSessionId(freshId)
+    setPagination(freshId, { hasMore: false, oldestMessageId: null })
     setMessages([])
     setInputValue('')
     setStatusText('')
-  }, [isStreaming, onLogout, setPagination])
+    setMessagesError(null)
+  }, [messages.length, isStreaming, setPagination])
 
   // Load the previous page of OLDER messages for the active session, triggered
   // either by the "Load older messages" button or the scroll observer (task
@@ -665,171 +732,194 @@ export default function ChatWindow({ officer, onLogout }) {
     return () => observer.disconnect()
   }, [loadOlderMessages, activeHasMore, isLoadingOlder, messages.length])
 
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
   const isEmpty = messages.length === 0
 
-  const officerLabel = useMemo(() => {
-    if (!officer) return ''
-    const parts = [officer.full_name, officer.rank].filter(Boolean)
-    return parts.join(' · ')
-  }, [officer])
+  const sidebarOpen = !sidebarCollapsed
+
+  // Title of the active session, shown at the top of the main area when the
+  // sidebar is collapsed (mirrors Claude.ai's collapsed-state title).
+  const currentSessionTitle = useMemo(() => {
+    const active = sessions.find((s) => s.session_id === activeSessionId)
+    return active?.title || ''
+  }, [sessions, activeSessionId])
 
   // session_id generation note (Requirements 1.1, 8.3):
   //   The initial `activeSessionId` is generated client-side via newSessionId()
   //   so a brand-new, unsaved chat can stream immediately — the backend's
   //   save_turn persists this provisional id on the first message. New chats
-  //   started from the sidebar/topbar "New chat" button use the backend-created
+  //   started from the sidebar "New chat" button use the backend-created
   //   session_id (handleNewChat → createSession), so all explicitly-created
-  //   sessions are backed by a server-owned id. We intentionally leave the
-  //   provisional client id for the very first fresh chat rather than
-  //   auto-selecting an existing session, so the empty state is shown on load.
+  //   sessions are backed by a server-owned id.
   return (
-    <div className="app-layout">
-      <ChatHistorySidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        officer={officer}
-        collapsed={sidebarCollapsed}
-        isLoading={isLoadingSessions}
-        error={sessionsError}
-        onRetry={loadSessions}
-        onNewChat={handleNewChat}
-        onSelectSession={handleSelectSession}
-        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-      />
-      <div className="chat-shell">
-      <header className="topbar">
-        <div className="topbar__brand">
-          <span className="topbar__mark" aria-hidden="true">✱</span>
-          <div className="topbar__titles">
-            <div className="topbar__title">KSP Crime Intelligence</div>
-            <div className="topbar__subtitle">
-              Session {activeSessionId.slice(0, 8)}
-              {officerLabel ? ` · ${officerLabel}` : ''}
-            </div>
-          </div>
-        </div>
-        <div className="topbar__actions">
-          <button className="btn btn--ghost" onClick={handleNewChat} disabled={isStreaming}>
-            New chat
-          </button>
-          <button className="btn btn--ghost" onClick={onLogout}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      {sessionError ? (
-        <div className="toast toast--error" role="alert">
-          <span className="toast__message">{sessionError}</span>
+    <div className="app-shell">
+      {/* ── SIDEBAR ── */}
+      <aside
+        className={`sidebar ${sidebarOpen ? 'expanded' : 'collapsed'}${isResizing ? ' resizing' : ''}`}
+        style={sidebarOpen ? { width: sidebarWidth } : undefined}
+      >
+        {/* Top: collapse toggle */}
+        <div className="sidebar-top">
           <button
-            type="button"
-            className="toast__dismiss"
-            onClick={() => setSessionError(null)}
-            aria-label="Dismiss notification"
+            className="sidebar-icon-btn"
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           >
-            ✕
+            {sidebarOpen ? <IconSidebarClose /> : <IconSidebarOpen />}
           </button>
         </div>
-      ) : null}
 
-      <main className="chat-scroll" ref={scrollRef}>
-        {messagesError ? (
-          <div className="chat-error" role="alert">
-            <span className="chat-error__message">{messagesError}</span>
+        {/* New chat — icon + label when expanded, icon only when collapsed */}
+        <button
+          className="new-chat-row"
+          onClick={handleNewChat}
+          title="New chat"
+        >
+          <span className="new-chat-row__icon">
+            <IconNewChat />
+          </span>
+          {sidebarOpen && <span className="new-chat-row__label">New chat</span>}
+        </button>
+
+        {/* Session list — only visible when expanded */}
+        <div className="session-list-container">
+          {sidebarOpen && <div className="recents-label">Recents</div>}
+          <SessionList
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onSelect={handleSelectSession}
+            isLoading={isLoadingSessions}
+            error={sessionsError}
+            onRetry={loadSessions}
+          />
+        </div>
+
+        {/* Bottom: officer info + popup */}
+        <div className="sidebar-bottom">
+          <OfficerRow officer={officer} onSignOut={onLogout} />
+        </div>
+
+        {/* Drag-to-resize handle — only active when the sidebar is expanded.
+            Sits on the right edge; dragging adjusts the width, double-click
+            resets to the default. */}
+        {sidebarOpen && (
+          <div
+            className="sidebar-resize-handle"
+            onMouseDown={handleResizeStart}
+            onTouchStart={handleResizeStart}
+            onDoubleClick={handleResizeReset}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            title="Drag to resize"
+          />
+        )}
+      </aside>
+
+      {/* ── MAIN CONTENT ── */}
+      <main className="main-content">
+        {/* Collapsed-sidebar title, top-left of the main area */}
+        {!sidebarOpen && currentSessionTitle && (
+          <div
+            style={{
+              padding: '12px 20px 0',
+              fontSize: 13,
+              color: 'var(--text-secondary)',
+              fontWeight: 500,
+              flexShrink: 0,
+            }}
+          >
+            {currentSessionTitle}
+          </div>
+        )}
+
+        {sessionError ? (
+          <div className="toast toast--error" role="alert">
+            <span className="toast__message">{sessionError}</span>
             <button
               type="button"
-              className="chat-error__retry"
-              onClick={retryLoadMessages}
-              disabled={isLoadingMessages}
+              className="toast__dismiss"
+              onClick={() => setSessionError(null)}
+              aria-label="Dismiss notification"
             >
-              {isLoadingMessages ? 'Retrying…' : 'Retry'}
+              ✕
             </button>
           </div>
         ) : null}
-        {isEmpty ? (
-          <div className="chat-empty">
-            <h2>Ask about cases, accused, or evidence.</h2>
-            <p>Plain English works. Try one of these to get started:</p>
-            <div className="suggestions">
-              {SAMPLE_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  className="suggestion-chip"
-                  onClick={() => handleSend(q)}
-                  disabled={isStreaming}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
+
+        {isEmpty && !messagesError ? (
+          /* Welcome state — greeting, chips, and the composer grouped together
+             and centered both vertically and horizontally. */
+          <div className="welcome-screen">
+            <WelcomeScreen officer={officer} onSuggestion={handleSend} isStreaming={isStreaming} />
+            <Composer
+              value={inputValue}
+              onChange={setInputValue}
+              onSend={handleSend}
+              disabled={isStreaming}
+              statusText={statusText}
+            />
           </div>
         ) : (
-          <div className="chat-messages">
-            {/* Top sentinel + load-older affordances (Req 4.5). The sentinel is
-                observed by the IntersectionObserver wired up in task 8.3 to
-                auto-trigger loadOlderMessages; the button offers a manual
-                fallback. */}
-            <div ref={topSentinelRef} className="chat-messages__top-sentinel" aria-hidden="true" />
-            {activeHasMore ? (
-              <button
-                type="button"
-                className="load-older-btn"
-                onClick={loadOlderMessages}
-                disabled={isLoadingOlder}
-              >
-                {isLoadingOlder ? 'Loading…' : 'Load older messages'}
-              </button>
-            ) : (
-              <div className="no-older-indicator">No older messages</div>
-            )}
-            {messages.map((m) => (
-              <MessageBubble
-                key={m.id}
-                role={m.role}
-                content={m.content}
-                tableData={m.tableData}
-                mediaAttachments={m.mediaAttachments}
-                isStreaming={m.isStreaming}
-                error={m.error}
-              />
-            ))}
+          /* Active chat — scrollable messages with the composer pinned below. */
+          <div className="chat-area">
+            <div className="messages-scroll" ref={scrollRef}>
+              <div className="messages-inner">
+                {messagesError ? (
+                  <div className="chat-error" role="alert">
+                    <span className="chat-error__message">{messagesError}</span>
+                    <button
+                      type="button"
+                      className="chat-error__retry"
+                      onClick={retryLoadMessages}
+                      disabled={isLoadingMessages}
+                    >
+                      {isLoadingMessages ? 'Retrying…' : 'Retry'}
+                    </button>
+                  </div>
+                ) : null}
+
+                {/* Top sentinel + load-older affordances (Req 4.5). */}
+                <div ref={topSentinelRef} className="chat-messages__top-sentinel" aria-hidden="true" />
+                {messages.length > 0 ? (
+                  activeHasMore ? (
+                    <button
+                      type="button"
+                      className="load-older-btn"
+                      onClick={loadOlderMessages}
+                      disabled={isLoadingOlder}
+                    >
+                      {isLoadingOlder ? 'Loading…' : 'Load older messages'}
+                    </button>
+                  ) : (
+                    <div className="no-older-indicator">No older messages</div>
+                  )
+                ) : null}
+
+                {messages.map((m) => (
+                  <MessageBubble
+                    key={m.id}
+                    role={m.role}
+                    content={m.content}
+                    tableData={m.tableData}
+                    mediaAttachments={m.mediaAttachments}
+                    isStreaming={m.isStreaming}
+                    error={m.error}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Composer — pinned at the bottom during an active chat. */}
+            <Composer
+              value={inputValue}
+              onChange={setInputValue}
+              onSend={handleSend}
+              disabled={isStreaming}
+              statusText={statusText}
+            />
           </div>
         )}
       </main>
-
-      <footer className="composer">
-        {statusText ? <div className="composer__status">{statusText}</div> : null}
-        <div className="composer__row">
-          <textarea
-            ref={textareaRef}
-            className="composer__input"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask a question…"
-            rows={1}
-            disabled={isStreaming}
-          />
-          <button
-            className="btn btn--primary"
-            onClick={() => handleSend()}
-            disabled={isStreaming || inputValue.trim().length === 0}
-          >
-            {isStreaming ? 'Working…' : 'Send'}
-          </button>
-        </div>
-        <div className="composer__hint">
-          Press Enter to send · Shift+Enter for a new line
-        </div>
-      </footer>
-    </div>
     </div>
   )
 }
