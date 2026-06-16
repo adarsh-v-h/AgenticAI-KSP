@@ -14,6 +14,7 @@
 6. [Frontend File-by-File Reference](#6-frontend-file-by-file-reference)
 7. [Data Flow Diagrams](#7-data-flow-diagrams)
 8. [Error Handling Patterns](#8-error-handling-patterns)
+9. [Removed / Deprecated Stuff](#9-removed--deprecated-stuff)
 
 ---
 
@@ -755,28 +756,158 @@ Attempt 2 (correction):
 
 ## 5. Frontend Architecture
 
+The frontend is a single-page React 18 app (no router) built with Vite 5. The
+top-level shell is a **two-panel layout** modeled on Claude.ai: a collapsible
+left **sidebar** (new chat, a "Recents" session list, and the officer identity
+block) beside a **main content area** that shows either a centered welcome
+screen (empty chat) or the scrollable message thread, with the composer below.
+
 ```
 frontend/
 ├── index.html                # SPA shell
-├── package.json              # React 18, Vite 5
-├── vite.config.js            # Dev proxy: /api → localhost:8000
+├── package.json              # React 18, Vite 5, Vitest 2
+├── vite.config.js            # Dev proxy: /api → localhost:8000; Vitest (jsdom) config
 ├── .env                      # VITE_APP_NAME only
 └── src/
     ├── main.jsx              # ReactDOM entry point
     ├── App.jsx               # Root: auth state → LoginPage or ChatWindow
     ├── api/
     │   ├── auth.js           # Token management + login/logout API
-    │   └── chat.js           # SSE stream consumer via fetch+ReadableStream
+    │   └── chat.js           # SSE stream consumer + session/message REST client
     ├── components/
     │   ├── LoginPage.jsx     # Badge + password form
-    │   ├── ChatWindow.jsx    # Main chat layout
-    │   ├── MessageBubble.jsx # Single message renderer
-    │   └── TableRenderer.jsx # HTML table from JSON data
+    │   ├── ChatWindow.jsx    # Two-panel shell: sidebar + main content; owns all chat state
+    │   ├── WelcomeScreen.jsx # Centered greeting + suggestion chips (empty chat)
+    │   ├── Composer.jsx      # Auto-growing input box, send/attach/voice buttons
+    │   ├── MessageBubble.jsx # Single message renderer (+ markdown-table stripping)
+    │   ├── TableRenderer.jsx # HTML table from JSON data
+    │   ├── SessionList.jsx   # Scrollable session list (loading/empty/error states)
+    │   ├── SessionItem.jsx   # One session row (title + relative timestamp + count)
+    │   ├── OfficerRow.jsx    # Sidebar-bottom officer avatar + sign-out popup
+    │   └── Icons.jsx         # Inline SVG icon set (no icon library)
     ├── hooks/
     │   └── useAuth.js        # Auth state management
-    └── styles/
-        └── main.css          # Government portal styling (Design.md)
+    ├── styles/
+    │   └── main.css          # Warm-canvas styling (Design.md) — app shell + components
+    └── test/
+        └── setup.js          # Vitest/jsdom test setup
 ```
+
+> **Orphaned components:** `NewChatButton.jsx` and `OfficerInfo.jsx` still exist
+> on disk but are no longer imported anywhere after the sidebar redesign. See
+> [Section 9 — Removed / Deprecated Stuff](#9-removed--deprecated-stuff).
+
+---
+
+### 5.1 Drag-to-Resize Sidebar
+
+**Feature:** The sidebar can be resized by dragging its right edge, mirroring the smooth, polished feel of Claude.ai's resizable panel. The chosen width persists across reloads.
+
+**Implementation location:** `frontend/src/components/ChatWindow.jsx` + `frontend/src/styles/main.css`
+
+**State:**
+- `sidebarWidth` — number (px), lazy-initialized from localStorage (key: `chs.sidebarWidth`), defaults to 260px, clamped to 220–480px range
+- `isResizing` — boolean, `true` while actively dragging, used to disable CSS transition and apply global `userSelect: none` + `cursor: col-resize`
+
+**Constants:**
+```js
+const SIDEBAR_WIDTH_KEY = 'chs.sidebarWidth'
+const SIDEBAR_MIN_WIDTH = 220
+const SIDEBAR_MAX_WIDTH = 480
+const SIDEBAR_DEFAULT_WIDTH = 260
+```
+
+**Key functions:**
+
+| Function | Description |
+|----------|-------------|
+| `readSidebarWidth()` | Lazy initializer. Reads from localStorage, parses as int, clamps to `[220, 480]`. Falls back to 260px if missing/invalid. Guards for SSR (no `window`). |
+| `handleResizeStart(e)` | Drag start handler attached to `.sidebar-resize-handle`'s `onMouseDown` and `onTouchStart`. Sets `isResizing: true`, adds window-level `mousemove`/`mouseup` (and `touchmove`/`touchend`) listeners, applies `userSelect: none` + `cursor: col-resize` to `document.body`. The `onMove` callback reads `clientX` (or `touches[0].clientX`), clamps to bounds, calls `setSidebarWidth(next)`. The `onUp` callback removes listeners, resets body styles, sets `isResizing: false`. |
+| `handleResizeReset()` | Double-click handler on the resize handle. Resets `sidebarWidth` to 260px. |
+
+**Persistence effect:**
+```js
+useEffect(() => {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
+  } catch {
+    // Ignore storage write failures
+  }
+}, [sidebarWidth])
+```
+
+**JSX structure:**
+```jsx
+<aside
+  className={`sidebar ${sidebarOpen ? 'expanded' : 'collapsed'}${isResizing ? ' resizing' : ''}`}
+  style={sidebarOpen ? { width: sidebarWidth } : undefined}
+>
+  {/* sidebar content */}
+
+  {/* Resize handle — only rendered when expanded */}
+  {sidebarOpen && (
+    <div
+      className="sidebar-resize-handle"
+      onMouseDown={handleResizeStart}
+      onTouchStart={handleResizeStart}
+      onDoubleClick={handleResizeReset}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      title="Drag to resize"
+    />
+  )}
+</aside>
+```
+
+**CSS:**
+
+The sidebar gets `position: relative` so the handle can be positioned absolutely on the right edge. The handle is a thin 6px-wide invisible strip that reveals a coral accent line on hover/drag:
+
+```css
+.sidebar {
+  position: relative;
+  transition: width 0.2s ease;
+  /* ... flex, height, background, border, overflow */
+}
+
+/* Disable width transition during drag for 1:1 pointer tracking */
+.sidebar.resizing {
+  transition: none;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 50;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar.resizing .sidebar-resize-handle {
+  background: var(--primary);
+  opacity: 0.5;
+}
+```
+
+**Behavior:**
+1. Hover over the sidebar's right edge → cursor changes to `col-resize`, thin coral line appears
+2. Click + drag → sidebar width follows pointer in real-time (no easing lag)
+3. Release → width persists to localStorage
+4. Double-click the handle → snap back to 260px default
+5. Reload page → last chosen width is restored
+6. Touch support via `touchstart`/`touchmove`/`touchend`
+
+**Why it feels smooth:**
+- `transition: none` during drag (`isResizing` class) ensures instant width updates on every `mousemove`, tracking pointer 1:1 instead of easing behind
+- `userSelect: none` on body prevents text selection mid-drag
+- `col-resize` cursor applied globally so it stays consistent even when pointer briefly leaves the handle
 
 ---
 
@@ -824,13 +955,17 @@ No routing library — just conditional rendering based on auth state.
 
 ### 6.4 `frontend/src/api/chat.js`
 
-**Purpose:** SSE stream consumer. Uses `fetch` with `ReadableStream` instead of `EventSource` because `EventSource` can't set custom headers (needed for JWT auth).
+**Purpose:** Two responsibilities: (1) the SSE stream consumer for sending a
+question and receiving the streamed answer, and (2) a small REST client for the
+chat-history sidebar (listing sessions, creating sessions, loading paginated
+messages). Uses `fetch` with a `ReadableStream` for SSE instead of `EventSource`
+because `EventSource` can't set custom headers (needed for JWT auth).
 
-**Functions:**
+**Streaming functions:**
 
 | Function | Description |
 |----------|-------------|
-| `startChatStream(question, sessionId, callbacks)` | Opens a `GET` request to `/api/chat/stream?question=...&session_id=...&token=...`. Token is passed both as `Authorization: Bearer` header AND as `?token=` query param (for proxy compatibility). Reads response body as stream, parses SSE frames (`data: {...}\n\n`), routes to callbacks by `event.type`. Returns a cancel function (`() => controller.abort()`). |
+| `startChatStream(question, sessionId, callbacks)` | Opens a `GET` request to `/api/chat/stream?question=...&session_id=...&token=...`. Token is passed both as `Authorization: Bearer` header AND as `?token=` query param (for proxy compatibility). Reads response body as stream, parses SSE frames (`data: {...}\n\n`), routes to callbacks by `event.type`. Handles 401/403 by firing `onAuthExpired`. Returns a cancel function (`() => controller.abort()`). |
 | `handleFrame(frame, callbacks)` | Parses a single SSE frame. Concatenates `data:` lines per SSE spec. JSON-parses the payload. Routes to the appropriate callback by `event.type`: `status`, `token`, `table`, `media`, `sql`, `graph_available`, `error`, `done`. |
 
 **Buffer-based SSE parsing:** Since `reader.read()` returns arbitrary chunks that may split mid-frame, the consumer maintains a `buffer` string across iterations. After each chunk, it scans for `\n\n` (the SSE frame delimiter), extracts complete frames from the buffer, and processes them. Any trailing partial frame is drained when the stream closes. This ensures correctness even when TCP segments don't align with SSE boundaries.
@@ -849,6 +984,23 @@ No routing library — just conditional rendering based on auth state.
   onDone: () => void,             // stream complete
 }
 ```
+
+**Session / message REST client:**
+
+| Export | Description |
+|--------|-------------|
+| `AuthError` (class) | Thrown when the backend rejects a request with HTTP 401, so callers can detect an expired session and trigger logout. |
+| `fetchSessions()` | `GET /api/chat/sessions` — returns the officer's sessions (`{session_id, title, created_at, updated_at, message_count}[]`). Throws `AuthError` on 401, `Error` on other failures. |
+| `createSession()` | `POST /api/chat/sessions` — creates a backend-owned session and returns its metadata. **Currently unused by `ChatWindow.jsx`** (new chats are provisional client-side until the first prompt — see 6.7), but retained as a ready API for when server-side session creation is reintroduced. |
+| `fetchMessages(sessionId, limit=50, beforeMessageId=null)` | `GET /api/chat/sessions/{id}/messages?limit=&before_message_id=` — returns `{messages, has_more}`. Backend returns newest-first; callers handle display ordering. Throws `AuthError` on 401, `Error` on 404 / other failures. |
+
+**Helpers (internal):**
+
+| Function | Description |
+|----------|-------------|
+| `authHeaders(extra)` | Merges `Authorization: Bearer {token}` (from `getToken()`) with any extra headers. |
+| `delay(ms)` | Promise wrapper around `setTimeout` for backoff waits. |
+| `fetchWithRetry(doFetch, {retries=2, baseDelayMs=300})` | Exponential-backoff retry for **transient** failures only: a thrown fetch (network down) or a 5xx response. Non-transient responses (<500, including 401/404) return immediately so callers apply their own handling. Backoff is `baseDelayMs * 2^n`, bounded at ~900ms added latency across two retries. |
 
 ---
 
@@ -890,38 +1042,125 @@ No routing library — just conditional rendering based on auth state.
 
 ### 6.7 `frontend/src/components/ChatWindow.jsx`
 
-**Purpose:** Main chat interface. Full viewport height with top bar, scrollable message area, and fixed composer at bottom.
+**Purpose:** The main application shell once authenticated. Renders the **two-panel
+layout** (collapsible sidebar + main content) and owns all chat state, session
+management, streaming, and pagination logic. This is the largest frontend file.
 
 **Props:** `{ officer, onLogout }`
 
+**Layout (JSX structure):**
+
+```
+.app-shell
+├── aside.sidebar (expanded | collapsed)
+│   ├── .sidebar-top        → collapse toggle icon button
+│   ├── .new-chat-row       → "New chat" (icon + label; icon-only when collapsed)
+│   ├── .session-list-container
+│   │   ├── .recents-label  → "Recents" (expanded only)
+│   │   └── <SessionList />
+│   └── .sidebar-bottom     → <OfficerRow />
+└── main.main-content
+    ├── (collapsed-only) active session title, top-left
+    ├── session-creation error toast (if any)
+    └── isEmpty?
+        ├── YES → .welcome-screen { <WelcomeScreen /> + <Composer /> }  ← centered group
+        └── NO  → .chat-area { .messages-scroll[.messages-inner] + <Composer /> }
+```
+
 **State:**
-- `sessionId` — UUID generated once per login (via `crypto.randomUUID()`)
-- `messages` — array of `{id, role, content, tableData, mediaAttachments, isStreaming, error}`
-- `inputValue` — current input text
-- `isStreaming` — prevents sending while streaming
-- `statusText` — pipeline progress display
+
+| State | Purpose |
+|-------|---------|
+| `activeSessionId` | Current session id. Initialized client-side via `newSessionId()`. |
+| `messages` | Array of `{id, role, content, tableData, mediaAttachments, isStreaming, error}`. |
+| `inputValue` | Composer text (lifted up so drafts can be preserved per session). |
+| `isStreaming` | True while a stream is active; disables sending. |
+| `statusText` | Pipeline progress text shown above the composer. |
+| `sessions` | Officer's session list (the "Recents" list), loaded on mount. |
+| `isLoadingSessions` / `sessionsError` | Sidebar load state + error (with Retry). |
+| `isLoadingMessages` / `messagesError` | Message-load state + error (with Retry). |
+| `sessionError` | Transient toast for a failed session operation. |
+| `sidebarCollapsed` | Sidebar collapse state, persisted to `localStorage` (`chs.sidebarCollapsed`). Surfaced to JSX as `sidebarOpen = !sidebarCollapsed`. |
+| `activeHasMore` / `isLoadingOlder` | Reactive pagination flags for the active session. |
+
+**Refs:** `cancelRef` (active stream canceller), `scrollRef` (message scroll container), `textareaRef` (legacy focus target), `topSentinelRef` (IntersectionObserver target for load-older), `paginationRef` (per-session `{hasMore, oldestMessageId}` map), `activeSessionIdRef` (stale-closure-safe mirror of `activeSessionId`), `draftInputsRef` (per-session unsent composer drafts).
 
 **Key behaviors:**
-- **New chat:** generates new `sessionId`, clears messages, cancels any active stream
-- **Send:** adds user + empty assistant message, calls `startChatStream()`, callbacks update the last assistant message incrementally
-- **Suggestion chips:** 4 pre-filled questions shown when chat is empty; clicking a chip calls `handleSend(question)` with the override parameter, bypassing the input field
-  - "How many theft cases are open?"
-  - "Show me all cases involving Mahesh Gowda"
-  - "List all vehicle theft cases with the registration number"
-  - "Who are the top 5 repeat offenders?"
-- **Auto-scroll:** scrolls to bottom on new content
-- **Keyboard:** Enter sends, Shift+Enter for newline
-- **Cleanup:** cancels active stream on unmount via `cancelRef`
-- **Focus restoration:** after streaming completes, focus is restored to the textarea via `requestAnimationFrame(() => textareaRef.current?.focus())`
+
+- **New chat (provisional, no backend call):** `handleNewChat()` is UI-only. If the
+  current chat is already empty and idle, it's a **no-op** — pressing "New chat"
+  repeatedly keeps the officer on the same blank chat instead of spawning
+  duplicates. Otherwise it cancels any stream, generates a fresh client-side
+  `session_id`, and resets to the blank welcome screen. The session is **not**
+  registered in the sidebar until the first prompt runs.
+- **First-prompt naming:** when a turn completes, `bumpSessionMetadata()` injects
+  the provisional session into the "Recents" list with a title derived from the
+  first user message (`deriveTitle()`), bumps `message_count`, refreshes
+  `updated_at`, and re-sorts newest-first.
+- **Send:** `handleSend(override?)` appends a user + empty assistant message,
+  opens the stream via `startChatStream()`, and routes callbacks through
+  `updateLastAssistant()` to incrementally update the active assistant message.
+- **Suggestion chips:** rendered by `WelcomeScreen`; clicking one calls
+  `handleSend(question)` directly, bypassing the input field.
+- **Session switching:** `handleSelectSession()` cancels any stream, stashes the
+  current draft under the old session and restores the new one, clears messages,
+  switches `activeSessionId`, and loads the most recent page.
+- **Pagination (bottom-to-top):** initial load fetches the 50 newest messages
+  (`loadSessionMessages`); scrolling to the top sentinel (IntersectionObserver) or
+  the "Load older messages" button triggers `loadOlderMessages()`, which prepends
+  older pages while preserving scroll position. `PAGE_SIZE = 50`.
+- **Collapsed-state title:** when the sidebar is collapsed, the active session
+  title is shown small at the top-left of the main area (Claude.ai behavior).
+- **Auto-scroll:** scrolls to the bottom on new content.
+- **Cleanup:** cancels the active stream on unmount via `cancelRef`.
 
 **Internal helpers:**
-- `newSessionId()` — generates UUID via `crypto.randomUUID()` (with fallback for older browsers)
-- `newMessageId()` — generates random ID for React keys
-- `updateLastAssistant(updater)` — finds the last assistant message in the array and applies an updater function to it. This is how all streaming callbacks (`onToken`, `onTable`, `onMedia`, `onError`) incrementally update the active message without replacing the entire array.
+- `newSessionId()` — UUID via `crypto.randomUUID()` (with fallback for older browsers).
+- `newMessageId()` — random id for React keys.
+- `readSidebarCollapsed()` — lazy initializer reading the persisted collapse flag from `localStorage`.
+- `updateLastAssistant(updater)` — finds the last assistant message and applies an updater; the mechanism behind all streaming callbacks.
+- `deriveTitle(firstUserMessage)` — client-side title heuristic (≤60 chars) mirroring the backend.
+- `bumpSessionMetadata(sessionId, firstUserMessage)` — optimistic sidebar update on turn completion (injects provisional sessions, bumps count, re-sorts).
+- `getPagination` / `setPagination` — read/write the per-session pagination map, syncing `activeHasMore` for the active session.
+- `loadSessions` / `loadSessionMessages` / `retryLoadMessages` / `loadOlderMessages` — data loaders described above.
 
 ---
 
-### 6.8 `frontend/src/components/MessageBubble.jsx`
+### 6.8 `frontend/src/components/WelcomeScreen.jsx`
+
+**Purpose:** The empty-chat greeting. Returns a fragment with a large serif
+heading "Good day, {firstName}." (derived from `officer.full_name`), a subheading
+"What would you like to look up today?", and a row of 4 suggestion chips.
+
+**Props:** `{ officer, onSuggestion, isStreaming }`
+
+**Notes:** Returns only the text + chips (not a wrapper). `ChatWindow` places it
+inside a centered `.welcome-screen` flex container together with the `Composer`,
+so the greeting, chips, and input box form one group centered both vertically and
+horizontally. Clicking a chip calls `onSuggestion(text)`; chips are disabled
+while `isStreaming`. The 4 suggestions are: "How many theft cases are open?",
+"Show me all cases involving Mahesh Gowda", "List all vehicle theft cases with
+registration numbers", "Who are the top 5 repeat offenders?".
+
+---
+
+### 6.9 `frontend/src/components/Composer.jsx`
+
+**Purpose:** The message input box. Used in both the welcome state (directly below
+the suggestions) and during an active chat (pinned at the bottom).
+
+**Props:** `{ value, onChange, onSend, disabled, statusText }`
+
+**Behavior:**
+- Auto-growing textarea: a `useEffect` resizes it on every `value` change, capped at 160px (then scrolls).
+- Enter sends, Shift+Enter inserts a newline. Send is suppressed while `disabled` or when the trimmed value is empty.
+- `statusText` (pipeline progress) renders in small text above the box while streaming.
+- Left actions: **Attach** (paperclip) and **Voice** (mic) buttons are placeholders — visually present but disabled with `.not-yet` styling and "coming soon" tooltips.
+- Send button: coral circle with an up-arrow icon; disabled while streaming or when input is empty.
+
+---
+
+### 6.10 `frontend/src/components/MessageBubble.jsx`
 
 **Purpose:** Renders a single chat message.
 
@@ -938,7 +1177,7 @@ No routing library — just conditional rendering based on auth state.
 
 ---
 
-### 6.9 `frontend/src/components/TableRenderer.jsx`
+### 6.11 `frontend/src/components/TableRenderer.jsx`
 
 **Purpose:** Renders query results as a clean HTML table.
 
@@ -954,7 +1193,58 @@ No routing library — just conditional rendering based on auth state.
 
 ---
 
-### 6.10 `frontend/src/styles/main.css`
+### 6.12 `frontend/src/components/SessionList.jsx`
+
+**Purpose:** Renders the scrollable list of chat sessions inside the sidebar.
+
+**Props:** `{ sessions, activeSessionId, onSelect, onSelectSession, isLoading, error, onRetry }`
+
+**Behavior:**
+- Accepts either `onSelect` (current sidebar) or `onSelectSession` (legacy) as the row-click handler — `handleSelect = onSelect || onSelectSession` for backward compatibility.
+- State precedence: **error** (shows the message + a Retry button calling `onRetry`) → **loading** ("Loading conversations…") → **empty** ("No conversations yet. Start a new chat!") → the list.
+- Sessions render in the order given (backend orders newest-first by `updated_at`); the component does not re-sort.
+- Wrapped in `React.memo`; rows are memoized `SessionItem`s so unrelated `ChatWindow` re-renders (streaming tokens, composer input) don't re-render the whole list.
+
+---
+
+### 6.13 `frontend/src/components/SessionItem.jsx`
+
+**Purpose:** A single session row button in the sidebar list.
+
+**Props:** `{ session, isActive, onClick }`
+
+**Behavior:**
+- Shows the session `title` (single line, ellipsis overflow), a relative timestamp, and a message count.
+- `formatRelativeTimestamp(iso)` renders: today → time ("12:30 PM"); yesterday → "Yesterday"; this week → weekday name; older → short date ("Jan 15"). Returns empty for missing/unparseable timestamps.
+- Active row gets `.session-item--active` (highlight background + coral left border) and `aria-current="true"`.
+- Memoized with `React.memo` for list performance.
+
+---
+
+### 6.14 `frontend/src/components/OfficerRow.jsx`
+
+**Purpose:** The officer identity block pinned at the bottom of the sidebar, with a sign-out popup.
+
+**Props:** `{ officer, onSignOut }`
+
+**Behavior:**
+- Renders a circular avatar with up to two initials derived from `officer.full_name` (fallback "KP"), plus name and rank (hidden when the sidebar is collapsed).
+- Clicking the row toggles a popup that appears **above** it (`bottom: calc(100% + 8px)`), showing the officer's full name, badge number, and a danger-styled "Sign out" button.
+- Sign out calls `onSignOut` and closes the popup. A `mousedown` listener closes the popup on any outside click (registered only while open).
+
+---
+
+### 6.15 `frontend/src/components/Icons.jsx`
+
+**Purpose:** A set of inline SVG icon components so the app needs no icon library (keeps the bundle small).
+
+**Exports:** `IconSidebarOpen`, `IconSidebarClose`, `IconNewChat`, `IconLogOut`, `IconPaperclip`, `IconMic`, `IconArrowUp`.
+
+**Convention:** Each takes a `size` prop (default 20) and uses `stroke="currentColor"` so color is controlled by CSS `color` on the parent.
+
+---
+
+### 6.16 `frontend/src/styles/main.css`
 
 **Purpose:** All UI styles. Follows Design.md: warm cream canvas, coral primary CTA, serif display headlines (EB Garamond), humanist sans body (Inter), JetBrains Mono for code.
 
@@ -963,10 +1253,15 @@ No routing library — just conditional rendering based on auth state.
 - Surfaces: `--canvas: #faf9f5` (cream), `--surface-card: #efe9de`, `--surface-dark: #181715`
 - Typography: `--font-display` (EB Garamond serif), `--font-body` (Inter sans), `--font-mono` (JetBrains Mono)
 - Radius: `--r-md: 8px`, `--r-lg: 12px`, `--r-xl: 16px`, `--r-pill: 9999px`
+- **Layout aliases** (added for the two-panel shell, mapped onto the brand palette so the theme stays consistent): `--border` → `--hairline`, `--surface-hover` → `rgba(20,20,19,0.05)`, `--text-primary` → `--ink`, `--text-secondary` → `--muted`, `--text-tertiary` → `--muted-soft`.
 
-**Component styles:** Buttons (primary, ghost, block), login page, chat shell, top bar, scroll area, messages (user/assistant), table renderer, media list, composer, suggestion chips.
+**Component styles:** the app shell (`.app-shell`, `.sidebar` expanded/collapsed, `.sidebar-top`, `.new-chat-row`, `.recents-label`, `.session-list-container`, `.sidebar-bottom`), officer row + popup, `.main-content`, welcome screen (`.welcome-screen`, `.welcome-heading`, `.welcome-subheading`, `.suggestion-chips`), chat area (`.chat-area`, `.messages-scroll`, `.messages-inner`), composer (`.composer-area`, `.composer-box`, `.composer-textarea`, `.composer-action-btn`, `.send-btn`), buttons, login page, messages (user/assistant), table renderer, media list, session list states (loading/empty/error), load-older affordances, and the error toast.
 
 **Font loading:** Google Fonts import for EB Garamond (400, 500), Inter (400, 500, 600), JetBrains Mono (400).
+
+> **Note:** There is no top bar / header anymore — navigation lives entirely in
+> the sidebar. The old `.topbar`, `.app-layout`, `.chat-sidebar*`, and
+> footer-based `.composer__*` styles were removed (see Section 9).
 
 ---
 
@@ -1051,11 +1346,118 @@ All history and cache functions **never raise**. Failures are logged to stderr a
 ### 8.4 Frontend Level
 
 - `api/auth.js`: `login()` never throws — returns `{success, message}` objects
-- `api/chat.js`: `startChatStream()` handles network errors, 401/403, and stream errors via callbacks
-- `ChatWindow.jsx`: All callback errors update the message content and re-enable the input
+- `api/chat.js`: `startChatStream()` handles network errors, 401/403, and stream errors via callbacks. The session/message client (`fetchSessions`, `createSession`, `fetchMessages`) retries transient failures (network + 5xx) via `fetchWithRetry`, throws `AuthError` on 401 (callers trigger logout), and throws a friendly `Error` on other failures.
+- `ChatWindow.jsx`: All callback errors update the message content and re-enable the input. Sidebar session-load failures surface as a Retry affordance in `SessionList`; message-load failures surface a Retry banner in the chat area; a failed session operation shows a dismissable toast.
 
 ### 8.5 Logging
 
 All logging goes to `sys.stderr` via `print(..., file=sys.stderr)`. No sensitive data is logged (no officer names, FIR numbers, or query content — only timestamps, route names, latency, and status codes).
 
 **Consistent `_log` pattern:** Most backend files define a module-level `_log(msg)` helper that writes to stderr with `flush=True`. This is used throughout the codebase for non-fatal warnings (history fallbacks, pipeline timing) and keeps logging code DRY. Files that use this pattern: `sql_generator.py`, `query_pipeline.py`, `routers/chat.py`, `routers/auth.py`, `conversation/history.py`, `conversation/session_store.py`.
+
+---
+
+## 9. Removed / Deprecated Stuff
+
+This section tracks code that **used to exist** in the documented architecture or
+that has been **superseded** during the frontend redesign. Anything moved here is
+either deleted from disk or still present but no longer wired into the app. Each
+entry records what it was, its current status, and why it changed — so the rest of
+this document only describes the live system.
+
+### 9.1 `frontend/src/components/ChatHistorySidebar.jsx` — DELETED
+
+- **What it was:** The original top-level sidebar container. It composed
+  `NewChatButton`, `SessionList`, and `OfficerInfo`, owned the collapse/expand
+  toggle, and included responsive overlay behavior for narrow viewports (a
+  `position: fixed` panel with a backdrop scrim on screens < 768px).
+- **Status:** Deleted from disk.
+- **Why removed:** The two-panel redesign (Claude.ai-style) moved the sidebar
+  layout directly into `ChatWindow.jsx` as inline JSX. The sidebar's
+  responsibilities were split: layout + collapse toggle now live in `ChatWindow`,
+  the officer block moved to the new `OfficerRow.jsx`, and the session list stayed
+  in `SessionList.jsx`. Keeping a separate container component added indirection
+  with no benefit, so it was removed.
+
+### 9.2 `frontend/src/components/NewChatButton.jsx` — ORPHANED (still on disk)
+
+- **What it was:** A reusable "+ New chat" ghost button used by the old
+  `ChatHistorySidebar`.
+- **Status:** File still exists but is **not imported anywhere**.
+- **Why deprecated:** The redesigned sidebar renders the new-chat control inline
+  as a `.new-chat-row` (icon + "New chat" label) directly in `ChatWindow.jsx`, so
+  the standalone button is no longer used. Left on disk (harmless) pending a
+  cleanup pass; safe to delete.
+
+### 9.3 `frontend/src/components/OfficerInfo.jsx` — ORPHANED (still on disk)
+
+- **What it was:** The officer identity footer (avatar + name + rank) used by the
+  old `ChatHistorySidebar`. Display-only — no interactions.
+- **Status:** File still exists but is **not imported anywhere**.
+- **Why deprecated:** Replaced by `OfficerRow.jsx`, which adds the click-to-open
+  sign-out popup (badge number + "Sign out") at the sidebar bottom. The sign-out
+  action previously lived in the top bar; consolidating identity + sign-out into
+  one component made `OfficerInfo` redundant. Left on disk pending cleanup; safe to
+  delete.
+
+### 9.4 Top bar / header layout — REMOVED
+
+- **What it was:** A `.topbar` header across the top of the chat shell showing the
+  brand mark, "KSP Crime Intelligence" title, a session-id subtitle, and **two
+  buttons: "New chat" and "Sign out"**. The overall layout was `.app-layout`
+  (sidebar + `.chat-shell` with the topbar, a `.chat-scroll` area, and a footer
+  composer).
+- **Status:** Removed from `ChatWindow.jsx` and its CSS deleted from `main.css`
+  (`.topbar*`, `.app-layout`, `.chat-shell` header usage).
+- **Why removed:** The redesign spec ([UIFixes.md](UIFixes.md)) calls for a pure
+  two-panel shell with no header — all navigation lives in the sidebar. "New chat"
+  moved to the sidebar top; "Sign out" moved into the `OfficerRow` popup at the
+  sidebar bottom. This removed the duplicate new-chat/sign-out affordances and
+  reclaimed vertical space for the conversation.
+
+### 9.5 Backend-created sessions on "New chat" — DEPRECATED (flow change)
+
+- **What it was:** `handleNewChat()` in `ChatWindow.jsx` used to `await
+  createSession()` (`POST /api/chat/sessions`) on every click, prepend the
+  backend-owned session to the sidebar, and make it active.
+- **Status:** That call path is **no longer used by the UI**. The
+  `createSession()` API client in `api/chat.js` is retained but currently unused
+  (see 6.4).
+- **Why changed:** Two UX problems. (1) Officers could **spam** the New chat button
+  and create many empty backend sessions. (2) An empty chat appeared in the sidebar
+  before any prompt was sent. The new flow makes a new chat **provisional and
+  client-side**: pressing New chat on an already-empty chat is a no-op, and a
+  session is only registered (in "Recents", with a title derived from the first
+  message) once a prompt actually runs. Server-side persistence of these
+  provisional sessions is intentionally deferred — it will be revisited when the
+  storage layer is finalized.
+
+### 9.6 Old welcome / empty-state markup (`.chat-empty`) — SUPERSEDED
+
+- **What it was:** A left-aligned empty state (`.chat-empty` with an `<h2>`,
+  helper text, and a `.suggestions` chip row) rendered inside the scroll area,
+  with the composer fixed separately at the bottom.
+- **Status:** Superseded by `WelcomeScreen.jsx` + the centered `.welcome-screen`
+  group. The old `.chat-empty` / `.suggestions` CSS rules remain in `main.css` but
+  are no longer referenced by any component.
+- **Why changed:** The redesign centers the greeting, suggestion chips, and the
+  composer together both vertically and horizontally so a new chat doesn't feel
+  empty. The greeting also became a personalized, larger serif heading ("Good day,
+  {firstName}.").
+
+### 9.7 Footer-based composer (`.composer__*`) — SUPERSEDED
+
+- **What it was:** The original composer was a `<footer className="composer">` with
+  `.composer__row`, `.composer__input`, `.composer__status`, and `.composer__hint`,
+  plus a text "Send" button and an Enter/Shift+Enter hint line.
+- **Status:** Replaced by the `Composer.jsx` component (`.composer-area` /
+  `.composer-box` / `.composer-textarea` / `.send-btn`). The old `.composer__*` CSS
+  was deleted from `main.css`.
+- **Why changed:** Extracting the composer into its own component lets it be reused
+  in both the welcome state and the active chat, and the redesign added an
+  icon-based send button plus placeholder attach/voice buttons in a single
+  rounded input box.
+
+> **Net frontend additions from the redesign** (for cross-reference): `WelcomeScreen.jsx`,
+> `Composer.jsx`, `OfficerRow.jsx`, `Icons.jsx` were added; `SessionList.jsx` and
+> `SessionItem.jsx` were retained. See [Section 6](#6-frontend-file-by-file-reference).

@@ -13,3 +13,4 @@ venv/
 .phases/
 *.kiro
 .vscode/
+.pytest_cache/
