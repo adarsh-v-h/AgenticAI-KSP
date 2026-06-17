@@ -770,11 +770,15 @@ frontend/
 ├── .env                      # VITE_APP_NAME only
 └── src/
     ├── main.jsx              # ReactDOM entry point
-    ├── App.jsx               # Root: auth state → LoginPage or ChatWindow
+    ├── App.jsx               # Root: auth state → LoginPage, LandingPage, or ChatWindow
     ├── api/
     │   ├── auth.js           # Token management + login/logout API
     │   └── chat.js           # SSE stream consumer + session/message REST client
+    ├── context/
+    │   └── LangContext.jsx   # Shared context for active language (English/Kannada)
     ├── components/
+    │   ├── PortalShell.jsx   # Header/footer shell for landing and login pages
+    │   ├── LandingPage.jsx   # Public landing page with portal features
     │   ├── LoginPage.jsx     # Badge + password form
     │   ├── ChatWindow.jsx    # Two-panel shell: sidebar + main content; owns all chat state
     │   ├── WelcomeScreen.jsx # Centered greeting + suggestion chips (empty chat)
@@ -786,7 +790,8 @@ frontend/
     │   ├── OfficerRow.jsx    # Sidebar-bottom officer avatar + sign-out popup
     │   └── Icons.jsx         # Inline SVG icon set (no icon library)
     ├── hooks/
-    │   └── useAuth.js        # Auth state management
+    │   ├── useAuth.js        # Auth state management
+    │   └── useLang.js        # Language selection state hook
     ├── styles/
     │   └── main.css          # Warm-canvas styling (Design.md) — app shell + components
     └── test/
@@ -924,10 +929,10 @@ The sidebar gets `position: relative` so the handle can be positioned absolutely
 **Purpose:** Root component. Manages auth state via `useAuth()` hook.
 
 **Logic:**
-- If `!isAuthenticated` → renders `<LoginPage onLogin={login} ... />`
 - If `isAuthenticated` → renders `<ChatWindow officer={officer} onLogout={logout} />`
+- If `!isAuthenticated` → renders `<PortalShell>` which wraps `<LandingPage>` (default home) or `<LoginPage>` (if user requests to enter portal).
 
-No routing library — just conditional rendering based on auth state.
+No routing library — just conditional rendering based on auth and navigation states.
 
 ---
 
@@ -1262,6 +1267,38 @@ the suggestions) and during an active chat (pinned at the bottom).
 > **Note:** There is no top bar / header anymore — navigation lives entirely in
 > the sidebar. The old `.topbar`, `.app-layout`, `.chat-sidebar*`, and
 > footer-based `.composer__*` styles were removed (see Section 9).
+
+---
+
+### 6.17 `frontend/src/context/LangContext.jsx`
+
+**Purpose:** React Context Provider that stores the active language (`en` / `kn`) and provides translation and state synchronization helper utilities across the entire component tree.
+
+**Context Values:**
+- `lang`: Current language ('en' or 'kn').
+- `setLang(newLang)`: Updates language, updates `localStorage` key `ksp_portal_lang`, and updates the `lang` attribute on `html` and `body` elements.
+- `t(en, kn)`: Translation helper returning `kn` if language is Kannada, otherwise `en`.
+
+---
+
+### 6.18 `frontend/src/hooks/useLang.js`
+
+**Purpose:** Custom hook that consumes `LangContext` and provides access to `lang`, `setLang`, and the translation helper `t()`. Re-exported to preserve compatibility with existing imports.
+
+---
+
+### 6.19 `frontend/src/components/PortalShell.jsx`
+
+**Purpose:** Layout shell wrapping the unauthenticated views (Landing page and Login page). Contains the official header banner, translation select dropdown, accessibility scaling buttons (`A+`, `A`, `A-`), and the footer banner.
+
+**Key Features:**
+- `setFontSize(size)`: Dynamically sets `--font-size-base` CSS variable on the root `html` tag to either `18px` (`large`), `16px` (`normal`), or `14px` (`small`).
+
+---
+
+### 6.20 `frontend/src/components/LandingPage.jsx`
+
+**Purpose:** Home view of the KSP portal for unauthenticated users. Showcases department statistics/features, secure access descriptions, and prompts the officer to enter the secure portal.
 
 ---
 
