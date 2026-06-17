@@ -11,7 +11,7 @@ class LLMError(Exception):
 def _llm_headers() -> dict:
     """Build the auth + org headers required by every Catalyst QuickML call."""
     return {
-        "Authorization": f"Bearer {get('CATALYST_API_TOKEN')}",
+        "Authorization": f"Zoho-oauthtoken {get('CATALYST_API_TOKEN')}",
         "Content-Type": "application/json",
         "CATALYST-ORG": get("CATALYST_ORG_ID"),
     }

@@ -1,67 +1,101 @@
-import { useState } from 'react'
+import React, { useState } from 'react';
+import { useLang } from '../hooks/useLang';
 
 export default function LoginPage({ onLogin, isLoading, error }) {
-  const [badgeNumber, setBadgeNumber] = useState('')
-  const [password, setPassword] = useState('')
+  const { t } = useLang();
+  const [badgeNumber, setBadgeNumber] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
 
-  const canSubmit =
-    badgeNumber.trim().length > 0 && password.length > 0 && !isLoading
+  const canSubmit = badgeNumber.trim().length > 0 && password.length > 0 && !isLoading;
 
   async function handleSubmit(e) {
-    e.preventDefault()
-    if (!canSubmit) return
-    await onLogin(badgeNumber.trim(), password)
+    e.preventDefault();
+    if (!canSubmit) return;
+    await onLogin(badgeNumber.trim(), password);
   }
 
   return (
-    <div className="login-shell">
-      <form className="login-card" onSubmit={handleSubmit} noValidate>
-        <div className="login-brand">
-          <span className="login-brand__mark" aria-hidden="true">
-            ✱
-          </span>
-          <span className="login-brand__name">Karnataka State Police</span>
-        </div>
+    <div id="login-panel" style={{ display: 'block', opacity: 1, transform: 'translateY(0)' }}>
+      <form onSubmit={handleSubmit} noValidate>
+        <section className="login-card">
+          <h2>{t('Authorized Sign In', 'ಅಧಿಕೃತ ಸೈನ್ ಇನ್')}</h2>
+          
+          <div className="form-group">
+            <label className="form-label">{t('Badge number', 'ಬ್ಯಾಡ್ಜ್ ಸಂಖ್ಯೆ')}</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="KSP-YYYY-NNNN"
+              value={badgeNumber}
+              onChange={(e) => setBadgeNumber(e.target.value)}
+              disabled={isLoading}
+              autoComplete="username"
+              spellCheck="false"
+            />
+          </div>
 
-        <h1 className="login-title">Crime Intelligence Platform</h1>
-        <p className="login-subtitle">
-          Authorized personnel only. Sign in with your station credentials.
-        </p>
+          <div className="form-group">
+            <label className="form-label">{t('Password', 'ಗುಪ್ತಪದ')}</label>
+            <div className="password-wrap">
+              <input
+                className="form-input"
+                type={showPw ? 'text' : 'password'}
+                placeholder={t('Enter your password', 'ನಿಮ್ಮ ಗುಪ್ತಪದವನ್ನು ನಮೂದಿಸಿ')}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="eye-btn"
+                onClick={() => setShowPw(!showPw)}
+                aria-label="Toggle password"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
+          </div>
 
-        <label className="field">
-          <span className="field__label">Badge number</span>
-          <input
-            type="text"
-            value={badgeNumber}
-            onChange={(e) => setBadgeNumber(e.target.value)}
-            autoComplete="username"
-            placeholder="KSP-2019-0042"
-            spellCheck="false"
-            disabled={isLoading}
-          />
-        </label>
+          <button
+            type="submit"
+            className="sign-in-btn"
+            disabled={!canSubmit}
+          >
+            {t(isLoading ? 'Authenticating…' : 'Sign in', isLoading ? 'ದೃಢೀಕರಿಸಲಾಗುತ್ತಿದೆ…' : 'ಸೈನ್ ಇನ್')}
+          </button>
 
-        <label className="field">
-          <span className="field__label">Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            disabled={isLoading}
-          />
-        </label>
+          {error && (
+            <p className="login-error" role="alert" style={{ marginTop: '12px', textAlign: 'center', color: '#c64545', fontSize: '0.875rem' }}>
+              {error}
+            </p>
+          )}
 
-        <button
-          type="submit"
-          className="btn btn--primary btn--block"
-          disabled={!canSubmit}
-        >
-          {isLoading ? 'Authenticating…' : 'Sign in'}
-        </button>
-
-        {error ? <p className="login-error" role="alert">{error}</p> : null}
+          <div className="system-notice">
+            <p>
+              <span>
+                {t(
+                  'This system is for authorized KSP personnel only. Unauthorized access is a punishable offence under the ',
+                  'ಈ ವ್ಯವಸ್ಥೆಯು ಅಧಿಕೃತ ಕೆ.ಎಸ್.ಪಿ ಸಿಬ್ಬಂದಿಗೆ ಮಾತ್ರ ಸೀಮಿತವಾಗಿದೆ. ಅನಧಿಕೃತ ಪ್ರವೇಶವು '
+                )}
+              </span>
+              <a href="#" onClick={(e) => e.preventDefault()}>
+                {t('Information Technology Act, 2000', 'ಮಾಹಿತಿ ತಂತ್ರಜ್ಞಾನ ಕಾಯ್ದೆ, ೨೦೦೦')}
+              </a>
+              <span>
+                {t(
+                  ' and Karnataka Police Act. All sessions are monitored and logged.',
+                  ' ಮತ್ತು ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ಕಾಯ್ದೆಯಡಿ ಶಿಕ್ಷಾರ್ಹ ಅಪರಾಧವಾಗಿದೆ. ಎಲ್ಲಾ ಸೆಷನ್‌ಗಳನ್ನು ಮೇಲ್ವಿಚಾರಣೆ ಮಾಡಲಾಗುತ್ತದೆ ಮತ್ತು ರೆಕಾರ್ಡ್ ಮಾಡಲಾಗುತ್ತದೆ.'
+                )}
+              </span>
+            </p>
+          </div>
+        </section>
       </form>
     </div>
-  )
+  );
 }
