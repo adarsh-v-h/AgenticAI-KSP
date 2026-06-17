@@ -252,7 +252,7 @@ backend/
 
 | Function | Description |
 |----------|-------------|
-| `_llm_headers() -> dict` | Returns `{"Authorization": "Bearer ...", "Content-Type": "application/json", "CATALYST-ORG": "..."}` — required on every Catalyst API call. |
+| `_llm_headers() -> dict` | Returns `{"Authorization": "Zoho-oauthtoken ...", "Content-Type": "application/json", "CATALYST-ORG": "..."}` — required on every Catalyst API call. |
 | `ping_model(model_key) -> bool` | Sends `"Say OK."` to the given model. Returns `True` on non-empty 200 response, `False` otherwise. Never raises — used by health check. Timeout: 120s. |
 | `call_llm(model_key, prompt, system_prompt, max_tokens) -> str` | **Core LLM call.** Sends a POST to `QUICKML_LLM_URL` with payload: `{model, prompt, system_prompt, max_tokens, temperature: 0.1, top_p: 0.95, top_k: 40}`. Returns the `response` field from JSON. Raises `LLMError` on: missing config, timeout (180s), HTTP error, non-200 status, invalid JSON, or empty response. |
 
@@ -268,7 +268,7 @@ backend/
 ```
 Response: `{"response": "generated text"}`
 
-**Key difference from standard chat APIs:** Uses `prompt`/`system_prompt` fields, NOT a `messages` array. Uses `Bearer` auth, NOT `Zoho-oauthtoken`. Requires `CATALYST-ORG` header.
+**Key difference from standard chat APIs:** Uses `prompt`/`system_prompt` fields, NOT a `messages` array. Uses `Zoho-oauthtoken` auth, NOT `Bearer`. Requires `CATALYST-ORG` header.
 
 ---
 
