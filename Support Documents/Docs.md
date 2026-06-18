@@ -20,18 +20,23 @@
 
 ## 1. System Overview
 
-The application is a **natural-language-to-SQL chatbot** for Karnataka State Police. An officer types a question in plain English, the system converts it to a MySQL SELECT query via an LLM, executes it against a crime database, formats the raw results into a human-readable answer via a second LLM, and streams the response back token-by-token over SSE.
+The application is a **natural-language-to-SQL chatbot** for Karnataka State Police. An officer types a question in plain English; the system first **routes** the message — deciding whether it needs a fresh database query or can be answered directly from the recent conversation — then either converts it to a MySQL SELECT query via an LLM, executes it against a crime database, and formats the raw results into a human-readable answer via a second LLM, OR answers it directly from context. The response streams back token-by-token over SSE.
 
-**Two LLMs are used in sequence:**
+**Two LLMs are used:**
 1. **Qwen 2.5-7B Coder** (`MODEL_SQL`) — generates SQL from natural language
-2. **Qwen 2.5-14B Instruct** (`MODEL_ANSWER`) — formats raw DB results into a natural-language answer
+2. **Qwen 2.5-14B Instruct** (`MODEL_ANSWER`) — three jobs: (a) **intent routing** (SQL vs DIRECT), (b) formatting raw DB results into a natural-language answer, and (c) **direct conversational answers** for follow-ups/insights/general questions that need no SQL
 
 Both are called via the Catalyst QuickML HTTP API. No external LLM providers (OpenAI, Anthropic, etc.) are used.
+
+**Two answer paths (see [Section 4.6](#46-intent-routing--direct-answers)):**
+- **SQL path** — fresh data requests run the full NL→SQL→execute→format chain.
+- **DIRECT path** — follow-ups about already-retrieved data ("which of those is open?"), requests for insight, greetings, and general questions are answered straight from the conversation + the most recent result set, with **no SQL and no DB hit**. The most recent answer's table is cached in conversation history (a bounded snapshot) so the model can discuss the data instead of re-querying it.
 
 **Key constraints enforced in code:**
 - Every SQL query must be a SELECT — validated before execution
 - Maximum 2 SQL generation attempts (self-correction loop)
 - Conversation history limited to 10 turns per session
+- Sessions and messages are persisted to MySQL (Catalyst Data Store); rich result data goes to NoSQL — see [Section 4.7](#47-persistent-chat-storage)
 - All secrets loaded from `.env`, never hardcoded
 
 ---
@@ -45,27 +50,29 @@ backend/
 ├── config/
 │   └── settings.py            # Environment variable loading and validation
 ├── db/
-│   ├── connection.py          # MySQL connection pool (aiomysql)
-│   ├── schema.sql             # DDL for all 13 tables
+│   ├── connection.py          # MySQL connection pool (aiomysql) + execute_query / execute_write
+│   ├── schema.sql             # DDL for all tables (incl. chat_sessions, chat_messages)
 │   ├── seed.py                # Synthetic data generator (200+ FIRs)
+│   ├── chat_store.py          # Persistent sessions + messages (MySQL) + rich data (NoSQL)
 │   └── schema_catalog.py      # Table metadata, schema builder, few-shot bank
 ├── llm/
 │   ├── client.py              # HTTP client for Catalyst QuickML
 │   ├── sql_generator.py       # SQL generation with retry loop
-│   ├── answer_formatter.py    # Result-to-text formatting
+│   ├── answer_formatter.py    # Result-to-text formatting + intent router + direct answers
 │   └── prompts.py             # All prompts and prompt builders
 ├── pipeline/
-│   ├── query_pipeline.py      # Main orchestrator (NL → SQL → answer)
+│   ├── query_pipeline.py      # Main orchestrator (route → NL → SQL → answer, or DIRECT)
 │   ├── sql_validator.py       # SQL safety validation
 │   ├── media_resolver.py      # Evidence media lookup
 │   └── schema_linker.py       # Keyword-based table selector
 ├── conversation/
-│   ├── history.py             # Conversation history (NoSQL + in-memory fallback)
+│   ├── history.py             # Conversation history + recent-table snapshot (NoSQL + in-memory fallback)
 │   └── session_store.py       # Session metadata + title generation (NoSQL + fallback)
 ├── auth/
 │   └── simple_auth.py         # JWT auth (dev) with Catalyst Auth swap path
 └── routers/
     ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
+    ├── export.py              # POST /api/chat/sessions/{id}/export (PDF via SmartBrowz)
     └── auth.py                # POST /api/auth/login + /api/auth/logout
 ```
 
@@ -91,13 +98,15 @@ backend/
 2. `create_pool()` → MySQL connection pool (minsize=3, maxsize=10)
 3. DB probe → `SELECT 1`, sets `app.state.db_ok`
 4. NoSQL probe → confirms Catalyst NoSQL reachable
-5. Register `auth_router` and `chat_router`
+5. Register `auth_router`, `chat_router`, and `export_router`
 
 **App metadata:**
 - `title`: `"KSP Crime Intelligence API"`
-- `version`: `"0.3.0-step3"`
+- `version`: `"0.4.0-step4"`
 - `docs_url`: `"/docs"` (Swagger UI available during dev)
 - `redoc_url`: `None` (ReDoc disabled)
+
+**Registered routers:** `auth_router`, `chat_router`, and `export_router` (PDF export).
 
 **CORS config:** Only allows the single origin from `ALLOWED_ORIGINS` env var. Methods: GET, POST. Headers: Authorization, Content-Type.
 
@@ -138,6 +147,7 @@ backend/
 | `create_pool() -> aiomysql.Pool` | Creates the connection pool with `host`, `port`, `user`, `password`, `db` from env vars. Settings: `minsize=3`, `maxsize=10`, `autocommit=True`, `connect_timeout=5`. Stores in `_pool`. Called once during FastAPI lifespan. |
 | `get_pool() -> aiomysql.Pool` | Returns the existing pool. Raises `RuntimeError` if called before `create_pool()`. |
 | `execute_query(sql, params) -> list[dict]` | **Security-critical function.** (1) Checks `sql.strip().upper().startswith("SELECT")` — raises `ValueError` if not. (2) Acquires a connection from the pool. (3) Executes with `aiomysql.DictCursor` (returns dicts, not tuples). (4) Uses `asyncio.wait_for` with a 5-second timeout. (5) Releases connection in `finally` block. Returns `list[dict]` where keys are column names. |
+| `execute_write(sql, params) -> int` | INSERT/UPDATE counterpart to `execute_query`. Refuses anything starting with `SELECT` (raises `ValueError` — use `execute_query` for reads). Commits and returns `cur.lastrowid` for INSERTs or `cur.rowcount` for UPDATEs. Same pool, 5-second timeout. Added in Step 4 for persistent chat storage (`chat_store.py`). |
 | `close_pool()` | Closes all connections in the pool. Called during FastAPI shutdown. |
 
 **Security enforcement:** `execute_query` is the second line of defense (after `sql_validator.py`). Even if validation is bypassed, this function refuses to run anything that doesn't start with `SELECT`.
@@ -146,7 +156,7 @@ backend/
 
 ### 3.4 `backend/db/schema.sql`
 
-**Purpose:** DDL statements for all 13 database tables. Idempotent (`CREATE TABLE IF NOT EXISTS`). Run once against the Catalyst Data Store.
+**Purpose:** DDL statements for all database tables. Idempotent (`CREATE TABLE IF NOT EXISTS`). Run once against the Catalyst Data Store. The original 13 domain tables plus 2 chat-persistence tables added in Step 4 (`chat_sessions`, `chat_messages`).
 
 **Tables defined:**
 
@@ -165,6 +175,8 @@ backend/
 | `cases_drug_offense` | Drug offense details | `drug_id` (PK), `fir_id` (FK, UNIQUE), `drug_type`, `quantity_seized` |
 | `case_relationships` | Links between entities for network graph | `rel_id` (PK), `entity_a_type`/`entity_a_id`, `entity_b_type`/`entity_b_id`, `relationship_type` (ENUM of 6 types) |
 | `evidence_media` | Media files attached to FIRs (Stratus) | `media_id` (PK), `fir_id` (FK), `media_type` (ENUM), `stratus_folder_id`, `stratus_file_id` |
+| `chat_sessions` | One row per conversation (Step 4) | `session_id` (PK, VARCHAR 36), `officer_id` (FK→officers), `title`, `created_at`, `updated_at` (auto-update), `message_count`, `is_active`; INDEX `(officer_id, updated_at)` |
+| `chat_messages` | One row per turn — user OR assistant (Step 4) | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `created_at`; INDEX `(session_id, created_at)` |
 
 **Design rationale:** Case-type tables are separate (not one giant table) because: (1) smaller tables mean faster queries without full-scan WHERE clauses on type, (2) the schema linker can inject only the relevant table, (3) each case type has distinct columns.
 
@@ -315,13 +327,17 @@ Attempt 2:
 
 ### 3.9 `backend/llm/answer_formatter.py`
 
-**Purpose:** Takes raw database results and formats them into a natural-language answer using Qwen 14B Instruct.
+**Purpose:** Wraps the Qwen 14B Instruct model for three jobs: formatting DB results into prose, the intent router, and direct conversational answers.
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `format_answer(question, results, media_attachments, history) -> str` | Builds the answer prompt via `build_answer_prompt()`, calls `call_llm("MODEL_ANSWER", ...)` with `max_tokens=1500`. Returns the formatted text. Empty results are still sent to the LLM so it produces a clean "no records" response. |
+| `format_answer(question, results, media_attachments, history) -> str` | Builds the answer prompt via `build_answer_prompt()`, calls `call_llm("MODEL_ANSWER", ...)` with `max_tokens=8000` (QuickML counts input+output against this, and up to 50 result rows are embedded). Returns the formatted text. Empty results are still sent to the LLM so it produces a clean "no records" response. Bubbles `LLMError` up to the pipeline. |
+| `route_intent(question, history, has_recent_data) -> str` | **Intent router.** Tiny 14B classification call returning `"SQL"` or `"DIRECT"`. `max_tokens=2048` (the one-word answer is small, but QuickML counts the prompt against the budget). **Never raises** — defaults to `"SQL"` on any failure, so routing degrades to the original always-SQL behavior. |
+| `generate_direct_answer(question, history, recent_table) -> str` | **Direct-answer path.** Answers WITHOUT SQL using the recent conversation + the most recent result set. `max_tokens=8000`. Bubbles `LLMError` up to the pipeline for fallback handling. |
+
+> **Note:** `format_answer` previously used `max_tokens=1500`; it is now `8000` so the prompt (which can embed up to 50 result rows) plus the generated summary both fit within QuickML's combined input+output budget.
 
 ---
 
@@ -334,19 +350,25 @@ Attempt 2:
 | Name | Used by | Key rules |
 |------|---------|-----------|
 | `SQL_SYSTEM_PROMPT` | SQL generation | Only SELECT; only provided schema; use JOINs with fir_master; return raw SQL only (no markdown/backticks); `CANNOT_ANSWER` if unanswerable; LIMIT 50; escape `rank` with backticks |
-| `ANSWER_SYSTEM_PROMPT` | Answer formatting | Be concise; markdown tables for multi-row; mention media; never speculate; "case" not "row" |
+| `ANSWER_SYSTEM_PROMPT` | Answer formatting | Be concise; **never** emit a markdown table (the UI renders rows separately) — prose summary only; mention media; never speculate; "case" not "row" |
 | `CORRECTION_SYSTEM_PROMPT` | SQL correction | Fix the broken SQL; return only corrected SQL; no explanation |
+| `ROUTER_SYSTEM_PROMPT` | Intent router | Reply with exactly one word — `SQL` or `DIRECT`. DIRECT for follow-ups about already-shown data (referential words: "those", "them", "that", "the third one"…), filtering/ranking/insight over results already in context, greetings, and general questions. SQL when fresh crime data is needed. |
+| `DIRECT_ANSWER_SYSTEM_PROMPT` | Direct answers | Answer from conversation + provided results only; **never fabricate** facts/numbers/trends/percentages not present in the data (explicit anti-hallucination rule); no markdown tables; concise professional prose. |
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `_format_history_for_prompt(history, max_turns=2)` | Compresses conversation history into a short context block. Pairs user/assistant turns. Truncates assistant responses to 100 chars. Returns empty string if no history. |
-| `build_sql_prompt(question, schema, few_shots, history) -> (system_prompt, user_prompt)` | Builds the two-tuple for the SQL LLM call. System prompt is kept short (7B Coder struggles with long system prompts). User prompt structure differs based on history: **with history**, the prompt includes `"Previous context:\n{history_block}\n\nCurrent question: {question}"`; **without history**, it uses `"Question: {question}"`. Both include the schema and few-shot examples. |
-| `_truncate_for_answer(results, max_rows=50, max_field_chars=200)` | Trims result set to 50 rows and clips string fields to 200 chars for the answer prompt. Non-string values (int, decimal, date, None) pass through unmodified — only strings are truncated. |
+| `_format_history_for_prompt(history, max_turns=2, max_chars=100)` | Compresses conversation history into a short context block. Pairs user/assistant turns. Truncates assistant responses to `max_chars`. Returns empty string if no history. |
+| `_format_history_for_sql_prompt(history, max_turns=2)` | History block for the SQL generator. Includes the prior turn's stored SQL so follow-ups can preserve filter clauses. |
+| `_format_officer_for_prompt(officer)` | Builds the officer-identity block so first-person questions ("cases I am handling") resolve to `investigating_officer_id`. |
+| `build_sql_prompt(question, schema, few_shots, history, officer=None) -> (system_prompt, user_prompt)` | Builds the two-tuple for the SQL LLM call. System prompt kept short (7B Coder struggles with long system prompts). Includes schema, few-shots, optional officer block, and (with history) a "Previous context" block. |
+| `_truncate_for_answer(results, max_rows=50, max_field_chars=200)` | Trims result set to `max_rows` and clips long string fields. Non-string values pass through unmodified. Reused by both the answer prompt and the direct-answer prompt. |
 | `_summarize_media(media_refs)` | Builds a summary string like "3 attachment(s): 2 image, 1 video". |
-| `build_answer_prompt(question, results, media_refs, history) -> (system_prompt, user_prompt)` | Builds the answer prompt. User prompt contains: optional history, question, truncated results as JSON, media summary. |
-| `build_correction_prompt(original_sql, error, schema) -> (system_prompt, user_prompt)` | Builds the correction prompt. Includes the bad SQL, the validation error message, and the schema for reference. |
+| `build_answer_prompt(question, results, media_refs, history) -> (system_prompt, user_prompt)` | Builds the answer prompt: optional history, question, truncated results as JSON, media summary. |
+| `build_correction_prompt(original_sql, error, schema, officer=None) -> (system_prompt, user_prompt)` | Builds the correction prompt: the bad SQL, the error message, optional officer block, and schema. |
+| `build_router_prompt(question, history, has_recent_data) -> (system_prompt, user_prompt)` | Builds the tiny router prompt: a compressed history slice, a flag stating whether recent results are in context, and the latest message. Kept small for a fast decision. |
+| `build_direct_answer_prompt(question, history, recent_table) -> (system_prompt, user_prompt)` | Builds the direct-answer prompt: a richer history slice (`max_turns=4`, `max_chars=400`) plus the most recent result set (up to 30 rows as JSON) when available. |
 
 ---
 
@@ -371,22 +393,25 @@ Attempt 2:
 | `_has_fir_id(results)` | Checks if the first result row contains a `fir_id` key |
 | `collect_fir_ids(results)` | Imported from `media_resolver` — extracts unique integer `fir_id` values from all result rows. Shared so the extraction logic lives in one place. |
 | `_check_graph_available(fir_ids)` | Runs a COUNT query against `case_relationships` to check if any of the given FIRs have relationship data. Returns `True` if count > 0. |
-| `run_pipeline(question, history) -> PipelineResponse` | **The main pipeline.** Never raises — every error is caught and converted to a user-friendly `answer_text` + `error` field. Steps: |
+| `_most_recent_table(history)` | Walks history newest-first and returns the most recent assistant turn's stored table snapshot (or `[]`). Lets a follow-up be answered from the last result set without re-querying. |
+| `_run_direct(question, history, recent_table)` | Runs the DIRECT path — calls `generate_direct_answer()` and returns a `PipelineResponse` with only `answer_text` filled. On `LLMError`/exception, returns a friendly error response (never raises). |
+| `run_pipeline(question, history, officer=None) -> PipelineResponse` | **The main pipeline.** Never raises — every error is caught and converted to a user-friendly `answer_text` + `error` field. |
 
 **Pipeline steps (in `run_pipeline`):**
 
+0. **Intent routing** — `_most_recent_table(history)` recovers the last result set. **Optimization:** the router only runs when there *is* prior history (a brand-new chat with no history skips the router LLM call and goes straight to SQL — there's nothing to answer "directly" from yet). When history exists, `route_intent()` returns `SQL` or `DIRECT`; a `DIRECT` decision calls `_run_direct()` and returns immediately (no SQL, no DB).
 1. **Schema linker** — `select_relevant_tables(question)` → list of table names
-2. **SQL generation** — `generate_sql(question, tables, history)` → SQL string (with retry loop)
-3. **Execute SQL** — `execute_query(sql)` → `list[dict]`
+2. **SQL generation** — `generate_sql(question, tables, history, officer)` → `(SQL, attempts_used)` (with retry loop)
+3. **Execute SQL** — `execute_query(sql)` → `list[dict]` (one corrective retry on MySQL error, within the shared `MAX_ATTEMPTS` budget)
 4. **Media resolver** — `resolve_media(results)` → only if results have `fir_id` column
 5. **Graph probe** — `_check_graph_available(fir_ids)` → boolean
 6. **Answer formatting** — `format_answer(question, results, media, history)` → text
 
 **Error handling in pipeline:**
-- `CannotAnswerError` → friendly "can't answer that" message
+- `CannotAnswerError` → **falls back to the DIRECT path** (`_run_direct`) so general questions and insights still get a real conversational answer instead of a canned error
 - `SQLGenerationError` → "couldn't translate to valid query" message
 - `LLMError` → "service unavailable" message
-- DB errors → "database couldn't run that query" message
+- DB errors → generic "couldn't run that query" message (raw MySQL details are logged, never surfaced)
 - Answer formatter failure → fallback to "Found N records"
 
 ---
@@ -457,6 +482,7 @@ Attempt 2:
 **Constants:**
 - `MAX_TURNS = 10` — last 10 messages (~5 user + 5 assistant turns)
 - `_NOSQL_TIMEOUT = 5.0` — seconds
+- `_TABLE_SNAPSHOT_ROWS = 30` — max rows of an assistant turn's result set kept in history for DIRECT follow-up answers (bounds the stored NoSQL document size)
 
 **Module-level state:**
 - `_local_history: dict[str, list[dict]]` — in-memory fallback dict, keyed by session_id
@@ -473,7 +499,7 @@ Attempt 2:
 | `_local_set(session_id, turns)` | Thread-safe write to `_local_history`, trims to `MAX_TURNS` |
 | `_local_clear(session_id)` | Thread-safe delete from `_local_history` |
 | `get_history(session_id) -> list[dict]` | Fetches history. Tries NoSQL first. On success: parses JSON from `data.history` field. On 404 or error: falls back to `_local_get()`. Never raises. |
-| `save_turn(session_id, user_message, assistant_message)` | Appends a user+assistant turn. Updates in-memory first (always). Then PUTs to NoSQL. If PUT returns 404 (document doesn't exist), POSTs to create it. Never raises. |
+| `save_turn(session_id, user_message, assistant_message, assistant_sql=None, assistant_table=None)` | Appends a user+assistant turn. Updates in-memory first (always). Then PUTs to NoSQL. If PUT returns 404 (document doesn't exist), POSTs to create it. `assistant_sql` is stored on the assistant turn so follow-up SQL generation can preserve filter clauses; `assistant_table` stores a bounded (`_TABLE_SNAPSHOT_ROWS`) snapshot of the result set so the next turn can answer follow-ups via the DIRECT path **without re-querying**. Never raises. |
 | `clear_history(session_id)` | Deletes from both NoSQL and in-memory. Never raises. |
 | `init_nosql_table()` | Probes NoSQL by fetching a non-existent document (`__probe__`). Status 200 or 404 means the service is alive. Called once at startup. Never raises. |
 
@@ -503,6 +529,29 @@ Attempt 2:
 | `update_session(session_id, updates) -> dict \| None` | Merges `updates` into an existing document and PUTs it (creating it on 404). Returns `None` when no session exists. Never raises. |
 | `list_sessions(officer_id) -> list[dict]` | Returns all of an officer's sessions ordered by `updated_at` DESC. Filters/sorts in Python since NoSQL may not support filtered queries. Never raises. |
 | `generate_title(message) -> str` | Derives a 3–8 word, ≤60-char human-readable title from the first user message; falls back to `"New chat"`. |
+
+> **Step 4 note:** As of Step 4, **MySQL (`chat_store.py`) is the source of truth** for the session list and message history. `session_store.py` (NoSQL `session_metadata`) is still written to by `history.py`'s metadata sync but is no longer the primary read path for the sidebar. See [Section 9.8](#98-nosql-session_metadata--superseded-by-mysql).
+
+---
+
+### 3.16b `backend/db/chat_store.py`
+
+**Purpose:** Persistent chat storage added in Step 4. Sessions and per-message metadata live in **MySQL** (Catalyst Data Store); rich result data (table snapshots, media) for a message lives in **NoSQL**, keyed by message id. All functions are non-fatal — they log and return a safe default on error so a storage outage never breaks the chat.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `create_session(session_id, officer_id, title) -> bool` | `INSERT IGNORE` a new `chat_sessions` row (title clipped to 60 chars). Returns `True`/`False`. |
+| `update_session_timestamp(session_id, increment_count=True)` | Touches `updated_at` and (by default) bumps `message_count` by 2 (one user + one assistant turn). Called after every successful pipeline run. |
+| `get_sessions_for_officer(officer_id, limit=30) -> list[dict]` | Loads the officer's active sessions newest-first (`ORDER BY updated_at DESC`), datetimes serialized to ISO strings. Backs the sidebar. Returns `[]` on error. |
+| `verify_session_owner(session_id, officer_id) -> bool` | Ownership check used before loading messages or exporting. Returns `False` if not found or owned by another officer. |
+| `save_message_pair(session_id, question, answer_text, sql_generated, has_table, has_media, graph_available, table_data, media_attachments) -> int \| None` | Inserts the user row + assistant row; when the assistant turn has a table/media, saves the rich data to NoSQL keyed by the assistant `message_id`. Returns the assistant `message_id`. |
+| `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); hydrates `table_data`/`media_attachments` from NoSQL for assistant messages that carry them. |
+| `save_rich_data(message_id, table_data, media_attachments)` | Writes `{table_data, media_attachments}` to NoSQL `message_rich_data` under key `msg_rich_{message_id}`. Non-fatal. |
+| `load_rich_data(message_id) -> dict \| None` | Reads and parses the rich-data document for a message. Returns `None` on miss/error. |
+
+> **Environment note:** The NoSQL `message_rich_data` round-trip depends on a reachable Catalyst NoSQL endpoint + valid token. When NoSQL is unavailable the MySQL persistence still works fully; only the rich table/media hydration on reload degrades (rows come back empty until NoSQL is reachable).
 
 ---
 
@@ -542,20 +591,20 @@ Attempt 2:
 | `ChatResponse` | `answer_text`, `table_data`, `media_attachments`, `sql_generated`, `graph_available`, `error` |
 | `SessionMetadata` | `session_id`, `title`, `created_at`, `updated_at`, `message_count` |
 | `SessionListResponse` | `sessions: list[SessionMetadata]` |
-| `Message` | `message_id`, `role`, `content`, `timestamp`, `sql?` |
-| `MessagesResponse` | `messages: list[Message]`, `has_more: bool` |
+| `Message` | `message_id` (int\|str), `role`, `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data`, `media_attachments`, `created_at` |
+| `MessagesResponse` | `messages: list[Message]` |
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `_error(status_code, code, error)` | Builds an `HTTPException` whose `detail` follows the structured `{"error", "code"}` shape and logs it to stderr. |
 | `_sse(event) -> str` | Formats a dict as an SSE `data:` line with `\n\n` terminator |
-| `list_chat_sessions(officer)` | `GET /api/chat/sessions` — lists the officer's sessions newest-first. Always HTTP 200 (NoSQL failures fall back to in-memory). |
-| `create_chat_session(officer)` | `POST /api/chat/sessions` — creates a new session, returns `SessionMetadata` with HTTP 201. |
-| `get_session_messages(session_id, limit, before_message_id, officer)` | `GET /api/chat/sessions/{id}/messages` — paginated, newest-first message page. 404 only when metadata exists and belongs to another officer (legacy sessions without metadata are allowed). |
-| `chat(request, officer)` | `POST /api/chat` — non-streaming endpoint (testing/fallback). Fetches history, runs pipeline, saves turn. Always returns HTTP 200 with `ChatResponse`. |
-| `chat_stream(question, session_id, officer)` | `GET /api/chat/stream` — SSE streaming endpoint. Protected by `get_current_officer_sse` (header or query param). Returns `StreamingResponse` with `text/event-stream` media type. |
+| `_persist_turn(session_id, officer, question, result)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message, saves the user+assistant pair via `chat_store.save_message_pair` (rich data to NoSQL when present), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. Called after `save_turn` in both chat endpoints. |
+| `list_chat_sessions(officer)` | `GET /api/chat/sessions` — lists the officer's sessions newest-first **from MySQL** (`chat_store.get_sessions_for_officer`). Always HTTP 200 (returns `[]` on DB error). |
+| `create_chat_session(officer)` | `POST /api/chat/sessions` — creates a NoSQL `session_metadata` doc and returns `SessionMetadata` (HTTP 201). **Currently unused by the UI** (see [9.5](#95-backend-created-sessions-on-new-chat--deprecated-flow-change)). |
+| `get_session_messages(session_id, officer)` | `GET /api/chat/sessions/{id}/messages` — verifies ownership via `chat_store.verify_session_owner` (404 on mismatch/not-found), then returns all messages oldest-first from MySQL + NoSQL rich data. **No pagination** (the prior `limit`/`before_message_id` cursor flow was removed — see [9.9](#99-message-pagination--removed)). |
+| `chat(request, officer)` | `POST /api/chat` — non-streaming endpoint (testing/fallback). Fetches history, runs pipeline, `save_turn` (with `assistant_table`), then `_persist_turn`. Always returns HTTP 200 with `ChatResponse`. |
+| `chat_stream(question, session_id, officer)` | `GET /api/chat/stream` — SSE streaming endpoint. Protected by `get_current_officer_sse` (header or query param). After the pipeline, `save_turn` (with `assistant_table`) then `_persist_turn`. Returns `StreamingResponse` with `text/event-stream`. |
 | `_tokenize(text) -> list[str]` | Splits text into space-preserving tokens for word-by-word streaming. Each token (except last) includes trailing space. |
 
 **SSE event types emitted by `chat_stream`:**
@@ -598,6 +647,21 @@ Attempt 2:
 
 ---
 
+### 3.20 `backend/routers/export.py`
+
+**Purpose:** PDF export of a chat session (Step 4). Renders the conversation as print-ready HTML and converts it to PDF via Catalyst SmartBrowz, with a graceful HTML fallback.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `_build_html(officer_name, badge_number, title, messages) -> str` | Builds a styled, self-contained HTML document: a header (officer + badge + session title + export date), each message (user bubbles right-aligned, assistant blocks with any result table rendered, max 50 rows), and a confidential footer. |
+| `export_session_pdf(session_id, officer)` | `POST /api/chat/sessions/{id}/export` — (1) verifies ownership via `verify_session_owner` (404 on mismatch); (2) loads messages via `get_messages_for_session` (400 if none); (3) fetches session title + officer name/badge from MySQL; (4) builds HTML; (5) POSTs to `SMARTBROWZ_URL` for a PDF. On success streams `application/pdf` (`KSP-Chat-{id}.pdf`). **Fallback:** if SmartBrowz returns non-200 or errors, streams the raw HTML as a downloadable `.html` so the export button always works. |
+
+> **Note:** `SMARTBROWZ_URL` was previously a reserved/optional env var; it is now actively read by this router. The exact SmartBrowz request shape should be verified against Catalyst docs before a production demo — the HTML fallback covers the case where it differs.
+
+---
+
 ## 4. End-to-End Feature Flows
 
 ### 4.1 User Login
@@ -632,6 +696,12 @@ Frontend ChatWindow.jsx: handleSend()
         → conversation/history.py: get_history(session_id)
           → HTTP GET to Catalyst NoSQL (or in-memory fallback)
         → pipeline/query_pipeline.py: run_pipeline(question, history)
+          
+          Step 0: Intent Router (only when history exists)
+            → llm/answer_formatter.py: route_intent(question, history, has_recent_data)
+              → "DIRECT" → generate_direct_answer(...) and RETURN (no SQL, no DB)
+              → "SQL"    → continue below
+              (a brand-new chat with no history skips this step → straight to SQL)
           
           Step 1: Schema Linker
             → pipeline/schema_linker.py: select_relevant_tables(question)
@@ -731,7 +801,7 @@ Turn 2: "Now show only the open ones"
 1. `get_history(session_id)` → tries NoSQL, falls back to in-memory
 2. History is passed to `generate_sql()` → compressed to last 2 turns in `_format_history_for_prompt()`
 3. History is passed to `format_answer()` → same compression
-4. After pipeline completes, `save_turn(session_id, question, answer)` → updates both NoSQL and in-memory
+4. After pipeline completes, `save_turn(session_id, question, answer, assistant_sql, assistant_table)` → updates both NoSQL and in-memory; `assistant_table` stores a bounded result snapshot so the next turn's DIRECT path can answer without re-querying. `_persist_turn(...)` then writes the session + message pair to MySQL (see [4.7](#47-persistent-chat-storage))
 
 ---
 
@@ -751,6 +821,80 @@ Attempt 2 (correction):
   Validator: PASS
   → Execute and return results
 ```
+
+---
+
+### 4.6 Intent Routing & Direct Answers
+
+Every turn that has prior conversation history is first classified by the **intent router** (a small 14B call) before any SQL work:
+
+```
+Turn 1: "How many theft cases are open?"  (no history)
+  → router SKIPPED (no history → nothing to answer directly from)
+  → SQL path: generate → execute → format
+  → answer + table_data; the table snapshot (≤30 rows) is saved into history
+
+Turn 2: "Which of those are in Koramangala?"  (history present)
+  → route_intent() → "DIRECT"  (referential "those" + recent results in context)
+  → generate_direct_answer(question, history, recent_table)
+  → answered straight from the cached rows — NO SQL, NO DB hit
+
+Turn 3: "Thanks, what else can you help with?"  (history present)
+  → route_intent() → "DIRECT"  (general question)
+  → conversational answer
+```
+
+**Decision rules** (`ROUTER_SYSTEM_PROMPT`): DIRECT for follow-ups that refer to
+already-shown data, filtering/ranking/insight over results already in context,
+greetings, and general questions; SQL when fresh crime data is needed.
+
+**Why this exists:** (1) avoids regenerating/re-running SQL when the answer is
+already in context, (2) lets the assistant give *insight* about retrieved data
+rather than just re-displaying a table, and (3) handles general/greeting messages
+that previously produced a "can't generate SQL" error.
+
+**Key safeguards:**
+- **No-history optimization:** the router is skipped entirely on a brand-new chat's first message (nothing to answer directly from), saving one LLM round-trip on the most common case. Empty-history turns go straight to SQL.
+- **Graceful fallback:** `route_intent()` never raises — any router failure defaults to `SQL`, preserving the original behavior.
+- **CANNOT_ANSWER → DIRECT:** if the SQL chain decides the question can't be answered from the DB, the pipeline falls back to a direct conversational answer instead of a canned error.
+- **Anti-hallucination:** `DIRECT_ANSWER_SYSTEM_PROMPT` forbids inventing facts/numbers/trends not present in the provided data — for a thin result (e.g. a single count) it states what the data shows and asks the officer to request a new query rather than fabricating an "insight".
+
+**Context plumbing:** `save_turn(..., assistant_table=result.table_data)` stores a
+bounded snapshot (`_TABLE_SNAPSHOT_ROWS = 30`) of each answer's result set on the
+assistant turn. On the next turn, `_most_recent_table(history)` recovers it and
+feeds it to the direct-answer prompt, so the model discusses real rows without a
+re-query.
+
+---
+
+### 4.7 Persistent Chat Storage
+
+Sessions and messages survive page reloads via MySQL (Step 4):
+
+```
+After a successful pipeline run (POST /api/chat or GET /api/chat/stream):
+  → save_turn(...)                         # conversation history → NoSQL + in-memory
+  → _persist_turn(session_id, officer, question, result)
+      → if first message of session: chat_store.create_session(...)   # chat_sessions row
+      → chat_store.save_message_pair(...)  # user row + assistant row → chat_messages (MySQL)
+          → if has_table/has_media: save_rich_data(...)               # → NoSQL message_rich_data
+      → chat_store.update_session_timestamp(...)                      # bump updated_at + message_count
+
+On login / sidebar load:
+  → GET /api/chat/sessions      → chat_store.get_sessions_for_officer(officer_id)   # MySQL, newest-first
+
+On opening a past session:
+  → GET /api/chat/sessions/{id}/messages
+      → verify_session_owner(...)          # 404 if not owned
+      → get_messages_for_session(...)      # MySQL rows + NoSQL rich data (table/media)
+
+Export:
+  → POST /api/chat/sessions/{id}/export    # build HTML → SmartBrowz PDF (HTML fallback)
+```
+
+**Source of truth:** MySQL (`chat_sessions`, `chat_messages`) for the session list
+and message history; NoSQL (`message_rich_data`) for per-message table/media
+snapshots. Ownership is enforced by `officer_id` on every read/export.
 
 ---
 
@@ -786,7 +930,7 @@ frontend/
     │   ├── MessageBubble.jsx # Single message renderer (+ markdown-table stripping)
     │   ├── TableRenderer.jsx # HTML table from JSON data
     │   ├── SessionList.jsx   # Scrollable session list (loading/empty/error states)
-    │   ├── SessionItem.jsx   # One session row (title + relative timestamp + count)
+    │   ├── SessionItem.jsx   # One session row (title + timestamp + count + export button)
     │   ├── OfficerRow.jsx    # Sidebar-bottom officer avatar + sign-out popup
     │   └── Icons.jsx         # Inline SVG icon set (no icon library)
     ├── hooks/
@@ -797,10 +941,6 @@ frontend/
     └── test/
         └── setup.js          # Vitest/jsdom test setup
 ```
-
-> **Orphaned components:** `NewChatButton.jsx` and `OfficerInfo.jsx` still exist
-> on disk but are no longer imported anywhere after the sidebar redesign. See
-> [Section 9 — Removed / Deprecated Stuff](#9-removed--deprecated-stuff).
 
 ---
 
@@ -996,8 +1136,9 @@ because `EventSource` can't set custom headers (needed for JWT auth).
 |--------|-------------|
 | `AuthError` (class) | Thrown when the backend rejects a request with HTTP 401, so callers can detect an expired session and trigger logout. |
 | `fetchSessions()` | `GET /api/chat/sessions` — returns the officer's sessions (`{session_id, title, created_at, updated_at, message_count}[]`). Throws `AuthError` on 401, `Error` on other failures. |
-| `createSession()` | `POST /api/chat/sessions` — creates a backend-owned session and returns its metadata. **Currently unused by `ChatWindow.jsx`** (new chats are provisional client-side until the first prompt — see 6.7), but retained as a ready API for when server-side session creation is reintroduced. |
-| `fetchMessages(sessionId, limit=50, beforeMessageId=null)` | `GET /api/chat/sessions/{id}/messages?limit=&before_message_id=` — returns `{messages, has_more}`. Backend returns newest-first; callers handle display ordering. Throws `AuthError` on 401, `Error` on 404 / other failures. |
+| `createSession()` | `POST /api/chat/sessions` — creates a backend-owned session. **Currently unused by the UI** (new chats are provisional client-side until the first prompt — see 6.7); retained as a ready API. |
+| `fetchMessages(sessionId)` | `GET /api/chat/sessions/{id}/messages` — returns `{messages}` (full list, oldest-first). The earlier `limit`/`before_message_id` pagination args were removed when the backend switched to returning the full message list (see [9.9](#99-message-pagination--removed)). Throws `AuthError` on 401, `Error` on 404 / other failures. |
+| `exportSession(sessionId)` | `POST /api/chat/sessions/{id}/export` — fetches the export blob (PDF or HTML fallback) and triggers a browser download, taking the filename from `Content-Disposition`. Throws `AuthError` on 401. |
 
 **Helpers (internal):**
 
@@ -1049,7 +1190,7 @@ because `EventSource` can't set custom headers (needed for JWT auth).
 
 **Purpose:** The main application shell once authenticated. Renders the **two-panel
 layout** (collapsible sidebar + main content) and owns all chat state, session
-management, streaming, and pagination logic. This is the largest frontend file.
+management, and streaming logic. This is the largest frontend file.
 
 **Props:** `{ officer, onLogout }`
 
@@ -1086,7 +1227,6 @@ management, streaming, and pagination logic. This is the largest frontend file.
 | `isLoadingMessages` / `messagesError` | Message-load state + error (with Retry). |
 | `sessionError` | Transient toast for a failed session operation. |
 | `sidebarCollapsed` | Sidebar collapse state, persisted to `localStorage` (`chs.sidebarCollapsed`). Surfaced to JSX as `sidebarOpen = !sidebarCollapsed`. |
-| `activeHasMore` / `isLoadingOlder` | Reactive pagination flags for the active session. |
 
 **Refs:** `cancelRef` (active stream canceller), `scrollRef` (message scroll container), `textareaRef` (legacy focus target), `topSentinelRef` (IntersectionObserver target for load-older), `paginationRef` (per-session `{hasMore, oldestMessageId}` map), `activeSessionIdRef` (stale-closure-safe mirror of `activeSessionId`), `draftInputsRef` (per-session unsent composer drafts).
 
@@ -1109,11 +1249,17 @@ management, streaming, and pagination logic. This is the largest frontend file.
   `handleSend(question)` directly, bypassing the input field.
 - **Session switching:** `handleSelectSession()` cancels any stream, stashes the
   current draft under the old session and restores the new one, clears messages,
-  switches `activeSessionId`, and loads the most recent page.
-- **Pagination (bottom-to-top):** initial load fetches the 50 newest messages
-  (`loadSessionMessages`); scrolling to the top sentinel (IntersectionObserver) or
-  the "Load older messages" button triggers `loadOlderMessages()`, which prepends
-  older pages while preserving scroll position. `PAGE_SIZE = 50`.
+  switches `activeSessionId`, and loads the session's messages.
+- **Message loading:** `loadSessionMessages()` fetches the full message list for a
+  session (oldest-first) and maps each row into the component shape, carrying
+  through `table_data`/`media_attachments` so a past session's tables/media render
+  on load. There is no pagination — the backend returns the whole list (see
+  [9.9](#99-message-pagination--removed)).
+- **Sidebar reconciliation:** after a turn completes, `onDone` optimistically bumps
+  the session via `bumpSessionMetadata()` and then re-fetches `fetchSessions()` so
+  the sidebar reflects the just-persisted session (real title, id, counts).
+- **Export:** each `SessionItem` shows a hover download button calling
+  `exportSession()` (PDF/HTML download).
 - **Collapsed-state title:** when the sidebar is collapsed, the active session
   title is shown small at the top-left of the main area (Claude.ai behavior).
 - **Auto-scroll:** scrolls to the bottom on new content.
@@ -1126,8 +1272,7 @@ management, streaming, and pagination logic. This is the largest frontend file.
 - `updateLastAssistant(updater)` — finds the last assistant message and applies an updater; the mechanism behind all streaming callbacks.
 - `deriveTitle(firstUserMessage)` — client-side title heuristic (≤60 chars) mirroring the backend.
 - `bumpSessionMetadata(sessionId, firstUserMessage)` — optimistic sidebar update on turn completion (injects provisional sessions, bumps count, re-sorts).
-- `getPagination` / `setPagination` — read/write the per-session pagination map, syncing `activeHasMore` for the active session.
-- `loadSessions` / `loadSessionMessages` / `retryLoadMessages` / `loadOlderMessages` — data loaders described above.
+- `loadSessions` / `loadSessionMessages` / `retryLoadMessages` — data loaders described above.
 
 ---
 
@@ -1220,6 +1365,7 @@ the suggestions) and during an active chat (pinned at the bottom).
 
 **Behavior:**
 - Shows the session `title` (single line, ellipsis overflow), a relative timestamp, and a message count.
+- Renders an **export button** (download icon) that appears on row hover; clicking it calls `exportSession(session_id)` (stopping propagation so it doesn't also select the row) and downloads the conversation as PDF/HTML. The row itself is a `div role="button"` (not a `<button>`) so the export `<button>` can nest legally inside it.
 - `formatRelativeTimestamp(iso)` renders: today → time ("12:30 PM"); yesterday → "Yesterday"; this week → weekday name; older → short date ("Jan 15"). Returns empty for missing/unparseable timestamps.
 - Active row gets `.session-item--active` (highlight background + coral left border) and `aria-current="true"`.
 - Memoized with `React.memo` for list performance.
@@ -1243,7 +1389,7 @@ the suggestions) and during an active chat (pinned at the bottom).
 
 **Purpose:** A set of inline SVG icon components so the app needs no icon library (keeps the bundle small).
 
-**Exports:** `IconSidebarOpen`, `IconSidebarClose`, `IconNewChat`, `IconLogOut`, `IconPaperclip`, `IconMic`, `IconArrowUp`.
+**Exports:** `IconSidebarOpen`, `IconSidebarClose`, `IconNewChat`, `IconLogOut`, `IconPaperclip`, `IconMic`, `IconArrowUp`, `IconDownload` (export button).
 
 **Convention:** Each takes a `size` prop (default 20) and uses `stroke="currentColor"` so color is controlled by CSS `color` on the parent.
 
@@ -1260,7 +1406,7 @@ the suggestions) and during an active chat (pinned at the bottom).
 - Radius: `--r-md: 8px`, `--r-lg: 12px`, `--r-xl: 16px`, `--r-pill: 9999px`
 - **Layout aliases** (added for the two-panel shell, mapped onto the brand palette so the theme stays consistent): `--border` → `--hairline`, `--surface-hover` → `rgba(20,20,19,0.05)`, `--text-primary` → `--ink`, `--text-secondary` → `--muted`, `--text-tertiary` → `--muted-soft`.
 
-**Component styles:** the app shell (`.app-shell`, `.sidebar` expanded/collapsed, `.sidebar-top`, `.new-chat-row`, `.recents-label`, `.session-list-container`, `.sidebar-bottom`), officer row + popup, `.main-content`, welcome screen (`.welcome-screen`, `.welcome-heading`, `.welcome-subheading`, `.suggestion-chips`), chat area (`.chat-area`, `.messages-scroll`, `.messages-inner`), composer (`.composer-area`, `.composer-box`, `.composer-textarea`, `.composer-action-btn`, `.send-btn`), buttons, login page, messages (user/assistant), table renderer, media list, session list states (loading/empty/error), load-older affordances, and the error toast.
+**Component styles:** the app shell (`.app-shell`, `.sidebar` expanded/collapsed, `.sidebar-top`, `.new-chat-row`, `.recents-label`, `.session-list-container`, `.sidebar-bottom`), officer row + popup, `.main-content`, welcome screen (`.welcome-screen`, `.welcome-heading`, `.welcome-subheading`, `.suggestion-chips`), chat area (`.chat-area`, `.messages-scroll`, `.messages-inner`), composer (`.composer-area`, `.composer-box`, `.composer-textarea`, `.composer-action-btn`, `.send-btn`), buttons, login page, messages (user/assistant), table renderer, media list, session list states (loading/empty/error), the per-session `.session-export-btn` (hover-revealed), and the error toast.
 
 **Font loading:** Google Fonts import for EB Garamond (400, 500), Inter (400, 500, 600), JetBrains Mono (400).
 
@@ -1416,26 +1562,23 @@ this document only describes the live system.
   in `SessionList.jsx`. Keeping a separate container component added indirection
   with no benefit, so it was removed.
 
-### 9.2 `frontend/src/components/NewChatButton.jsx` — ORPHANED (still on disk)
+### 9.2 `frontend/src/components/NewChatButton.jsx` — DELETED
 
 - **What it was:** A reusable "+ New chat" ghost button used by the old
   `ChatHistorySidebar`.
-- **Status:** File still exists but is **not imported anywhere**.
-- **Why deprecated:** The redesigned sidebar renders the new-chat control inline
-  as a `.new-chat-row` (icon + "New chat" label) directly in `ChatWindow.jsx`, so
-  the standalone button is no longer used. Left on disk (harmless) pending a
-  cleanup pass; safe to delete.
+- **Status:** **Deleted from disk** (post-Step-4 cleanup pass).
+- **Why removed:** The redesigned sidebar renders the new-chat control inline
+  as a `.new-chat-row` directly in `ChatWindow.jsx`, so the standalone button was
+  never imported anywhere. Removed during the dead-code audit.
 
-### 9.3 `frontend/src/components/OfficerInfo.jsx` — ORPHANED (still on disk)
+### 9.3 `frontend/src/components/OfficerInfo.jsx` — DELETED
 
 - **What it was:** The officer identity footer (avatar + name + rank) used by the
-  old `ChatHistorySidebar`. Display-only — no interactions.
-- **Status:** File still exists but is **not imported anywhere**.
-- **Why deprecated:** Replaced by `OfficerRow.jsx`, which adds the click-to-open
-  sign-out popup (badge number + "Sign out") at the sidebar bottom. The sign-out
-  action previously lived in the top bar; consolidating identity + sign-out into
-  one component made `OfficerInfo` redundant. Left on disk pending cleanup; safe to
-  delete.
+  old `ChatHistorySidebar`. Display-only.
+- **Status:** **Deleted from disk** (post-Step-4 cleanup pass).
+- **Why removed:** Replaced by `OfficerRow.jsx` (which adds the click-to-open
+  sign-out popup). Was no longer imported anywhere; removed during the dead-code
+  audit.
 
 ### 9.4 Top bar / header layout — REMOVED
 
@@ -1498,3 +1641,49 @@ this document only describes the live system.
 > **Net frontend additions from the redesign** (for cross-reference): `WelcomeScreen.jsx`,
 > `Composer.jsx`, `OfficerRow.jsx`, `Icons.jsx` were added; `SessionList.jsx` and
 > `SessionItem.jsx` were retained. See [Section 6](#6-frontend-file-by-file-reference).
+
+### 9.8 NoSQL `session_metadata` — SUPERSEDED BY MySQL
+
+- **What it was:** `conversation/session_store.py` stored per-session metadata
+  (title, timestamps, message_count) in a Catalyst NoSQL `session_metadata`
+  collection, and the sidebar's `GET /api/chat/sessions` read from it.
+- **Status:** As of Step 4, **MySQL `chat_sessions` is the source of truth.**
+  `GET /api/chat/sessions` now reads from `chat_store.get_sessions_for_officer`.
+  `session_store.py` is still written to (via `history.py`'s metadata sync) and
+  `POST /api/chat/sessions` still creates a NoSQL doc, but neither is the primary
+  read path anymore.
+- **Why kept (not deleted):** removing it touches the history metadata sync and the
+  unused `POST /api/chat/sessions` endpoint; it was deliberately left in place as a
+  fallback pending a decision on whether to fully retire the NoSQL session path.
+
+### 9.9 Message pagination — REMOVED
+
+- **What it was:** `GET /api/chat/sessions/{id}/messages` accepted `limit` +
+  `before_message_id` cursor params and returned `{messages, has_more}` (newest
+  first). The frontend had a full bottom-to-top pagination apparatus in
+  `ChatWindow.jsx`: `loadOlderMessages`, an `IntersectionObserver` top sentinel,
+  `paginationRef`/`getPagination`/`setPagination`, `activeHasMore`/`isLoadingOlder`
+  state, a "Load older messages" button, and a "No older messages" indicator, plus
+  `PAGE_SIZE = 50`.
+- **Status:** **Removed end-to-end.** The backend endpoint now returns the full
+  message list (oldest-first, capped at 100 in `chat_store.get_messages_for_session`)
+  with no `has_more`; the `Message` model dropped `timestamp`/`sql` in favor of the
+  rich fields (`table_data`, `media_attachments`, etc.); the frontend pagination
+  state/handlers/JSX and the `.load-older-btn` / `.no-older-indicator` /
+  `.chat-messages__top-sentinel` CSS were deleted; `fetchMessages` lost its
+  `limit`/`beforeMessageId` args.
+- **Why removed:** After the Step 4 MySQL migration the endpoint always returned the
+  whole list with `has_more=false`, so the entire pagination path was dead code that
+  could never trigger. Removing it deleted ~100+ lines of unreachable frontend logic.
+
+### 9.10 Dead code / unused artifacts — REMOVED (audit pass)
+
+A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
+- **`routers/chat.py`:** unused `_error()` helper; unused imports `list_sessions`,
+  `get_session` (kept `create_session`).
+- **`llm/sql_generator.py`:** unused `LLMError` import.
+- **`llm/answer_formatter.py`:** unused `LLMError` import.
+- **`db/seed.py`:** unused `datetime` and `get_pool` imports; unused `media_types` local.
+- **`db/connection.py`:** three no-op `global _pool` declarations (in `get_pool`,
+  `execute_query`, `execute_write`) that only read the variable.
+- Confirmed clean via `pyflakes`; full test suite green after each removal.

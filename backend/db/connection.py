@@ -38,7 +38,6 @@ async def get_pool() -> aiomysql.Pool:
     Return the existing pool.
     Raises RuntimeError if pool has not been created yet.
     """
-    global _pool
     if _pool is None:
         raise RuntimeError("Database connection pool has not been created yet.")
     return _pool
@@ -53,7 +52,6 @@ async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
     - Raises ValueError if sql does not start with SELECT (case-insensitive after strip)
     - Releases connection back to pool in finally block always
     """
-    global _pool
     if _pool is None:
         raise RuntimeError("Database connection pool has not been created yet.")
         
@@ -75,6 +73,37 @@ async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
         return await asyncio.wait_for(_run(), timeout=5.0)
     except asyncio.TimeoutError:
         raise TimeoutError("Database query execution timed out (5s limit reached).")
+
+async def execute_write(sql: str, params: tuple = ()) -> int:
+    """
+    Execute an INSERT or UPDATE statement.
+    Returns lastrowid for INSERT, rowcount for UPDATE.
+    Never accepts SELECT — raises ValueError if sql starts with SELECT.
+    Uses same pool as execute_query.
+    5-second timeout enforced.
+    Releases connection in finally block always.
+    """
+    if _pool is None:
+        raise RuntimeError("Database connection pool has not been created yet.")
+
+    stripped = sql.strip()
+    if stripped.upper().startswith("SELECT"):
+        raise ValueError("Use execute_query() for SELECT statements.")
+
+    async def _run():
+        async with _pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                if params:
+                    await cur.execute(stripped, params)
+                else:
+                    await cur.execute(stripped)
+                await conn.commit()
+                return cur.lastrowid if stripped.upper().startswith("INSERT") else cur.rowcount
+
+    try:
+        return await asyncio.wait_for(_run(), timeout=5.0)
+    except asyncio.TimeoutError:
+        raise TimeoutError("Database write timed out (5s limit).")
 
 async def close_pool():
     """

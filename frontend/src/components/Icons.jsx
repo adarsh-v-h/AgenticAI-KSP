@@ -74,3 +74,13 @@ export function IconArrowUp({ size = 20 }) {
     </svg>
   )
 }
+
+export function IconDownload({ size = 20 }) {
+  // Arrow into a tray — "download / export".
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 3v10M6 9l4 4 4-4" />
+      <path d="M3 16h14" />
+    </svg>
+  )
+}

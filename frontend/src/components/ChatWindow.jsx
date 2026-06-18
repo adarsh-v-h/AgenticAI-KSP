@@ -19,12 +19,6 @@ const SIDEBAR_MIN_WIDTH = 220
 const SIDEBAR_MAX_WIDTH = 480
 const SIDEBAR_DEFAULT_WIDTH = 260
 
-// Number of messages loaded per page for bottom-to-top pagination. The initial
-// session load fetches the 50 most recent messages (Requirement 4.1), and the
-// scroll-triggered "load older" flow (task 8.4) reuses the same page size so
-// the contract stays self-documenting in one place.
-const PAGE_SIZE = 50
-
 // Lazy initializer for sidebarCollapsed: read the persisted value from
 // localStorage, guarding for environments without `window` (SSR/tests).
 function readSidebarCollapsed() {
@@ -99,55 +93,14 @@ export default function ChatWindow({ officer, onLogout }) {
   // drag tracks the pointer 1:1 instead of easing behind it.
   const [isResizing, setIsResizing] = useState(false)
 
-  // Per-session pagination state, keyed by session_id with value
-  // {hasMore, oldestMessageId}. We use a ref (not state) because pagination is
-  // tracked independently per session (Requirement 13.4) and updated frequently
-  // during scroll-triggered loading — keeping it in a ref avoids unnecessary
-  // re-renders. The ref is the source of truth for load bookkeeping; the UI
-  // reacts to the *active* session's hasMore via `activeHasMore` state below.
-  const paginationRef = useRef(new Map())
-
-  // React state mirroring the ACTIVE session's `hasMore` pagination flag. A ref
-  // alone can't drive re-renders, so the "load older" affordances (task 8.3/8.4)
-  // need a reactive value. We keep this in sync with paginationRef for whichever
-  // session is currently active (Requirement 13.4).
-  const [activeHasMore, setActiveHasMore] = useState(false)
-
-  // Whether an older-messages page is currently being loaded for the active
-  // session. Used by the scroll-triggered pagination flow (task 8.4) to prevent
-  // overlapping loads; declared here so the structure is ready.
-  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
-
-  // Mirror of `activeSessionId` in a ref so the pagination helpers can compare
-  // against the current active session without going stale inside async
-  // callbacks (e.g. fetchMessages.then). Kept in sync via the effect below and
-  // updated eagerly in the switch/new-chat handlers.
+  // Mirror of `activeSessionId` in a ref so async callbacks (e.g.
+  // fetchMessages.then) can compare against the current active session without
+  // going stale. Kept in sync via the effect below and updated eagerly in the
+  // switch/new-chat handlers.
   const activeSessionIdRef = useRef(activeSessionId)
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId
   }, [activeSessionId])
-
-  // --- Pagination bookkeeping helpers (Requirement 13.4) -------------------
-  // Centralize read/write of per-session pagination so tasks 8.3 (scroll
-  // observer) and 8.4 (loadOlderMessages) don't duplicate this logic.
-
-  // Read the pagination entry for a session, defaulting to a "no history loaded
-  // yet" state when the session hasn't been initialized.
-  const getPagination = useCallback(
-    (sessionId) =>
-      paginationRef.current.get(sessionId) || { hasMore: false, oldestMessageId: null },
-    [],
-  )
-
-  // Write the pagination entry for a session. When the mutated session is the
-  // active one, also update `activeHasMore` so the UI re-renders its
-  // "load older"/"no more messages" affordances.
-  const setPagination = useCallback((sessionId, { hasMore, oldestMessageId }) => {
-    paginationRef.current.set(sessionId, { hasMore, oldestMessageId })
-    if (sessionId === activeSessionIdRef.current) {
-      setActiveHasMore(hasMore)
-    }
-  }, [])
 
   // Per-session unsent input drafts, keyed by session_id -> input text. When
   // switching away from a session we stash the current composer text here, and
@@ -160,10 +113,6 @@ export default function ChatWindow({ officer, onLogout }) {
   const cancelRef = useRef(null)
   const scrollRef = useRef(null)
   const textareaRef = useRef(null)
-  // Sentinel element rendered at the very TOP of the message list. Task 8.3
-  // attaches an IntersectionObserver to it to auto-trigger loadOlderMessages
-  // when the officer scrolls to the top. Declared here so 8.3 can reuse it.
-  const topSentinelRef = useRef(null)
 
   // Cancel any active stream on unmount.
   useEffect(() => {
@@ -421,6 +370,12 @@ export default function ChatWindow({ officer, onLogout }) {
           // re-sort the sidebar. The captured question seeds the title when the
           // session is a provisional client-side chat not yet in the list.
           bumpSessionMetadata(turnSessionId, question)
+          // Step 4: reconcile the sidebar against the backend so the just-
+          // persisted session (real title, id, counts) replaces the optimistic
+          // entry. Non-fatal — the optimistic values stand if this fails.
+          fetchSessions()
+            .then((loaded) => setSessions(loaded))
+            .catch(() => {})
           requestAnimationFrame(() => textareaRef.current?.focus())
         },
       })
@@ -428,12 +383,9 @@ export default function ChatWindow({ officer, onLogout }) {
     [inputValue, isStreaming, activeSessionId, updateLastAssistant, onLogout, bumpSessionMetadata],
   )
 
-  // Load the most recent page of messages for a session (Requirements 4.1,
-  // 13.3). Extracted into a reusable callback so the chat-area Retry button can
-  // re-attempt the load after a failure (Req 15.4). Initial load: 50 most
-  // recent messages, no before_message_id cursor. PAGE_SIZE is passed
-  // explicitly so the "50 most recent" contract is self-documenting and shared
-  // with loadOlderMessages.
+  // Load all messages for a session (Requirements 4.1, 13.3). Extracted into a
+  // reusable callback so the chat-area Retry button can re-attempt the load
+  // after a failure (Req 15.4).
   //
   // On failure: an expired token logs out; other errors are logged (Req 15.5)
   // and surfaced via `messagesError` for the chat-area banner (Req 15.2). We do
@@ -443,30 +395,27 @@ export default function ChatWindow({ officer, onLogout }) {
     (sessionId) => {
       setMessagesError(null)
       setIsLoadingMessages(true)
-      return fetchMessages(sessionId, PAGE_SIZE, null)
-        .then(({ messages: fetched, has_more }) => {
-          // Backend is newest-first; reverse to oldest-first for display.
-          const oldestFirst = fetched.slice().reverse()
-          const mapped = oldestFirst.map((m) => ({
+      return fetchMessages(sessionId)
+        .then(({ messages: fetched }) => {
+          // Backend returns the full message list oldest-first. Map into the
+          // component message shape, carrying through rich data so a past
+          // session with a table/media renders correctly on load.
+          const mapped = fetched.map((m) => ({
             id: m.message_id,
             role: m.role,
             content: m.content,
-            tableData: null,
-            mediaAttachments: null,
+            tableData:
+              Array.isArray(m.table_data) && m.table_data.length > 0
+                ? m.table_data
+                : null,
+            mediaAttachments:
+              Array.isArray(m.media_attachments) && m.media_attachments.length > 0
+                ? m.media_attachments
+                : null,
             isStreaming: false,
             error: false,
           }))
           setMessages(mapped)
-
-          // The oldest loaded message is the LAST element of the newest-first
-          // response (equivalently the first element of oldest-first). Record
-          // pagination via the helper, which also syncs activeHasMore when this
-          // session is active.
-          const oldestLoaded = fetched.length > 0 ? fetched[fetched.length - 1] : null
-          setPagination(sessionId, {
-            hasMore: has_more,
-            oldestMessageId: oldestLoaded ? oldestLoaded.message_id : null,
-          })
 
           // Show newest at the bottom: defer to the next frame so the list has
           // rendered before we scroll (the messages-keyed effect also handles
@@ -490,7 +439,7 @@ export default function ChatWindow({ officer, onLogout }) {
           setIsLoadingMessages(false)
         })
     },
-    [onLogout, setPagination],
+    [onLogout],
   )
 
   // Retry handler for the chat-area message-load error (Req 15.4). Re-attempts
@@ -506,14 +455,7 @@ export default function ChatWindow({ officer, onLogout }) {
   //   3. Stash the current unsent input under the OLD session, then restore the
   //      draft (if any) for the NEW session (Property 8: state preservation).
   //   4. Clear the message list and switch activeSessionId.
-  //   5. Load the most recent page of messages for the new session.
-  //
-  // Message ordering decision (kept consistent for task 8.x pagination):
-  //   The backend returns messages NEWEST-FIRST (descending by timestamp). The
-  //   chat view reads top→bottom with the newest message at the bottom, so we
-  //   reverse the response into OLDEST-FIRST before storing in `messages`.
-  //   Pagination bookkeeping records `oldestMessageId` as the oldest loaded
-  //   message — i.e. the LAST element of the newest-first response array.
+  //   5. Load all messages for the new session.
   const handleSelectSession = useCallback(
     (sessionId) => {
       // (1) Selecting the already-active session is a no-op.
@@ -533,18 +475,15 @@ export default function ChatWindow({ officer, onLogout }) {
       setInputValue(restoredDraft || '')
 
       // (4) Switch active session and clear the message list (Requirement 13.3).
-      // Update the ref eagerly so the async load below can compare against the
-      // correct active session when calling setPagination.
+      // Update the ref eagerly so the async load below compares against the
+      // correct active session.
       activeSessionIdRef.current = sessionId
       setActiveSessionId(sessionId)
       setMessages([])
-      // Reset the reactive hasMore until the load resolves to avoid showing a
-      // stale "load older" affordance from the previous session.
-      setActiveHasMore(false)
       // Clear any prior message-load error before the new load (Req 15.2).
       setMessagesError(null)
 
-      // (5) Load the most recent page of messages for the selected session.
+      // (5) Load all messages for the selected session.
       loadSessionMessages(sessionId)
     },
     [activeSessionId, isStreaming, inputValue, loadSessionMessages],
@@ -603,134 +542,11 @@ export default function ChatWindow({ officer, onLogout }) {
     const freshId = newSessionId()
     activeSessionIdRef.current = freshId
     setActiveSessionId(freshId)
-    setPagination(freshId, { hasMore: false, oldestMessageId: null })
     setMessages([])
     setInputValue('')
     setStatusText('')
     setMessagesError(null)
-  }, [messages.length, isStreaming, setPagination])
-
-  // Load the previous page of OLDER messages for the active session, triggered
-  // either by the "Load older messages" button or the scroll observer (task
-  // 8.3). Implements bottom-to-top pagination while keeping the viewport
-  // anchored to the same content (Requirements 4.3, 4.4, 4.5).
-  //
-  // Flow, in order:
-  //   - Guard against redundant/overlapping loads: bail if there's nothing
-  //     older to load (hasMore false / no cursor) or a load is in flight.
-  //   - Capture the scroll container's height BEFORE prepending so we can
-  //     restore the relative scroll position afterwards.
-  //   - Fetch the next page older than oldestMessageId. The response is
-  //     newest-first and entirely older than the cursor; reverse to oldest-first
-  //     and map into the component message shape before PREPENDING.
-  //   - Advance the cursor to the oldest of the freshly fetched page (the LAST
-  //     element of the newest-first response); keep the previous cursor if the
-  //     page came back empty. Update has_more so the affordances re-render.
-  //   - After the DOM paints, restore scrollTop to newHeight - prevHeight so the
-  //     content the officer was viewing stays put instead of jumping to the top.
-  const loadOlderMessages = useCallback(async () => {
-    const sessionId = activeSessionIdRef.current
-    const pagination = getPagination(sessionId)
-
-    // Nothing older to load, no cursor to page from, or a load already running.
-    if (!pagination.hasMore || isLoadingOlder || !pagination.oldestMessageId) {
-      return
-    }
-
-    setIsLoadingOlder(true)
-
-    // Capture height before prepend so we can restore the scroll position.
-    const prevScrollHeight = scrollRef.current ? scrollRef.current.scrollHeight : 0
-
-    try {
-      const { messages: fetched, has_more } = await fetchMessages(
-        sessionId,
-        PAGE_SIZE,
-        pagination.oldestMessageId,
-      )
-
-      // Backend is newest-first and all OLDER than the cursor; reverse to
-      // oldest-first for display, then map into the component message shape.
-      const older = fetched
-        .slice()
-        .reverse()
-        .map((m) => ({
-          id: m.message_id,
-          role: m.role,
-          content: m.content,
-          tableData: null,
-          mediaAttachments: null,
-          isStreaming: false,
-          error: false,
-        }))
-
-      // Prepend the older messages ahead of the existing ones.
-      setMessages((prev) => [...older, ...prev])
-
-      // Advance the cursor to the oldest of this page (last element of the
-      // newest-first response). Keep the previous cursor if the page was empty.
-      const newOldest =
-        fetched.length > 0 ? fetched[fetched.length - 1].message_id : pagination.oldestMessageId
-      setPagination(sessionId, { hasMore: has_more, oldestMessageId: newOldest })
-
-      // Restore scroll position AFTER the DOM updates so the viewport stays
-      // anchored to the same content rather than jumping to the top (Req 4.4).
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          const newScrollHeight = scrollRef.current.scrollHeight
-          scrollRef.current.scrollTop = newScrollHeight - prevScrollHeight
-        }
-      })
-    } catch (err) {
-      if (err instanceof AuthError) {
-        onLogout()
-      } else {
-        // Full error UI arrives in task 11.2; log for now.
-        console.error('ChatWindow: failed to load older messages', err)
-      }
-    } finally {
-      setIsLoadingOlder(false)
-    }
-  }, [getPagination, setPagination, isLoadingOlder, onLogout])
-
-  // Scroll-triggered "load older" via IntersectionObserver (Requirements 4.2,
-  // 4.3). When the top sentinel scrolls into view inside the chat scroll
-  // container, auto-trigger loadOlderMessages so history streams in as the
-  // officer scrolls up, complementing the manual "Load older messages" button.
-  //
-  // Dependencies: we re-create the observer when `messages.length` changes
-  // because the sentinel only mounts once the list is non-empty (so it isn't in
-  // the DOM on an empty session). Re-running on `activeHasMore`/`isLoadingOlder`
-  // re-evaluates the guard as pages are exhausted or a load is in flight. The
-  // `loadOlderMessages` callback is stable but listed so the latest closure is
-  // observed.
-  useEffect(() => {
-    // Guard for SSR/test environments without IntersectionObserver.
-    if (typeof IntersectionObserver === 'undefined') return
-    // The sentinel only renders when there are messages; nothing to observe.
-    if (!topSentinelRef.current) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && activeHasMore && !isLoadingOlder) {
-          // loadOlderMessages also no-ops internally when there's nothing to
-          // load or a load is already running, so this is safe either way.
-          loadOlderMessages()
-        }
-      },
-      {
-        // Use the chat scroll container as the viewport root, and prefetch a
-        // little before the very top is reached.
-        root: scrollRef.current,
-        rootMargin: '100px 0px 0px 0px',
-        threshold: 0.1,
-      },
-    )
-
-    observer.observe(topSentinelRef.current)
-
-    return () => observer.disconnect()
-  }, [loadOlderMessages, activeHasMore, isLoadingOlder, messages.length])
+  }, [messages.length, isStreaming])
 
   const isEmpty = messages.length === 0
 
@@ -876,23 +692,6 @@ export default function ChatWindow({ officer, onLogout }) {
                       {isLoadingMessages ? 'Retrying…' : 'Retry'}
                     </button>
                   </div>
-                ) : null}
-
-                {/* Top sentinel + load-older affordances (Req 4.5). */}
-                <div ref={topSentinelRef} className="chat-messages__top-sentinel" aria-hidden="true" />
-                {messages.length > 0 ? (
-                  activeHasMore ? (
-                    <button
-                      type="button"
-                      className="load-older-btn"
-                      onClick={loadOlderMessages}
-                      disabled={isLoadingOlder}
-                    >
-                      {isLoadingOlder ? 'Loading…' : 'Load older messages'}
-                    </button>
-                  ) : (
-                    <div className="no-older-indicator">No older messages</div>
-                  )
                 ) : null}
 
                 {messages.map((m) => (

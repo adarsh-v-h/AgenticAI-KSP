@@ -324,25 +324,19 @@ export async function createSession() {
 }
 
 /**
- * Fetch a paginated page of messages for a session (bottom-to-top loading).
+ * Fetch all messages for a session.
  *
- * GET /api/chat/sessions/{sessionId}/messages?limit=&before_message_id=
+ * GET /api/chat/sessions/{sessionId}/messages
  *
- * The backend returns messages newest-first; callers handle display ordering.
+ * The backend returns the full message list oldest-first.
  *
  * @param {string} sessionId
- * @param {number} [limit=50] number of messages to return (backend caps at 100)
- * @param {string|null} [beforeMessageId=null] return messages older than this id
- * @returns {Promise<{messages: Array<object>, has_more: boolean}>}
+ * @returns {Promise<{messages: Array<object>}>}
  * @throws {AuthError} on 401
  * @throws {Error} on 404 (session not found), other non-ok, or network failure
  */
-export async function fetchMessages(sessionId, limit = 50, beforeMessageId = null) {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (beforeMessageId) {
-    params.set('before_message_id', beforeMessageId)
-  }
-  const url = `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages?${params.toString()}`
+export async function fetchMessages(sessionId) {
+  const url = `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`
 
   let response
   try {
@@ -373,10 +367,69 @@ export async function fetchMessages(sessionId, limit = 50, beforeMessageId = nul
     const data = await response.json()
     return {
       messages: Array.isArray(data?.messages) ? data.messages : [],
-      has_more: Boolean(data?.has_more),
     }
   } catch (err) {
     console.error('fetchMessages: failed to parse response', err)
     throw new Error('Received an invalid response from the server.')
   }
+}
+
+/**
+ * Export a chat session as a downloadable PDF (or HTML fallback).
+ *
+ * POST /api/chat/sessions/{sessionId}/export
+ *
+ * Fetches the export blob from the backend and triggers a browser download.
+ * The filename is taken from the Content-Disposition header when present,
+ * falling back to a sensible default.
+ *
+ * @param {string} sessionId
+ * @returns {Promise<void>}
+ * @throws {AuthError} on 401
+ * @throws {Error} on other non-ok responses or network failure
+ */
+export async function exportSession(sessionId) {
+  let response
+  try {
+    response = await fetch(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/export`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+      },
+    )
+  } catch (err) {
+    console.error('exportSession: network error', err)
+    throw new Error('Cannot reach the server. Please try again.')
+  }
+
+  if (response.status === 401) {
+    throw new AuthError()
+  }
+  if (!response.ok) {
+    console.error(`exportSession: unexpected status ${response.status}`)
+    throw new Error(`Export failed (HTTP ${response.status}).`)
+  }
+
+  let blob
+  try {
+    blob = await response.blob()
+  } catch (err) {
+    console.error('exportSession: failed to read blob', err)
+    throw new Error('Received an invalid response from the server.')
+  }
+
+  const contentDisposition = response.headers.get('Content-Disposition')
+  const filename =
+    contentDisposition?.match(/filename="(.+)"/)?.[1] ?? 'KSP-Export.pdf'
+
+  // Trigger a browser download.
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }

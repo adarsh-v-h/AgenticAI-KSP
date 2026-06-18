@@ -9,8 +9,8 @@ import asyncio
 import random
 import json
 import aiomysql
-from datetime import datetime, date, timedelta
-from db.connection import create_pool, close_pool, get_pool
+from datetime import date, timedelta
+from db.connection import create_pool, close_pool
 
 # Set random seed for deterministic synthetic data generation
 random.seed(42)
@@ -703,7 +703,6 @@ async def seed_evidence_media(conn, fir_records: list[dict]):
     # Pick 25 random FIR IDs
     firs_to_seed = random.sample(fir_records, 25)
     
-    media_types = ["image", "video", "audio"]
     descriptions = {
         "image": [
             "Crime scene photo showing point of entry",

@@ -31,6 +31,10 @@ from conversation.session_store import (
 MAX_TURNS = 10  # last 10 messages = ~5 user + 5 assistant turns
 _NOSQL_TIMEOUT = 5.0
 
+# Max rows of an assistant turn's result set kept in history for follow-up
+# (DIRECT) answers. Bounded so the stored NoSQL document stays small.
+_TABLE_SNAPSHOT_ROWS = 30
+
 # Deterministic fallback timestamp for legacy messages that predate the
 # message_id/timestamp schema. Using a fixed epoch keeps lazy migration
 # deterministic (same input → same output) and sorts legacy messages before
@@ -231,11 +235,14 @@ async def save_turn(
     user_message: str,
     assistant_message: str,
     assistant_sql: str | None = None,
+    assistant_table: list[dict] | None = None,
 ) -> None:
     """
     Append a user+assistant turn to the session history. Trims to MAX_TURNS.
     If `assistant_sql` is provided, it's stored alongside the assistant turn
     so follow-up SQL generation can preserve the prior filter clauses.
+    If `assistant_table` is provided, a compact snapshot (first rows) is stored
+    so the next turn can answer follow-ups about the data WITHOUT re-querying.
     Never raises — failures are logged and the in-memory store is updated so
     the chat keeps working.
     """
@@ -264,6 +271,10 @@ async def save_turn(
     }
     if assistant_sql:
         assistant_turn["sql"] = assistant_sql
+    if assistant_table:
+        # Store a bounded snapshot so a follow-up can be answered from context
+        # instead of re-running the query. Kept small to limit NoSQL doc size.
+        assistant_turn["table"] = assistant_table[:_TABLE_SNAPSHOT_ROWS]
     existing.append(assistant_turn)
     # Number of messages persisted this turn: one user + one assistant. Used to
     # advance the monotonic message_count in session_metadata (independent of
