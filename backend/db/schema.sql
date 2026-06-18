@@ -196,3 +196,31 @@ CREATE TABLE IF NOT EXISTS evidence_media (
     FOREIGN KEY (fir_id) REFERENCES fir_master(fir_id),
     INDEX idx_media_fir (fir_id)
 );
+
+-- Chat sessions — one row per conversation (Step 4: persistent storage)
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    session_id      VARCHAR(36) PRIMARY KEY,
+    officer_id      INT NOT NULL,
+    title           VARCHAR(200) NOT NULL DEFAULT 'Untitled Chat',
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    message_count   INT DEFAULT 0,
+    is_active       BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (officer_id) REFERENCES officers(officer_id),
+    INDEX idx_sessions_officer (officer_id, updated_at)
+);
+
+-- Chat messages — one row per turn (user question OR assistant answer)
+CREATE TABLE IF NOT EXISTS chat_messages (
+    message_id      INT AUTO_INCREMENT PRIMARY KEY,
+    session_id      VARCHAR(36) NOT NULL,
+    role            ENUM('user', 'assistant') NOT NULL,
+    content         TEXT NOT NULL,
+    sql_generated   TEXT,
+    has_table       BOOLEAN DEFAULT FALSE,
+    has_media       BOOLEAN DEFAULT FALSE,
+    graph_available BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id),
+    INDEX idx_messages_session (session_id, created_at)
+);

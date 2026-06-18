@@ -21,8 +21,17 @@ from pydantic import BaseModel, Field
 
 from pipeline.query_pipeline import run_pipeline
 from conversation.history import get_history, save_turn
-from conversation.session_store import list_sessions, create_session, get_session
+from conversation.session_store import create_session
 from auth.simple_auth import get_current_officer, get_current_officer_sse
+from db.connection import execute_query
+from db.chat_store import (
+    create_session as create_chat_session_row,
+    update_session_timestamp,
+    save_message_pair,
+    get_sessions_for_officer,
+    get_messages_for_session,
+    verify_session_owner,
+)
 
 router = APIRouter()
 
@@ -54,45 +63,66 @@ class SessionListResponse(BaseModel):
 
 
 class Message(BaseModel):
-    message_id: str
+    message_id: int | str
     role: str
     content: str
-    timestamp: str
-    sql: str | None = None
+    sql_generated: str = ""
+    has_table: bool = False
+    has_media: bool = False
+    graph_available: bool = False
+    table_data: list[dict] = Field(default_factory=list)
+    media_attachments: list[dict] = Field(default_factory=list)
+    created_at: str | None = None
 
 
 class MessagesResponse(BaseModel):
     messages: list[Message]
-    has_more: bool
 
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def _error(status_code: int, code: str, error: str) -> HTTPException:
-    """
-    Build an HTTPException whose `detail` follows the standardized structured
-    shape `{"error": str, "code": str}` (Requirements 15.1-15.3).
-
-    FastAPI serializes the exception's `detail` into the response body, so a
-    raised `_error(...)` produces a JSON body of the form:
-        {"detail": {"error": "...", "code": "..."}}
-    with the given HTTP status code (e.g. 400, 401, 404, 500).
-
-    All structured errors are logged to stderr via `_log` following the
-    existing logging pattern (Requirement 15.5).
-    """
-    _log(f"chat session error [{status_code} {code}]: {error}")
-    return HTTPException(
-        status_code=status_code,
-        detail={"error": error, "code": code},
-    )
-
-
 def _sse(event: dict) -> str:
     """Format a single SSE message. Must end with a blank line."""
     return f"data: {json.dumps(event, default=str)}\n\n"
+
+
+async def _persist_turn(session_id: str, officer: dict, question: str, result) -> None:
+    """
+    Persist a completed pipeline turn to MySQL (Step 4).
+
+    Creates the chat_sessions row on the first message of a session, saves the
+    user + assistant message pair (with rich data to NoSQL when present), and
+    bumps the session's updated_at / message_count.
+
+    Never raises — persistence failures are logged and non-fatal so the chat
+    keeps working even when the Data Store is unavailable.
+    """
+    try:
+        existing = await execute_query(
+            "SELECT session_id FROM chat_sessions WHERE session_id = %s",
+            (session_id,),
+        )
+        if not existing:
+            await create_chat_session_row(
+                session_id, officer["officer_id"], question[:60]
+            )
+
+        await save_message_pair(
+            session_id=session_id,
+            question=question,
+            answer_text=result.answer_text,
+            sql_generated=result.sql_generated,
+            has_table=bool(result.table_data),
+            has_media=bool(result.media_attachments),
+            graph_available=result.graph_available,
+            table_data=result.table_data,
+            media_attachments=result.media_attachments,
+        )
+        await update_session_timestamp(session_id)
+    except Exception as e:
+        _log(f"_persist_turn failed (non-fatal): {e}")
 
 
 @router.get("/api/chat/sessions", response_model=SessionListResponse)
@@ -103,27 +133,24 @@ async def list_chat_sessions(
     List all chat sessions for the authenticated officer, ordered by
     updated_at descending (most recent first).
 
-    Authentication (401) is enforced by `get_current_officer`. NoSQL failures
-    are handled inside `list_sessions`, which falls back to the in-memory store
-    and never raises — so this endpoint always returns HTTP 200 with whatever
-    sessions are available.
-
-    The stored document uses `id` as the session_id key; we map it to
-    `session_id` in the response.
+    Step 4: now reads from MySQL (chat_sessions) instead of NoSQL. Authentication
+    (401) is enforced by `get_current_officer`. `get_sessions_for_officer` never
+    raises — it returns [] on any DB error — so this endpoint always returns
+    HTTP 200 with whatever sessions are available.
     """
     officer_id = officer["officer_id"]
 
-    docs = await list_sessions(officer_id)
+    rows = await get_sessions_for_officer(officer_id, limit=30)
 
     sessions = [
         SessionMetadata(
-            session_id=doc.get("id", ""),
-            title=doc.get("title", ""),
-            created_at=doc.get("created_at", ""),
-            updated_at=doc.get("updated_at", ""),
-            message_count=doc.get("message_count", 0),
+            session_id=row.get("session_id", ""),
+            title=row.get("title", ""),
+            created_at=row.get("created_at") or "",
+            updated_at=row.get("updated_at") or "",
+            message_count=row.get("message_count", 0) or 0,
         )
-        for doc in docs
+        for row in rows
     ]
 
     return SessionListResponse(sessions=sessions)
@@ -180,90 +207,43 @@ async def create_chat_session(
 )
 async def get_session_messages(
     session_id: str,
-    limit: int = Query(50, ge=1, le=100),
-    before_message_id: str | None = Query(default=None),
     officer: dict = Depends(get_current_officer),
 ) -> MessagesResponse:
     """
-    Return a paginated page of messages for `session_id`, newest first.
+    Load all messages for a session (Step 4: now backed by MySQL + NoSQL).
 
-    Authentication (401) is enforced by `get_current_officer`.
+    Authentication (401) is enforced by `get_current_officer`. Ownership is
+    verified against chat_sessions.officer_id: officers can only read their own
+    sessions, and a mismatch (or missing session) returns 404 so we never reveal
+    that another officer's session exists.
 
-    Ownership check: we fetch the session_metadata doc via `get_session`. If it
-    exists and its `officer_id` does NOT match the authenticated officer, we
-    return 404 (we use 404 rather than 403 so we never reveal that a session
-    belonging to another officer exists). If no metadata doc exists at all we
-    deliberately do NOT 404: legacy sessions created via the old /api/chat flow
-    have conversation history but were never given a session_metadata document,
-    and 404-ing those would break access to existing conversations. The design
-    says "404 when session doesn't exist OR doesn't belong to officer", but we
-    relax the "doesn't exist" half pragmatically for backward compatibility.
-
-    Pagination (bottom-to-top loading):
-      - `get_history` returns messages in chronological (oldest-first) order,
-        already capped at MAX_TURNS — that is the full available history here.
-      - Without `before_message_id`: the eligible set is the whole history.
-      - With `before_message_id`: the eligible set is everything strictly older
-        than that message (i.e. the messages before its index). If the id is
-        not found in the history we treat it as "no older messages" and return
-        an empty page (has_more=False) — the client asked for messages older
-        than something we don't have, so there is nothing to return.
-      - We take the last `limit` messages of the eligible set (the most recent
-        eligible ones). `has_more` is True when the eligible set contained more
-        messages than we returned (i.e. older messages remain).
-      - Returned messages are ordered by timestamp DESCENDING (newest first)
-        per Requirement 10.6.
+    Messages are returned oldest-first, ready for direct frontend consumption.
+    Rich data (table_data, media_attachments) is hydrated from NoSQL for
+    assistant messages that carry it.
     """
-    officer_id = officer["officer_id"]
+    owned = await verify_session_owner(session_id, officer["officer_id"])
+    if not owned:
+        raise HTTPException(status_code=404, detail="Session not found.")
 
-    # Ownership verification. Only 404 when metadata exists and the officer
-    # doesn't match; missing metadata is allowed (legacy sessions).
-    metadata = await get_session(session_id)
-    if metadata is not None and metadata.get("officer_id") != officer_id:
-        raise _error(404, "SESSION_NOT_FOUND", "Session not found.")
-
-    # Chronological (oldest-first) list of message dicts.
-    history = await get_history(session_id)
-
-    # Determine the eligible set (messages older than before_message_id).
-    if before_message_id:
-        index = next(
-            (
-                i
-                for i, msg in enumerate(history)
-                if msg.get("message_id") == before_message_id
-            ),
-            None,
-        )
-        if index is None:
-            # Cursor not found — nothing older to return.
-            eligible = []
-        else:
-            eligible = history[:index]
-    else:
-        eligible = history
-
-    # Most recent `limit` messages of the eligible set; older messages remain
-    # when the eligible set was larger than the page we return.
-    page = eligible[-limit:] if limit < len(eligible) else eligible
-    has_more = len(eligible) > len(page)
-
-    # Newest first (descending by timestamp). The eligible list is already in
-    # chronological order, so reversing yields newest-first.
-    page_desc = list(reversed(page))
+    rows = await get_messages_for_session(session_id)
 
     messages = [
         Message(
-            message_id=msg.get("message_id", ""),
-            role=msg.get("role", ""),
-            content=msg.get("content", ""),
-            timestamp=msg.get("timestamp", ""),
-            sql=msg.get("sql"),
+            message_id=row["message_id"],
+            role=row["role"],
+            content=row["content"],
+            sql_generated=row.get("sql_generated", ""),
+            has_table=row.get("has_table", False),
+            has_media=row.get("has_media", False),
+            graph_available=row.get("graph_available", False),
+            table_data=row.get("table_data", []),
+            media_attachments=row.get("media_attachments", []),
+            created_at=row.get("created_at"),
         )
-        for msg in page_desc
+        for row in rows
     ]
 
-    return MessagesResponse(messages=messages, has_more=has_more)
+    return MessagesResponse(messages=messages)
 
 
 @router.post("/api/chat", response_model=ChatResponse)
@@ -313,9 +293,13 @@ async def chat(
                 question,
                 result.answer_text,
                 assistant_sql=result.sql_generated,
+                assistant_table=result.table_data,
             )
         except Exception as e:
             _log(f"save_turn failed (non-fatal): {e}")
+
+        # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
+        await _persist_turn(request.session_id, officer, question, result)
 
     return ChatResponse(
         answer_text=result.answer_text,
@@ -422,9 +406,13 @@ async def chat_stream(
                     q,
                     result.answer_text,
                     assistant_sql=result.sql_generated,
+                    assistant_table=result.table_data,
                 )
             except Exception as e:
                 _log(f"save_turn failed in stream (non-fatal): {e}")
+
+            # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
+            await _persist_turn(session_id, officer, q, result)
 
             yield _sse({"type": "done"})
 

@@ -13,7 +13,7 @@ combined exceed the budget.
 
 import sys
 
-from llm.client import call_llm, LLMError
+from llm.client import call_llm
 from llm.prompts import build_sql_prompt, build_correction_prompt
 from pipeline.sql_validator import validate_sql, sanitize_sql
 from db.schema_catalog import get_schema_for_tables, get_few_shot_examples

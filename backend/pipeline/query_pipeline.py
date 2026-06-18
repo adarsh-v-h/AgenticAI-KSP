@@ -28,7 +28,7 @@ from llm.sql_generator import (
 )
 from db.connection import execute_query
 from pipeline.media_resolver import resolve_media, collect_fir_ids
-from llm.answer_formatter import format_answer
+from llm.answer_formatter import format_answer, route_intent, generate_direct_answer
 from llm.client import LLMError
 
 
@@ -80,6 +80,46 @@ async def _check_graph_available(fir_ids: list[int]) -> bool:
         return False
 
 
+def _most_recent_table(history: list[dict]) -> list[dict]:
+    """
+    Return the most recent assistant turn's stored table snapshot, or [].
+    Walks history newest-first so a follow-up can be answered from the last
+    result set without re-querying the database.
+    """
+    for turn in reversed(history or []):
+        if (turn.get("role") or "").lower() == "assistant":
+            table = turn.get("table")
+            if isinstance(table, list) and table:
+                return table
+    return []
+
+
+async def _run_direct(
+    question: str, history: list[dict], recent_table: list[dict]
+) -> PipelineResponse:
+    """
+    Answer without SQL — for follow-ups about already-retrieved data, requests
+    for insight, and general questions. On LLM failure, returns a friendly
+    error response (never raises).
+    """
+    response = PipelineResponse()
+    try:
+        response.answer_text = await generate_direct_answer(
+            question=question, history=history, recent_table=recent_table
+        )
+    except LLMError as e:
+        _log(f"direct answer LLM error: {e}")
+        response.error = "The assistant is unavailable right now."
+        response.answer_text = (
+            "I'm unable to answer that right now. Please try again in a moment."
+        )
+    except Exception as e:
+        _log(f"direct answer unexpected error: {e}")
+        response.error = "Internal error while answering."
+        response.answer_text = "Something went wrong. Please try again."
+    return response
+
+
 async def run_pipeline(
     question: str, history: list[dict] | None = None, officer: dict | None = None
 ) -> PipelineResponse:
@@ -94,6 +134,24 @@ async def run_pipeline(
     history = history or []
     start = time.monotonic()
     response = PipelineResponse()
+
+    # 0. Intent routing — decide whether this turn needs a NEW SQL query or can
+    #    be answered directly from conversation + the most recent result set.
+    #    Optimization: only route when there IS prior context to refer back to.
+    #    On a brand-new chat (no history) there's nothing to answer "directly"
+    #    from, so we skip the extra router LLM call and go straight to SQL;
+    #    greetings / general first messages still fall back via CANNOT_ANSWER.
+    #    Falls back to SQL on any router failure (see route_intent).
+    recent_table = _most_recent_table(history)
+    if history:
+        decision = await route_intent(
+            question=question, history=history, has_recent_data=bool(recent_table)
+        )
+        if decision == "DIRECT":
+            direct = await _run_direct(question, history, recent_table)
+            elapsed = time.monotonic() - start
+            _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (no SQL)")
+            return direct
 
     # 1. Schema linker
     try:
@@ -115,17 +173,14 @@ async def run_pipeline(
             question=question, table_names=tables, history=history, officer=officer
         )
     except CannotAnswerError:
+        # The DB can't answer this — fall back to a direct conversational
+        # answer (general question or insight about prior data) instead of a
+        # canned error.
+        _log("SQL chain returned CANNOT_ANSWER — falling back to DIRECT answer")
+        direct = await _run_direct(question, history, recent_table)
         elapsed = time.monotonic() - start
-        _log(
-            f"Pipeline completed in {elapsed:.1f}s — tables: {tables}, "
-            f"rows: 0 (CANNOT_ANSWER)"
-        )
-        response.answer_text = (
-            "I can't answer that question from the available crime database. "
-            "Please rephrase or ask about FIRs, accused persons, victims, "
-            "officers, or specific case details."
-        )
-        return response
+        _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (CANNOT_ANSWER fallback)")
+        return direct
     except SQLGenerationError as e:
         _log(f"sql generation failed: {e}")
         response.error = "Could not generate a valid query for this question."

@@ -1,4 +1,6 @@
-import { memo } from 'react'
+import { memo, useState } from 'react'
+import { exportSession } from '../api/chat.js'
+import { IconDownload } from './Icons.jsx'
 
 // Format an ISO 8601 timestamp into a short, human-friendly relative label.
 //   - Today        → time, e.g. "12:30 PM"
@@ -29,6 +31,8 @@ function formatRelativeTimestamp(iso) {
 }
 
 function SessionItem({ session, isActive, onClick }) {
+  const [isExporting, setIsExporting] = useState(false)
+
   if (!session) return null
 
   const { session_id, title, updated_at, message_count } = session
@@ -39,11 +43,32 @@ function SessionItem({ session, isActive, onClick }) {
     if (onClick) onClick(session_id)
   }
 
+  async function handleExport(e) {
+    // Don't trigger session selection when clicking the export button.
+    e.stopPropagation()
+    if (isExporting) return
+    setIsExporting(true)
+    try {
+      await exportSession(session_id)
+    } catch (err) {
+      console.error('Export failed:', err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={`session-item${isActive ? ' session-item--active' : ''}`}
       onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          handleClick()
+        }
+      }}
       aria-current={isActive ? 'true' : undefined}
     >
       <span className="session-item__title">{title || 'New chat'}</span>
@@ -53,7 +78,17 @@ function SessionItem({ session, isActive, onClick }) {
           {count} {count === 1 ? 'message' : 'messages'}
         </span>
       </span>
-    </button>
+      <button
+        type="button"
+        className="session-export-btn"
+        title="Export as PDF"
+        aria-label="Export conversation as PDF"
+        onClick={handleExport}
+        disabled={isExporting}
+      >
+        <IconDownload size={14} />
+      </button>
+    </div>
   )
 }
 

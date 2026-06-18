@@ -965,6 +965,47 @@ textarea {
   padding: 10px 12px;
   border-radius: var(--r-md);
   transition: background-color 120ms ease;
+  position: relative;
+}
+
+/* Export-as-PDF button — hidden until the row is hovered. */
+.session-export-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-sm, 6px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.session-item:hover .session-export-btn,
+.session-export-btn:focus-visible {
+  opacity: 1;
+}
+
+.session-export-btn:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.session-export-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Keep the title clear of the absolutely-positioned export button on hover. */
+.session-item__title {
+  padding-right: 4px;
 }
 
 .session-item:hover {
@@ -1121,64 +1162,6 @@ textarea {
   background: rgba(198, 69, 69, 0.08);
   border-radius: var(--r-md);
   text-align: center;
-}
-
-/*
- * Top-of-list "Load older messages" control (Req 4.3 affordance). A subtle,
- * centred pill/ghost button that recedes against the chat canvas; the disabled
- * (in-flight) state is muted so officers see the load is already running.
- */
-.load-older-btn {
-  display: block;
-  margin: 0 auto 16px;
-  appearance: none;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--hairline);
-  color: var(--muted);
-  border-radius: var(--r-pill);
-  padding: 6px 16px;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.2px;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.load-older-btn:hover:not(:disabled) {
-  background: var(--surface-card);
-  border-color: var(--primary);
-  color: var(--primary-active);
-}
-
-.load-older-btn:disabled {
-  cursor: not-allowed;
-  color: var(--muted-soft);
-  border-color: var(--hairline-soft);
-}
-
-/*
- * "No older messages" end-of-history indicator (Req 4.5). Deliberately low
- * emphasis — small, muted, centred — so it confirms the top of history without
- * drawing attention away from the conversation.
- */
-.no-older-indicator {
-  margin: 0 auto 16px;
-  text-align: center;
-  color: var(--muted-soft);
-  font-size: 12px;
-  letter-spacing: 0.2px;
-}
-
-/*
- * Inert top sentinel: the IntersectionObserver target that triggers pagination.
- * Forced to a 1px, non-interactive marker so it never adds visible vertical
- * space to the message list.
- */
-.chat-messages__top-sentinel {
-  height: 1px;
-  margin: 0;
-  padding: 0;
-  pointer-events: none;
 }
 
 /*

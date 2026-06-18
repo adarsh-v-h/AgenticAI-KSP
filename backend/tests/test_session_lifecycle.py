@@ -13,7 +13,7 @@ behaviour when NoSQL is unreachable and lets us verify the full lifecycle:
   1. Create session            (session_store.create_session / get_session / list_sessions)
   2. Send messages             (history.save_turn → get_history + metadata sync)
   3. Switch between sessions    (list_sessions ordering by updated_at DESC)
-  4. Pagination correctness     (routers.chat.get_session_messages newest-first + has_more)
+  4. Message loading           (routers.chat.get_session_messages oldest-first)
   5. Persistence across login   (fresh reads still return previously saved data)
 
 pytest-asyncio is intentionally NOT required: each test wraps its async body in
@@ -28,7 +28,6 @@ import pytest
 
 from conversation import history as history_mod
 from conversation import session_store as store_mod
-from routers.chat import get_session_messages
 
 
 # --------------------------------------------------------------------------- #
@@ -266,80 +265,86 @@ def test_get_history_capped_at_max_turns_and_chronological():
     asyncio.run(scenario())
 
 
-def test_messages_endpoint_newest_first_and_has_more():
-    async def scenario():
+def test_messages_endpoint_returns_messages_oldest_first():
+    """Step 4: the messages endpoint is MySQL-backed.
+
+    Ownership is verified via chat_store.verify_session_owner and messages come
+    from chat_store.get_messages_for_session (oldest-first). We monkeypatch both
+    (imported into routers.chat) so the test needs no live MySQL pool.
+    """
+    async def scenario(monkeypatch):
+        import routers.chat as chat_mod
+
         officer_id = 1006
         session_id = "sess-page-1"
-        await store_mod.create_session(
-            _new_session_doc(session_id, officer_id, _iso(2024, 5, 1, 0, 0, 0))
-        )
-
-        for i in range(5):  # 10 messages = MAX_TURNS exactly
-            await history_mod.save_turn(session_id, f"question {i}", f"answer {i}")
-
         officer = {"officer_id": officer_id}
 
-        # Full page (limit covers everything): newest-first, no more pages.
-        resp = await get_session_messages(
-            session_id, limit=50, before_message_id=None, officer=officer
-        )
-        assert resp.has_more is False
-        assert len(resp.messages) == history_mod.MAX_TURNS
-        ts_desc = [m.timestamp for m in resp.messages]
-        assert ts_desc == sorted(ts_desc, reverse=True), "messages must be newest-first"
+        stored = [
+            {
+                "message_id": i,
+                "role": "user" if i % 2 == 1 else "assistant",
+                "content": f"message {i}",
+                "sql_generated": "",
+                "has_table": False,
+                "has_media": False,
+                "graph_available": False,
+                "table_data": [],
+                "media_attachments": [],
+                "created_at": _iso(2024, 5, 1, 0, 0, i),
+            }
+            for i in range(1, 7)
+        ]
 
-        # Small page → older messages remain → has_more True.
-        small = await get_session_messages(
-            session_id, limit=4, before_message_id=None, officer=officer
-        )
-        assert len(small.messages) == 4
-        assert small.has_more is True
-        # The small page contains the 4 newest messages.
-        assert small.messages[0].timestamp == ts_desc[0]
+        async def fake_owner(sid, oid):
+            return sid == session_id and oid == officer_id
 
-        # Pagination with before_message_id: ask for messages older than the
-        # oldest currently-loaded message → returns the strictly older slice.
-        full_chrono = await history_mod.get_history(session_id)
-        cursor_id = full_chrono[3]["message_id"]  # 4th message chronologically
-        older = await get_session_messages(
-            session_id, limit=50, before_message_id=cursor_id, officer=officer
-        )
-        # Everything strictly older than index 3 → 3 messages, newest-first.
-        assert len(older.messages) == 3
-        older_ts = [m.timestamp for m in older.messages]
-        assert older_ts == sorted(older_ts, reverse=True)
-        assert older.has_more is False
+        async def fake_messages(sid):
+            return stored if sid == session_id else []
 
-        # Unknown cursor → nothing older.
-        none_page = await get_session_messages(
-            session_id, limit=50, before_message_id="m-does-not-exist", officer=officer
-        )
-        assert none_page.messages == []
-        assert none_page.has_more is False
+        monkeypatch.setattr(chat_mod, "verify_session_owner", fake_owner)
+        monkeypatch.setattr(chat_mod, "get_messages_for_session", fake_messages)
 
-    asyncio.run(scenario())
+        resp = await chat_mod.get_session_messages(session_id, officer=officer)
+
+        # All messages returned, oldest-first.
+        assert len(resp.messages) == len(stored)
+        ids = [m.message_id for m in resp.messages]
+        assert ids == sorted(ids), "messages must be oldest-first"
+        assert resp.messages[0].content == "message 1"
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    try:
+        asyncio.run(scenario(mp))
+    finally:
+        mp.undo()
 
 
 def test_messages_endpoint_rejects_other_officers_session():
-    async def scenario():
-        owner_id = 1007
-        session_id = "sess-owned-1"
-        await store_mod.create_session(
-            _new_session_doc(session_id, owner_id, _iso(2024, 6, 1, 0, 0, 0))
-        )
-        await history_mod.save_turn(session_id, "private question", "private answer")
-
-        intruder = {"officer_id": 7777}
-        # Ownership check returns a 404 HTTPException (never reveals existence).
+    async def scenario(monkeypatch):
+        import routers.chat as chat_mod
         from fastapi import HTTPException
 
+        owner_id = 1007
+        session_id = "sess-owned-1"
+
+        async def fake_owner(sid, oid):
+            # Only the real owner passes the ownership check.
+            return sid == session_id and oid == owner_id
+
+        monkeypatch.setattr(chat_mod, "verify_session_owner", fake_owner)
+
+        intruder = {"officer_id": 7777}
         with pytest.raises(HTTPException) as exc:
-            await get_session_messages(
-                session_id, limit=50, before_message_id=None, officer=intruder
-            )
+            await chat_mod.get_session_messages(session_id, officer=intruder)
         assert exc.value.status_code == 404
 
-    asyncio.run(scenario())
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    try:
+        asyncio.run(scenario(mp))
+    finally:
+        mp.undo()
 
 
 # --------------------------------------------------------------------------- #

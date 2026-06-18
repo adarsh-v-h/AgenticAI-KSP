@@ -298,3 +298,90 @@ def build_correction_prompt(
         "Write the corrected SQL query only."
     )
     return CORRECTION_SYSTEM_PROMPT, user_p
+
+
+# --------------------------------------------------------------------------- #
+# Intent routing + direct conversational answers
+# --------------------------------------------------------------------------- #
+
+ROUTER_SYSTEM_PROMPT = """You are a routing classifier for a Karnataka State Police crime-database assistant.
+Decide whether the officer's latest message needs a NEW database query, or can be answered without one.
+
+Reply with EXACTLY one word — either SQL or DIRECT. No punctuation, no explanation.
+
+Choose SQL when the message asks for specific records, counts, lists, statistics, or any crime data that is NOT already present in the recent conversation.
+
+Choose DIRECT when the message:
+- refers to or asks about data already shown in the recent conversation. Referential words like "those", "them", "that", "these", "the ones", "it", "the third one", "the above" almost always mean the answer is already in context — choose DIRECT,
+- asks to filter, sort, rank, count, or pick from results ALREADY shown (e.g. "which of those is open", "which is the oldest", "sort them by date") AND recent query results are available in context,
+- asks for analysis, insight, or interpretation of already-retrieved results,
+- is a greeting, thanks, or small talk,
+- is a general question that does not require crime records.
+
+Key rule: if recent query results ARE available in context and the message refers to them, choose DIRECT — do not re-query data the officer already has.
+
+When there is no recent data in context and the message asks for crime data, choose SQL."""
+
+
+DIRECT_ANSWER_SYSTEM_PROMPT = """You are a professional police intelligence assistant for Karnataka State Police officers.
+Answer the officer's question using ONLY the recent conversation and any query results provided below.
+
+RULES:
+1. Be direct, concise, and professional. Officers are busy.
+2. When recent query results are provided, base your answer strictly on that data — surface patterns, counts, notable records, and status mix that are actually present in the rows.
+3. NEVER invent facts, numbers, trends, percentages, dates, or comparisons that are not directly present in the provided data or conversation. Do NOT say things like "a 15% increase from last month" unless that exact figure appears in the data. If the data is a single count or too thin to draw an insight from, simply state what the data shows and stop.
+4. If the information needed is not in the conversation or the provided results, say so plainly and suggest the officer ask for it as a new query (e.g. "I don't have that detail — ask me to pull it and I'll query the database.").
+5. NEVER output a markdown table (no `|`-separated rows, no `|---|` divider). The earlier results are already shown to the officer separately.
+6. Use plain professional English. Markdown lists, **bold**, and inline emphasis are fine for prose.
+7. For greetings or general questions, respond naturally and briefly."""
+
+
+def build_router_prompt(
+    question: str,
+    history: list[dict] | None,
+    has_recent_data: bool,
+) -> tuple[str, str]:
+    """
+    Build (system_prompt, prompt) for the intent router classification call.
+    Keeps context small so the decision is fast.
+    """
+    history_block = _format_history_for_prompt(history or [])
+    parts = []
+    if history_block:
+        parts.append(f"Recent conversation:\n{history_block}\n")
+    parts.append(
+        f"Recent query results are available in context: "
+        f"{'yes' if has_recent_data else 'no'}\n"
+    )
+    parts.append(f"Officer's latest message: {question}\n")
+    parts.append("Answer with one word — SQL or DIRECT:")
+    return ROUTER_SYSTEM_PROMPT, "\n".join(parts)
+
+
+def build_direct_answer_prompt(
+    question: str,
+    history: list[dict] | None,
+    recent_table: list[dict] | None,
+) -> tuple[str, str]:
+    """
+    Build (system_prompt, prompt) for a direct conversational answer that skips
+    SQL — used for follow-ups about already-retrieved data, requests for
+    insight, and general questions. Includes a richer slice of history than the
+    router plus the most recent query results when available.
+    """
+    history_block = _format_history_for_prompt(history or [], max_turns=4, max_chars=400)
+    parts = []
+    if history_block:
+        parts.append(f"Recent conversation:\n{history_block}\n")
+    if recent_table:
+        truncated = _truncate_for_answer(recent_table, max_rows=30)
+        try:
+            rows_json = json.dumps(truncated, indent=2, default=str)
+        except Exception:
+            rows_json = str(truncated)
+        parts.append(
+            f"Most recent query results ({len(recent_table)} record(s)):\n{rows_json}\n"
+        )
+    parts.append(f"Officer's question: {question}\n")
+    parts.append("Answer the question professionally:")
+    return DIRECT_ANSWER_SYSTEM_PROMPT, "\n".join(parts)
