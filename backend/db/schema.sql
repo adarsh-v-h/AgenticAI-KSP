@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     has_table       BOOLEAN DEFAULT FALSE,
     has_media       BOOLEAN DEFAULT FALSE,
     graph_available BOOLEAN DEFAULT FALSE,
+    table_data_json MEDIUMTEXT DEFAULT NULL,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id),
     INDEX idx_messages_session (session_id, created_at)

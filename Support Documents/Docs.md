@@ -54,6 +54,7 @@ backend/
 │   ├── schema.sql             # DDL for all tables (incl. chat_sessions, chat_messages)
 │   ├── seed.py                # Synthetic data generator (200+ FIRs)
 │   ├── chat_store.py          # Persistent sessions + messages (MySQL) + rich data (NoSQL)
+│   ├── nosql_client.py        # Centralized Catalyst NoSQL client wrapper
 │   └── schema_catalog.py      # Table metadata, schema builder, few-shot bank
 ├── llm/
 │   ├── client.py              # HTTP client for Catalyst QuickML
@@ -73,6 +74,7 @@ backend/
 └── routers/
     ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
     ├── export.py              # POST /api/chat/sessions/{id}/export (PDF via SmartBrowz)
+    ├── reports.py             # POST /api/reports/analyze (Report analysis & upload)
     └── auth.py                # POST /api/auth/login + /api/auth/logout
 ```
 
@@ -98,7 +100,7 @@ backend/
 2. `create_pool()` → MySQL connection pool (minsize=3, maxsize=10)
 3. DB probe → `SELECT 1`, sets `app.state.db_ok`
 4. NoSQL probe → confirms Catalyst NoSQL reachable
-5. Register `auth_router`, `chat_router`, and `export_router`
+5. Register `auth_router`, `chat_router`, `export_router`, and `reports_router`
 
 **App metadata:**
 - `title`: `"KSP Crime Intelligence API"`
@@ -106,7 +108,7 @@ backend/
 - `docs_url`: `"/docs"` (Swagger UI available during dev)
 - `redoc_url`: `None` (ReDoc disabled)
 
-**Registered routers:** `auth_router`, `chat_router`, and `export_router` (PDF export).
+**Registered routers:** `auth_router`, `chat_router`, `export_router`, and `reports_router`.
 
 **CORS config:** Only allows the single origin from `ALLOWED_ORIGINS` env var. Methods: GET, POST. Headers: Authorization, Content-Type.
 
@@ -176,7 +178,7 @@ backend/
 | `case_relationships` | Links between entities for network graph | `rel_id` (PK), `entity_a_type`/`entity_a_id`, `entity_b_type`/`entity_b_id`, `relationship_type` (ENUM of 6 types) |
 | `evidence_media` | Media files attached to FIRs (Stratus) | `media_id` (PK), `fir_id` (FK), `media_type` (ENUM), `stratus_folder_id`, `stratus_file_id` |
 | `chat_sessions` | One row per conversation (Step 4) | `session_id` (PK, VARCHAR 36), `officer_id` (FK→officers), `title`, `created_at`, `updated_at` (auto-update), `message_count`, `is_active`; INDEX `(officer_id, updated_at)` |
-| `chat_messages` | One row per turn — user OR assistant (Step 4) | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `created_at`; INDEX `(session_id, created_at)` |
+| `chat_messages` | One row per turn — user OR assistant (Step 4) | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data_json` (MEDIUMTEXT), `created_at`; INDEX `(session_id, created_at)` |
 
 **Design rationale:** Case-type tables are separate (not one giant table) because: (1) smaller tables mean faster queries without full-scan WHERE clauses on type, (2) the schema linker can inject only the relevant table, (3) each case type has distinct columns.
 
@@ -538,6 +540,11 @@ Attempt 2:
 
 **Purpose:** Persistent chat storage added in Step 4. Sessions and per-message metadata live in **MySQL** (Catalyst Data Store); rich result data (table snapshots, media) for a message lives in **NoSQL**, keyed by message id. All functions are non-fatal — they log and return a safe default on error so a storage outage never breaks the chat.
 
+**Local Fallback for Rich Data:**
+To handle Zoho Catalyst NoSQL credential limitations in local development environments (which often raise `OAUTH_SCOPE_MISMATCH`), `chat_store.py` incorporates a persistent local JSON file fallback (`local_rich_data.json`).
+- Writes and reads to `local_rich_data.json` are synchronized using an `asyncio.Lock` to ensure concurrency/thread safety.
+- When NoSQL writes or reads fail, the system transparently falls back to this local file, preserving tables and media attachments across restarts and enabling them to render correctly in exports and conversation loads.
+
 **Functions:**
 
 | Function | Description |
@@ -547,11 +554,32 @@ Attempt 2:
 | `get_sessions_for_officer(officer_id, limit=30) -> list[dict]` | Loads the officer's active sessions newest-first (`ORDER BY updated_at DESC`), datetimes serialized to ISO strings. Backs the sidebar. Returns `[]` on error. |
 | `verify_session_owner(session_id, officer_id) -> bool` | Ownership check used before loading messages or exporting. Returns `False` if not found or owned by another officer. |
 | `save_message_pair(session_id, question, answer_text, sql_generated, has_table, has_media, graph_available, table_data, media_attachments) -> int \| None` | Inserts the user row + assistant row; when the assistant turn has a table/media, saves the rich data to NoSQL keyed by the assistant `message_id`. Returns the assistant `message_id`. |
-| `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); hydrates `table_data`/`media_attachments` from NoSQL for assistant messages that carry them. |
-| `save_rich_data(message_id, table_data, media_attachments)` | Writes `{table_data, media_attachments}` to NoSQL `message_rich_data` under key `msg_rich_{message_id}`. Non-fatal. |
-| `load_rich_data(message_id) -> dict \| None` | Reads and parses the rich-data document for a message. Returns `None` on miss/error. |
+| `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); hydrates `table_data`/`media_attachments` from NoSQL or the local fallback for assistant messages that carry them. |
+| `save_rich_data(message_id, table_data, media_attachments)` | Writes `{table_data, media_attachments}` to NoSQL `message_rich_data` under key `msg_rich_{message_id}`. Falls back to `local_rich_data.json` on any NoSQL error. Non-fatal. |
+| `load_rich_data(message_id) -> dict \| None` | Reads and parses the rich-data document for a message from NoSQL, or from `local_rich_data.json` if NoSQL is missing/fails. Returns `None` on miss/error. |
 
-> **Environment note:** The NoSQL `message_rich_data` round-trip depends on a reachable Catalyst NoSQL endpoint + valid token. When NoSQL is unavailable the MySQL persistence still works fully; only the rich table/media hydration on reload degrades (rows come back empty until NoSQL is reachable).
+> **Environment note:** The NoSQL `message_rich_data` round-trip depends on a reachable Catalyst NoSQL endpoint + valid token. When NoSQL is unavailable the MySQL persistence still works fully; only the rich table/media hydration on reload degrades (rows come back empty unless they exist in the local JSON fallback `local_rich_data.json`).
+
+---
+
+### 3.16c `backend/db/nosql_client.py`
+
+**Purpose:** Centralized Zoho Catalyst NoSQL client. Wraps the raw HTTP requests to Zoho Catalyst NoSQL tables, handling authorization, base URL resolution, and serialization/deserialization of JSON records to and from Catalyst format (e.g. `{"S": "value"}`).
+
+**Key Helpers:**
+- `serialize_to_catalyst(val)`: Converts standard Python types (bool, int, float, str, list, dict, None) into the structured nested format required by Catalyst NoSQL.
+- `deserialize_from_catalyst(c_val)`: Recursively decodes Catalyst-formatted values back into standard Python primitives.
+- `deserialize_item(item_data)`: Converts a full document object from Catalyst format.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `get_document(table_name, document_id, timeout=5.0)` | POSTs to `/nosqltable/{table_name}/item/fetch` to fetch a document by ID. Returns the deserialized dict, or `None` if it does not exist (404) or fails. |
+| `insert_document(table_name, document_id, document_data, timeout=5.0)` | POSTs to `/nosqltable/{table_name}/item` to insert a serialized document. Returns `True` on success; raises `NoSQLError` on failure. |
+| `update_document(table_name, document_id, updates, timeout=5.0)` | PUTs to `/nosqltable/{table_name}/item` with update operations. Returns `True` on success; raises `NoSQLError` on failure. |
+| `delete_document(table_name, document_id, timeout=5.0)` | Sends a DELETE request to `/nosqltable/{table_name}/item`. Returns `True` on success; raises `NoSQLError` on failure. |
+| `list_documents(table_name, timeout=5.0)` | GETs `/nosqltable/{table_name}/item` to retrieve all items. Returns a list of deserialized dicts. |
 
 ---
 
@@ -658,7 +686,31 @@ Attempt 2:
 | `_build_html(officer_name, badge_number, title, messages) -> str` | Builds a styled, self-contained HTML document: a header (officer + badge + session title + export date), each message (user bubbles right-aligned, assistant blocks with any result table rendered, max 50 rows), and a confidential footer. |
 | `export_session_pdf(session_id, officer)` | `POST /api/chat/sessions/{id}/export` — (1) verifies ownership via `verify_session_owner` (404 on mismatch); (2) loads messages via `get_messages_for_session` (400 if none); (3) fetches session title + officer name/badge from MySQL; (4) builds HTML; (5) POSTs to `SMARTBROWZ_URL` for a PDF. On success streams `application/pdf` (`KSP-Chat-{id}.pdf`). **Fallback:** if SmartBrowz returns non-200 or errors, streams the raw HTML as a downloadable `.html` so the export button always works. |
 
-> **Note:** `SMARTBROWZ_URL` was previously a reserved/optional env var; it is now actively read by this router. The exact SmartBrowz request shape should be verified against Catalyst docs before a production demo — the HTML fallback covers the case where it differs.
+> Note: `SMARTBROWZ_URL` was previously a reserved/optional env var; it is now actively read by this router. The exact SmartBrowz request shape should be verified against Catalyst docs before a production demo — the HTML fallback covers the case where it differs.
+
+---
+
+### 3.21 `backend/routers/reports.py`
+
+**Purpose:** Handles analysis and intelligence extraction from uploaded report files. Extracts text from base64 data payloads, classifies themes/entities, relates them to existing case/chat context using `MODEL_ANSWER`, and persists the interaction to both conversation history (NoSQL) and database (MySQL).
+
+**Pydantic models:**
+- `ReportAnalysisRequest`: Fields: `session_id`, `prompt`, `file_name`, `mime_type`, `data_base64`.
+- `ReportAnalysisResponse`: Fields: `answer_text`, `extracted_chars`, `file_name`, `warning`.
+
+**Key helpers:**
+- `_decode_file(data_base64)`: Decodes the base64 payload into raw bytes, limiting file size to 5MB.
+- `_decode_text(raw)`: Decodes bytes to string trying `utf-8-sig`, `utf-8`, `cp1252`, `latin-1` or ignoring errors.
+- `_extract_docx_text(raw)`: Parses DOCX OpenXML ZIP content to extract paragraph text.
+- `_extract_pdf_text(raw)`: Decodes PDF content, resolving compressed zlib streams and textual literals.
+- `extract_report_text(raw, file_name, mime_type)`: Dispatches text extraction depending on file extension or mime type. Truncates results to 14,000 characters.
+- `build_report_prompt(prompt, file_name, text, history)`: Assembles system and user prompts, blending the officer's request, recent conversation context, and report content.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `analyze_report(request, officer)` | `POST /api/reports/analyze` — Decodes report, extracts text, queries `MODEL_ANSWER` via QuickML with a customized analysis prompt, appends the turn to history/DB, and returns the markdown response. |
 
 ---
 
@@ -934,8 +986,7 @@ frontend/
     │   ├── OfficerRow.jsx    # Sidebar-bottom officer avatar + sign-out popup
     │   └── Icons.jsx         # Inline SVG icon set (no icon library)
     ├── hooks/
-    │   ├── useAuth.js        # Auth state management
-    │   └── useLang.js        # Language selection state hook
+    │   └── useAuth.js        # Auth state management
     ├── styles/
     │   └── main.css          # Warm-canvas styling (Design.md) — app shell + components
     └── test/
@@ -1425,11 +1476,8 @@ the suggestions) and during an active chat (pinned at the bottom).
 - `setLang(newLang)`: Updates language, updates `localStorage` key `ksp_portal_lang`, and updates the `lang` attribute on `html` and `body` elements.
 - `t(en, kn)`: Translation helper returning `kn` if language is Kannada, otherwise `en`.
 
----
-
-### 6.18 `frontend/src/hooks/useLang.js`
-
-**Purpose:** Custom hook that consumes `LangContext` and provides access to `lang`, `setLang`, and the translation helper `t()`. Re-exported to preserve compatibility with existing imports.
+**Custom Hook:**
+- Exports the `useLang()` custom hook directly, allowing any component inside the provider tree to easily consume the language state and the translation helper.
 
 ---
 
@@ -1687,3 +1735,9 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 - **`db/connection.py`:** three no-op `global _pool` declarations (in `get_pool`,
   `execute_query`, `execute_write`) that only read the variable.
 - Confirmed clean via `pyflakes`; full test suite green after each removal.
+
+### 9.11 `frontend/src/hooks/useLang.js` — DELETED
+
+- **What it was:** A custom hook that managed the language state locally using `useState`.
+- **Status:** Deleted from disk.
+- **Why removed:** Replaced by `frontend/src/context/LangContext.jsx` which manages the active language state globally as a single source of truth, synchronizes it with localStorage, and exports the `useLang` hook directly to components.

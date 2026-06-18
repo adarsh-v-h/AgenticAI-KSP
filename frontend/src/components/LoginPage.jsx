@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLang } from '../hooks/useLang';
+import { useLang } from '../context/LangContext.jsx';
 
 export default function LoginPage({ onLogin, isLoading, error }) {
   const { t } = useLang();

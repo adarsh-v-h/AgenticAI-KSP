@@ -43,7 +43,10 @@ export function startChatStream(question, sessionId, callbacks = {}) {
         signal: controller.signal,
       })
     } catch (err) {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) {
+        callbacks.onDone?.()
+        return
+      }
       callbacks.onError?.('Cannot reach the server. Please try again.')
       callbacks.onDone?.()
       return
@@ -282,46 +285,6 @@ export async function fetchSessions() {
   }
 }
 
-/**
- * Create a new chat session for the authenticated officer.
- *
- * POST /api/chat/sessions
- *
- * @returns {Promise<object>} the created session object
- *   ({session_id, title, created_at, updated_at, message_count})
- * @throws {AuthError} on 401
- * @throws {Error} on other non-ok responses or network failure
- */
-export async function createSession() {
-  let response
-  try {
-    response = await fetchWithRetry(() =>
-      fetch('/api/chat/sessions', {
-        method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({}),
-      }),
-    )
-  } catch (err) {
-    console.error('createSession: network error', err)
-    throw new Error('Cannot reach the server. Please try again.')
-  }
-
-  if (response.status === 401) {
-    throw new AuthError()
-  }
-  if (!response.ok) {
-    console.error(`createSession: unexpected status ${response.status}`)
-    throw new Error(`Failed to create session (HTTP ${response.status}).`)
-  }
-
-  try {
-    return await response.json()
-  } catch (err) {
-    console.error('createSession: failed to parse response', err)
-    throw new Error('Received an invalid response from the server.')
-  }
-}
 
 /**
  * Fetch all messages for a session.
@@ -433,3 +396,4 @@ export async function exportSession(sessionId) {
   a.remove()
   URL.revokeObjectURL(url)
 }
+

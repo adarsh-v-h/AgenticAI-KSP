@@ -1,25 +1,51 @@
 import { useEffect, useRef } from 'react'
-import { IconPaperclip, IconMic, IconArrowUp } from './Icons.jsx'
+import { IconMic, IconArrowUp, IconPaperclip } from './Icons.jsx'
 
 /**
- * Composer â€” the message input box, always at the bottom of the screen.
+ * Composer – the message input box, always at the bottom of the screen.
  *
  * Props:
  *   value: string
  *   onChange: (val: string) => void
  *   onSend: (text: string) => void
- *   disabled: bool â€” true while streaming
- *   statusText: string | null â€” pipeline status shown above composer
+ *   onStop: () => void – called when the stop button is clicked while streaming
+ *   disabled: bool – true while streaming
+ *   statusText: string | null – pipeline status shown above composer
  *
  * Features:
  *   - Textarea auto-grows up to 160px, then scrolls
  *   - Enter sends, Shift+Enter adds newline
- *   - Attach + Voice buttons (placeholders â€” not yet functional)
+ *   - Voice button (placeholder – not yet functional)
  *   - Send button (coral, arrow icon, disabled while streaming or input empty)
+ *   - While streaming, the send button is replaced by a stop button so the
+ *     officer can cancel a long-running query
  *   - Status text shown above the box while streaming
  */
-export default function Composer({ value, onChange, onSend, disabled, statusText }) {
+
+function IconStop({ size = 14 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="10" height="10" rx="2" />
+    </svg>
+  )
+}
+
+export default function Composer({
+  value,
+  onChange,
+  onSend,
+  onStop,
+  disabled,
+  statusText,
+}) {
   const textareaRef = useRef(null)
+  const canSend = !disabled && value.trim()
 
   // Auto-resize textarea up to 160px, then scroll.
   useEffect(() => {
@@ -32,7 +58,7 @@ export default function Composer({ value, onChange, onSend, disabled, statusText
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!disabled && value.trim()) {
+      if (canSend) {
         onSend(value.trim())
       }
     }
@@ -69,17 +95,18 @@ export default function Composer({ value, onChange, onSend, disabled, statusText
 
           <div className="composer-actions">
             <div className="composer-left-actions">
-              {/* Attach â€” placeholder, not yet functional */}
+              {/* Attach – UI only, file analysis coming via Zoho Catalyst */}
               <button
                 className="composer-action-btn not-yet"
-                title="Attach file (coming soon)"
+                title="Attach report (coming soon)"
                 onClick={() => {}}
+                disabled={disabled}
                 type="button"
               >
                 <IconPaperclip size={18} />
               </button>
 
-              {/* Voice â€” placeholder, not yet functional */}
+              {/* Voice – placeholder, not yet functional */}
               <button
                 className="composer-action-btn not-yet"
                 title="Voice input (coming soon)"
@@ -90,18 +117,30 @@ export default function Composer({ value, onChange, onSend, disabled, statusText
               </button>
             </div>
 
-            {/* Send */}
-            <button
-              className="send-btn"
-              onClick={() => value.trim() && onSend(value.trim())}
-              disabled={disabled || !value.trim()}
-              type="button"
-            >
-              <IconArrowUp size={16} />
-            </button>
+            {disabled ? (
+              <button
+                className="send-btn send-btn--stop"
+                onClick={() => onStop?.()}
+                type="button"
+                title="Stop generating"
+              >
+                <IconStop size={14} />
+              </button>
+            ) : (
+              <button
+                className="send-btn"
+                onClick={() => canSend && onSend(value.trim())}
+                disabled={!canSend}
+                type="button"
+                title="Send message"
+              >
+                <IconArrowUp size={16} />
+              </button>
+            )}
           </div>
         </div>
       </div>
     </div>
   )
 }
+
