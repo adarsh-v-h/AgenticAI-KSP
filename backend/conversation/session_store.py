@@ -37,22 +37,13 @@ _local_sessions: dict[str, dict] = {}
 _local_lock = asyncio.Lock()
 
 
-def _nosql_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {get('CATALYST_API_TOKEN')}",
-        "Content-Type": "application/json",
-        "CATALYST-ORG": get("CATALYST_ORG_ID"),
-    }
-
-
-def _nosql_url(session_id: str) -> str:
-    base = get("NOSQL_BASE_URL").rstrip("/")
-    return f"{base}/table/session_metadata/document/{session_id}"
-
-
-def _nosql_collection_url() -> str:
-    base = get("NOSQL_BASE_URL").rstrip("/")
-    return f"{base}/table/session_metadata/document"
+from db.nosql_client import (
+    NoSQLError,
+    get_document,
+    insert_document,
+    update_document,
+    list_documents,
+)
 
 
 def _log(msg: str) -> None:
@@ -78,17 +69,6 @@ async def _local_list(officer_id: int | None = None) -> list[dict]:
     return docs
 
 
-def _document(doc: dict) -> dict:
-    """
-    Normalise a Catalyst NoSQL response into the bare session_metadata document.
-    Catalyst returns the stored document under a "data" key; some shapes return
-    the document directly. Handle both.
-    """
-    if isinstance(doc, dict) and isinstance(doc.get("data"), dict):
-        return doc["data"]
-    return doc
-
-
 async def create_session(document: dict) -> dict:
     """
     Persist a new session_metadata document. `document` must already contain
@@ -106,21 +86,9 @@ async def create_session(document: dict) -> dict:
     await _local_set(session_id, document)
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                _nosql_collection_url(),
-                headers=_nosql_headers(),
-                json={"data": document},
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code in (200, 201, 204):
-                return document
-            _log(
-                f"session_metadata POST returned {response.status_code} "
-                f"for {session_id}"
-            )
+        await insert_document("session_metadata", session_id, document, timeout=_NOSQL_TIMEOUT)
     except Exception as e:
-        _log(f"session_metadata POST failed for {session_id}: {e}")
+        _log(f"ERROR: session_metadata POST failed for {session_id}: {e}")
 
     return document
 
@@ -135,25 +103,12 @@ async def get_session(session_id: str) -> dict | None:
         return None
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                _nosql_url(session_id),
-                headers=_nosql_headers(),
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code == 200:
-                doc = _document(response.json())
-                if isinstance(doc, dict) and doc:
-                    return doc
-                return await _local_get(session_id)
-            if response.status_code == 404:
-                return await _local_get(session_id)
-            _log(
-                f"session_metadata GET unexpected status "
-                f"{response.status_code} for {session_id}"
-            )
+        doc = await get_document("session_metadata", session_id, timeout=_NOSQL_TIMEOUT)
+        if doc is not None:
+            return doc
+        return await _local_get(session_id)
     except Exception as e:
-        _log(f"session_metadata GET failed for {session_id}: {e}")
+        _log(f"ERROR: session_metadata GET failed for {session_id}: {e}")
 
     return await _local_get(session_id)
 
@@ -172,43 +127,22 @@ async def update_session(session_id: str, updates: dict) -> dict | None:
 
     existing = await get_session(session_id)
     if existing is None:
-        _log(f"session_metadata PUT skipped — {session_id} not found")
+        _log(f"ERROR: session_metadata PUT skipped — {session_id} not found")
         return None
 
     merged = {**existing, **updates, "id": session_id}
     await _local_set(session_id, merged)
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                _nosql_url(session_id),
-                headers=_nosql_headers(),
-                json={"data": merged},
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code in (200, 201, 204):
-                return merged
-            if response.status_code == 404:
-                # Document doesn't exist — create it.
-                created = await client.post(
-                    _nosql_collection_url(),
-                    headers=_nosql_headers(),
-                    json={"data": merged},
-                    timeout=_NOSQL_TIMEOUT,
-                )
-                if created.status_code in (200, 201, 204):
-                    return merged
-                _log(
-                    f"session_metadata POST (via PUT) returned "
-                    f"{created.status_code} for {session_id}"
-                )
-                return merged
-            _log(
-                f"session_metadata PUT returned {response.status_code} "
-                f"for {session_id}"
-            )
+        try:
+            await update_document("session_metadata", session_id, merged, timeout=_NOSQL_TIMEOUT)
+        except NoSQLError as ne:
+            if "404" in str(ne):
+                await insert_document("session_metadata", session_id, merged, timeout=_NOSQL_TIMEOUT)
+            else:
+                raise
     except Exception as e:
-        _log(f"session_metadata PUT failed for {session_id}: {e}")
+        _log(f"ERROR: session_metadata PUT failed for {session_id}: {e}")
 
     return merged
 
@@ -225,30 +159,9 @@ async def list_sessions(officer_id: int) -> list[dict]:
     docs: list[dict] | None = None
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                _nosql_collection_url(),
-                headers=_nosql_headers(),
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code == 200:
-                payload = response.json()
-                raw = payload.get("data") if isinstance(payload, dict) else payload
-                if isinstance(raw, list):
-                    docs = [_document(item) for item in raw]
-                elif isinstance(raw, dict):
-                    docs = [_document(raw)]
-                else:
-                    docs = []
-            elif response.status_code == 404:
-                docs = None  # fall back to in-memory
-            else:
-                _log(
-                    f"session_metadata list GET unexpected status "
-                    f"{response.status_code} for officer {officer_id}"
-                )
+        docs = await list_documents("session_metadata", timeout=_NOSQL_TIMEOUT)
     except Exception as e:
-        _log(f"session_metadata list GET failed for officer {officer_id}: {e}")
+        _log(f"ERROR: session_metadata list GET failed for officer {officer_id}: {e}")
 
     if docs is None:
         docs = await _local_list(officer_id)

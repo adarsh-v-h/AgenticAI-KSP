@@ -564,6 +564,56 @@ textarea {
   overflow: hidden;
 }
 
+/* ---------- Chat area header ---------- */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
+  flex-shrink: 0;
+}
+
+.chat-header__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+.chat-header__export-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.chat-header__export-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+  color: var(--primary-active);
+}
+
+.chat-header__export-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .messages-scroll {
   flex: 1;
   overflow-y: auto;
@@ -610,6 +660,57 @@ textarea {
 
 .composer-box:focus-within {
   border-color: var(--primary);
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.attachment-chip__name {
+  max-width: min(360px, 52vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.attachment-chip__meta {
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.attachment-chip__remove {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-chip__remove:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .composer-textarea {
@@ -1818,3 +1919,87 @@ textarea {
       display: block;
       font-size: 0.82em;
     }
+
+/* ---------- Chat panel header (title + Export PDF button) ---------- */
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.chat-header__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header__export-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: transparent;
+  border: 1px solid var(--primary);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chat-header__export-btn:hover:not(:disabled) {
+  background: var(--primary);
+  color: #fff;
+}
+
+.chat-header__export-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- Messages loading state ---------- */
+
+.messages-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.messages-loading__bubble {
+  height: 48px;
+  border-radius: var(--r-md);
+  background: linear-gradient(90deg, var(--surface-hover) 25%, var(--hairline) 50%, var(--surface-hover) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+
+.messages-loading__bubble:nth-child(odd) {
+  width: 65%;
+  align-self: flex-end;
+  height: 36px;
+}
+
+.messages-loading__bubble:nth-child(even) {
+  width: 80%;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

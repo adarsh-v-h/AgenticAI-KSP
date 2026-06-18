@@ -82,22 +82,13 @@ _local_history: dict[str, list[dict]] = {}
 _local_lock = asyncio.Lock()
 
 
-def _nosql_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {get('CATALYST_API_TOKEN')}",
-        "Content-Type": "application/json",
-        "CATALYST-ORG": get("CATALYST_ORG_ID"),
-    }
-
-
-def _nosql_url(session_id: str) -> str:
-    base = get("NOSQL_BASE_URL").rstrip("/")
-    return f"{base}/table/conversation_history/document/{session_id}"
-
-
-def _nosql_collection_url() -> str:
-    base = get("NOSQL_BASE_URL").rstrip("/")
-    return f"{base}/table/conversation_history/document"
+from db.nosql_client import (
+    NoSQLError,
+    get_document,
+    insert_document,
+    update_document,
+    delete_document,
+)
 
 
 def _log(msg: str) -> None:
@@ -132,33 +123,19 @@ async def get_history(session_id: str) -> list[dict]:
         return []
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                _nosql_url(session_id),
-                headers=_nosql_headers(),
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code == 200:
-                payload = response.json()
-                # Catalyst returns the document under "data". The actual
-                # field name we wrote ("history") may be a JSON-encoded string
-                # (legacy) or a JSON array (enhanced format).
-                doc = payload.get("data") or payload
-                raw = doc.get("history") if isinstance(doc, dict) else None
-                if raw is None:
-                    return await _local_get(session_id)
-                turns = json.loads(raw) if isinstance(raw, str) else raw
-                if isinstance(turns, list):
-                    return _migrate_messages(turns[-MAX_TURNS:])
-                return []
-            if response.status_code == 404:
+        doc = await get_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT)
+        if doc is not None:
+            raw = doc.get("history")
+            if raw is None:
                 return await _local_get(session_id)
-            _log(
-                f"history GET unexpected status {response.status_code} "
-                f"for {session_id}"
-            )
+            turns = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(turns, list):
+                return _migrate_messages(turns[-MAX_TURNS:])
+            return []
+        else:
+            return await _local_get(session_id)
     except Exception as e:
-        _log(f"history GET failed for {session_id}: {e}")
+        _log(f"ERROR: history GET failed for {session_id}: {e}")
 
     return await _local_get(session_id)
 
@@ -297,38 +274,16 @@ async def save_turn(
     )
 
     try:
-        async with httpx.AsyncClient() as client:
-            url = _nosql_url(session_id)
-            response = await client.put(
-                url,
-                headers=_nosql_headers(),
-                json={"data": document},
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code in (200, 201, 204):
-                return
-            if response.status_code == 404:
-                # Document doesn't exist — create it.
-                create_url = _nosql_collection_url()
-                created = await client.post(
-                    create_url,
-                    headers=_nosql_headers(),
-                    json={"data": {**document, "id": session_id}},
-                    timeout=_NOSQL_TIMEOUT,
-                )
-                if created.status_code in (200, 201, 204):
-                    return
-                _log(
-                    f"history POST returned {created.status_code} "
-                    f"for {session_id}"
-                )
-                return
-            _log(
-                f"history PUT returned {response.status_code} "
-                f"for {session_id}"
-            )
+        try:
+            await update_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT)
+        except NoSQLError as ne:
+            # If document doesn't exist, we get a 404 error
+            if "404" in str(ne):
+                await insert_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT)
+            else:
+                raise
     except Exception as e:
-        _log(f"history PUT failed for {session_id}: {e}")
+        _log(f"ERROR: history save/update failed for {session_id}: {e}")
 
 
 async def clear_history(session_id: str) -> None:
@@ -337,14 +292,9 @@ async def clear_history(session_id: str) -> None:
         return
     await _local_clear(session_id)
     try:
-        async with httpx.AsyncClient() as client:
-            await client.delete(
-                _nosql_url(session_id),
-                headers=_nosql_headers(),
-                timeout=_NOSQL_TIMEOUT,
-            )
+        await delete_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT)
     except Exception as e:
-        _log(f"history DELETE failed for {session_id}: {e}")
+        _log(f"ERROR: history DELETE failed for {session_id}: {e}")
 
 
 async def init_nosql_table() -> None:
@@ -354,20 +304,8 @@ async def init_nosql_table() -> None:
     service is reachable so we can warn early if it isn't. Never raises.
     """
     try:
-        async with httpx.AsyncClient() as client:
-            base = get("NOSQL_BASE_URL").rstrip("/")
-            # A HEAD-style probe — fetching a non-existent doc is enough to
-            # confirm auth + path work. 404 is a healthy "service alive" signal.
-            response = await client.get(
-                f"{base}/table/conversation_history/document/__probe__",
-                headers=_nosql_headers(),
-                timeout=_NOSQL_TIMEOUT,
-            )
-            if response.status_code in (200, 404):
-                return
-            _log(
-                f"NoSQL probe returned status {response.status_code}; "
-                f"history will fall back to in-memory store."
-            )
+        # A probe — fetching a non-existent doc is enough to confirm auth + path work.
+        # 404 is handled inside get_document and returns None safely.
+        await get_document("conversation_history", "__probe__", timeout=_NOSQL_TIMEOUT)
     except Exception as e:
-        _log(f"NoSQL probe failed: {e}; history will use in-memory store.")
+        _log(f"ERROR: NoSQL probe failed: {e}; history will use in-memory store.")

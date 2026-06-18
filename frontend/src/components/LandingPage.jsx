@@ -1,5 +1,5 @@
 import React from 'react';
-import { useLang } from '../hooks/useLang';
+import { useLang } from '../context/LangContext.jsx';
 
 export default function LandingPage({ onEnter }) {
   const { t } = useLang();
