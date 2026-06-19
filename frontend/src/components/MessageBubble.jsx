@@ -1,4 +1,23 @@
+import { useState } from 'react'
 import TableRenderer from './TableRenderer.jsx'
+import { IconNetwork, IconSpeaker } from './Icons.jsx'
+import { speakText } from '../api/voice.js'
+import { useLang } from '../context/LangContext.jsx'
+
+// Pull the first usable fir_id out of structured table rows so "View network"
+// can open a graph centered on that case. Returns null when no fir_id column
+// is present (e.g. aggregate-only results).
+function firstFirId(tableData) {
+  if (!Array.isArray(tableData)) return null
+  for (const row of tableData) {
+    if (row && row.fir_id != null) {
+      const n = Number(row.fir_id)
+      if (Number.isFinite(n)) return n
+    }
+  }
+  return null
+}
+
 
 // Defense-in-depth filter for Bug 1 (Duplicate Table Rendering).
 //
@@ -62,6 +81,8 @@ export default function MessageBubble({
   content,
   tableData,
   mediaAttachments,
+  graphAvailable,
+  onOpenGraph,
   isStreaming,
   error,
 }) {
@@ -81,6 +102,25 @@ export default function MessageBubble({
   const hasTable = Array.isArray(tableData) && tableData.length > 0
   const renderedContent = hasTable ? stripMarkdownTable(content) : content
 
+  const { lang } = useLang()
+  const [isSpeaking, setIsSpeaking] = useState(false)
+
+  // On-demand read-aloud (Zia TTS). Best-effort: speakText never throws and
+  // returns false when synthesis is unavailable, so the button just resets.
+  async function handleReadAloud() {
+    if (isSpeaking) return
+    const text = (renderedContent || '').trim()
+    if (!text) return
+    setIsSpeaking(true)
+    try {
+      await speakText(text, lang)
+    } finally {
+      setIsSpeaking(false)
+    }
+  }
+
+  const canReadAloud = !isStreaming && !error && (renderedContent || '').trim().length > 0
+
   return (
     <div className="message message--assistant">
       <div className="message__meta">Assistant</div>
@@ -90,6 +130,32 @@ export default function MessageBubble({
       </div>
 
       {hasTable ? <TableRenderer data={tableData} /> : null}
+
+      <div className="message__actions">
+        {canReadAloud ? (
+          <button
+            type="button"
+            className="message-action-btn"
+            onClick={handleReadAloud}
+            disabled={isSpeaking}
+            title="Read answer aloud"
+          >
+            {isSpeaking ? <span className="voice-spinner" /> : <IconSpeaker size={14} />}
+            <span>{isSpeaking ? 'Reading...' : 'Read aloud'}</span>
+          </button>
+        ) : null}
+
+        {graphAvailable && firstFirId(tableData) != null ? (
+          <button
+            type="button"
+            className="view-network-btn"
+            onClick={() => onOpenGraph?.({ firId: firstFirId(tableData) })}
+          >
+            <IconNetwork size={14} />
+            <span>View network</span>
+          </button>
+        ) : null}
+      </div>
 
       {Array.isArray(mediaAttachments) && mediaAttachments.length > 0 ? (
         <div className="media-list">

@@ -165,7 +165,7 @@ Then apply fixes, re-run, and repeat until the AI reports zero findings.
 ## SECTION 6 — Security & Safety (Quick Pass)
 
 - [ ] Find any API keys, secrets, or credentials hardcoded in any file — move to environment variables immediately.
-- [ ] Find any FastAPI routes that are missing authentication/authorization checks that should have them — AI often skips auth when adding new endpoints.
+- [x] ~~Find any FastAPI routes that are missing authentication/authorization checks that should have them — AI often skips auth when adding new endpoints.~~ **FIXED:** All session-referencing routes now enforce object-level authorization (BOLA/IDOR mitigation). Read paths (`GET .../messages`, `POST .../export`) verify ownership via `verify_session_owner` → 404 on mismatch. Write paths (`POST /api/chat`, `GET /api/chat/stream`, `POST /api/reports/analyze`) check ownership before expensive work, reusing the existence result to avoid duplicate queries. Tested in `test_session_authz.py` (6 tests).
 - [ ] Find any MySQL queries built with string concatenation involving user-supplied values — parameterize them.
 - [ ] Find any CORS configuration that uses `allow_origins=["*"]` in a non-development context — restrict it.
 - [ ] Find any NoSQL keys that include unescaped user input directly — sanitize or hash them.
