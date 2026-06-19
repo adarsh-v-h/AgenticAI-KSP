@@ -84,3 +84,25 @@ export function IconDownload({ size = 20 }) {
     </svg>
   )
 }
+
+export function IconNetwork({ size = 20 }) {
+  // Three connected nodes — "network / relationship graph".
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="5" cy="6" r="2" />
+      <circle cx="15" cy="6" r="2" />
+      <circle cx="10" cy="15" r="2" />
+      <path d="M6.7 7.4l2.6 6.2M13.3 7.4l-2.6 6.2M7 6h6" />
+    </svg>
+  )
+}
+
+export function IconSpeaker({ size = 20 }) {
+  // Speaker with sound waves — "read aloud / text-to-speech".
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 7.5h3l4-3v11l-4-3H4z" />
+      <path d="M14 7a3.5 3.5 0 0 1 0 6" />
+    </svg>
+  )
+}

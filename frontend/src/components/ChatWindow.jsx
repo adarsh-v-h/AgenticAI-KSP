@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AuthError,
   fetchMessages,
@@ -12,6 +12,11 @@ import WelcomeScreen from './WelcomeScreen.jsx'
 import Composer from './Composer.jsx'
 import OfficerRow from './OfficerRow.jsx'
 import { IconSidebarOpen, IconSidebarClose, IconNewChat, IconDownload } from './Icons.jsx'
+
+// Lazy-loaded: vis-network is a large dependency only needed when an officer
+// opens a network graph. Code-splitting it keeps the main bundle small and the
+// initial chat load fast — the graph chunk is fetched on first use.
+const NetworkGraph = lazy(() => import('./NetworkGraph.jsx'))
 
 const SIDEBAR_COLLAPSED_KEY = 'chs.sidebarCollapsed'
 
@@ -57,6 +62,8 @@ export default function ChatWindow({ officer, onLogout }) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [isExportingActive, setIsExportingActive] = useState(false)
+  // Which network graph (if any) is open in the modal overlay. null = closed.
+  const [graphTarget, setGraphTarget] = useState(null)
 
   const [sessionError, setSessionError] = useState(null)
   const [sessionsError, setSessionsError] = useState(null)
@@ -246,6 +253,7 @@ export default function ChatWindow({ officer, onLogout }) {
         content: '',
         tableData: null,
         mediaAttachments: null,
+        graphAvailable: false,
         isStreaming: true,
         error: false,
       }
@@ -263,6 +271,7 @@ export default function ChatWindow({ officer, onLogout }) {
           updateLastAssistant((m) => ({ content: (m.content || '') + chunk })),
         onTable: (rows) => updateLastAssistant(() => ({ tableData: rows })),
         onMedia: (refs) => updateLastAssistant(() => ({ mediaAttachments: refs })),
+        onGraphAvailable: () => updateLastAssistant(() => ({ graphAvailable: true })),
         onError: (msg) =>
           updateLastAssistant((m) => ({
             content: (m.content && m.content.length > 0 ? m.content + '\n\n' : '') + msg,
@@ -313,6 +322,7 @@ export default function ChatWindow({ officer, onLogout }) {
               Array.isArray(m.media_attachments) && m.media_attachments.length > 0
                 ? m.media_attachments
                 : null,
+            graphAvailable: Boolean(m.graph_available),
             isStreaming: false,
             error: false,
           }))
@@ -549,6 +559,8 @@ export default function ChatWindow({ officer, onLogout }) {
                     content={m.content}
                     tableData={m.tableData}
                     mediaAttachments={m.mediaAttachments}
+                    graphAvailable={m.graphAvailable}
+                    onOpenGraph={setGraphTarget}
                     isStreaming={m.isStreaming}
                     error={m.error}
                   />
@@ -565,6 +577,16 @@ export default function ChatWindow({ officer, onLogout }) {
           </div>
         )}
       </main>
+
+      {graphTarget ? (
+        <Suspense fallback={null}>
+          <NetworkGraph
+            firId={graphTarget.firId ?? null}
+            accusedId={graphTarget.accusedId ?? null}
+            onClose={() => setGraphTarget(null)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

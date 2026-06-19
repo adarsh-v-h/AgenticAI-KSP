@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from pipeline.query_pipeline import run_pipeline
+from graph.network_builder import build_graph_for_fir, build_graph_for_accused
 from conversation.history import get_history, save_turn
 from conversation.session_store import create_session
 from auth.simple_auth import get_current_officer, get_current_officer_sse
@@ -88,7 +89,7 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, default=str)}\n\n"
 
 
-async def _persist_turn(session_id: str, officer: dict, question: str, result) -> None:
+async def _persist_turn(session_id: str, officer: dict, question: str, result, session_exists: bool) -> None:
     """
     Persist a completed pipeline turn to MySQL (Step 4).
 
@@ -96,15 +97,14 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result) -
     user + assistant message pair (with rich data to NoSQL when present), and
     bumps the session's updated_at / message_count.
 
+    `session_exists` is the ownership/existence result already computed by the
+    caller's authorization gate, so we avoid a duplicate existence query.
+
     Never raises — persistence failures are logged and non-fatal so the chat
     keeps working even when the Data Store is unavailable.
     """
     try:
-        existing = await execute_query(
-            "SELECT session_id FROM chat_sessions WHERE session_id = %s",
-            (session_id,),
-        )
-        if not existing:
+        if not session_exists:
             await create_chat_session_row(
                 session_id, officer["officer_id"], question[:60]
             )
@@ -123,6 +123,62 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result) -
         await update_session_timestamp(session_id)
     except Exception as e:
         _log(f"_persist_turn failed (non-fatal): {e}")
+
+
+async def _authorize_session_write(session_id: str, officer_id: int) -> bool:
+    """
+    Authorization gate for chat write paths (POST /api/chat and the SSE stream).
+
+    Prevents BOLA/IDOR (OWASP API1:2023): an authenticated officer must not be
+    able to write turns into another officer's session by supplying its
+    session_id. Returns the existence flag (True if the session already exists
+    and is owned by this officer) so the caller can pass it to `_persist_turn`
+    without a second existence query.
+
+    Raises HTTP 404 (not 403) when the session exists but belongs to another
+    officer — we never reveal that a foreign session exists. A not-yet-existing
+    session is allowed (create-or-append: the officer owns it on creation).
+
+    Returns True when the session already exists (and is owned by this officer),
+    False when it does not yet exist.
+    """
+    rows = await execute_query(
+        "SELECT officer_id FROM chat_sessions WHERE session_id = %s",
+        (session_id,),
+    )
+    if rows and rows[0]["officer_id"] != officer_id:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return bool(rows)
+
+
+@router.get("/api/graph/fir/{fir_id}")
+async def graph_by_fir(
+    fir_id: int,
+    officer: dict = Depends(get_current_officer),
+) -> dict:
+    """
+    Return a vis.js-compatible network graph centered on a FIR.
+
+    No ownership check: FIR/accused data is station-scoped, not officer-scoped —
+    any authenticated officer may view any case's network (unlike chat sessions,
+    which are officer-owned). The `get_current_officer` auth gate is sufficient.
+
+    Always HTTP 200 with `{"nodes": [...], "edges": [...]}` — the builder returns
+    an empty graph on error rather than raising, so this never 500s.
+    """
+    return await build_graph_for_fir(fir_id)
+
+
+@router.get("/api/graph/accused/{accused_id}")
+async def graph_by_accused(
+    accused_id: int,
+    officer: dict = Depends(get_current_officer),
+) -> dict:
+    """
+    Return a vis.js-compatible network graph centered on an accused person.
+    Same station-scoped authorization model as `graph_by_fir`. Always HTTP 200.
+    """
+    return await build_graph_for_accused(accused_id)
 
 
 @router.get("/api/chat/sessions", response_model=SessionListResponse)
@@ -267,6 +323,11 @@ async def chat(
             error="Empty question.",
         )
 
+    # Object-level authorization gate (BOLA/IDOR) before any pipeline work.
+    session_exists = await _authorize_session_write(
+        request.session_id, officer["officer_id"]
+    )
+
     try:
         history = await get_history(request.session_id)
     except Exception as e:
@@ -299,7 +360,7 @@ async def chat(
             _log(f"save_turn failed (non-fatal): {e}")
 
         # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
-        await _persist_turn(request.session_id, officer, question, result)
+        await _persist_turn(request.session_id, officer, question, result, session_exists)
 
     return ChatResponse(
         answer_text=result.answer_text,
@@ -340,6 +401,13 @@ async def chat_stream(
     q = question.strip()
     if not q:
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
+
+    # Object-level authorization gate (BOLA/IDOR) before opening the stream, so
+    # a forged/foreign session_id returns a clean HTTP 404 rather than a 200
+    # SSE stream carrying an error event.
+    session_exists = await _authorize_session_write(
+        session_id, officer["officer_id"]
+    )
 
     async def event_generator():
         try:
@@ -412,7 +480,7 @@ async def chat_stream(
                 _log(f"save_turn failed in stream (non-fatal): {e}")
 
             # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
-            await _persist_turn(session_id, officer, q, result)
+            await _persist_turn(session_id, officer, q, result, session_exists)
 
             yield _sse({"type": "done"})
 

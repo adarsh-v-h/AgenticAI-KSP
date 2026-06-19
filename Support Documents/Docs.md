@@ -75,6 +75,7 @@ backend/
     ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
     ├── export.py              # POST /api/chat/sessions/{id}/export (PDF via SmartBrowz)
     ├── reports.py             # POST /api/reports/analyze (Report analysis & upload)
+    ├── voice.py               # POST /api/voice/transcribe, /api/voice/speak (Zia STT/TTS)
     └── auth.py                # POST /api/auth/login + /api/auth/logout
 ```
 
@@ -108,9 +109,38 @@ backend/
 - `docs_url`: `"/docs"` (Swagger UI available during dev)
 - `redoc_url`: `None` (ReDoc disabled)
 
-**Registered routers:** `auth_router`, `chat_router`, `export_router`, and `reports_router`.
+**Registered routers:** `auth_router`, `chat_router`, `export_router`, `reports_router`, and `voice_router`.
 
 **CORS config:** Only allows the single origin from `ALLOWED_ORIGINS` env var. Methods: GET, POST. Headers: Authorization, Content-Type.
+
+---
+
+### 3.1a Security — Authorization & BOLA/IDOR Mitigation
+
+**Overview:** All protected routes enforce **authentication** via JWT (the `get_current_officer` or `get_current_officer_sse` dependency). Beyond that, routes that reference a `session_id` must also enforce **object-level authorization** to prevent BOLA (Broken Object Level Authorization) / IDOR (Insecure Direct Object Reference) attacks — OWASP's #1 API security risk (API1:2023).
+
+**The vulnerability:** An authenticated officer could supply another officer's `session_id` (by guessing, brute-forcing, or observing) and read or modify their session if the backend doesn't check ownership.
+
+**The fix — two patterns:**
+
+1. **Read authorization** (GET endpoints that load a session's data):
+   - Call `chat_store.verify_session_owner(session_id, officer_id) -> bool` before any query.
+   - Returns `False` if the session doesn't exist or belongs to another officer.
+   - On `False`, raise `HTTPException(status_code=404)` — never 403, to avoid leaking that another officer's session exists.
+   - **Used by:** `GET /api/chat/sessions/{id}/messages`, `POST /api/chat/sessions/{id}/export`
+
+2. **Write authorization** (POST/GET endpoints that persist turns into a session):
+   - Check ownership **before any expensive work** (pipeline, LLM call, file decode) so a forged `session_id` is rejected cheaply.
+   - **Create-or-append semantics:** the first turn of a brand-new session legitimately targets a `session_id` that doesn't yet exist (the officer will own it on creation). Only reject when the session *exists and is owned by someone else*.
+   - The check is a single indexed PK lookup: `SELECT officer_id FROM chat_sessions WHERE session_id = %s`. If rows exist and `officer_id` doesn't match → `HTTPException(status_code=404)`. If no rows → allowed (will be created). If rows match → allowed (owner).
+   - Reuse the existence result so `_persist_turn` / `_persist_report_turn` don't run a duplicate query — same query count as before, now also doing auth.
+   - **Used by:** `POST /api/chat`, `GET /api/chat/stream`, `POST /api/reports/analyze`
+
+**Performance:** The authorization check is a single primary-key lookup (session_id is the PK) — effectively free — and reusing the existence result means **zero added round-trips** relative to the previous code.
+
+**Error response:** Always return **404** (not 403) when a session exists but belongs to another officer, so we never reveal that the foreign session exists. This is the industry-standard pattern for BOLA/IDOR mitigation.
+
+**Tests:** `backend/tests/test_session_authz.py` covers all three write endpoints: intruder rejection (404, asserting the pipeline/LLM never runs), owner acceptance, and brand-new-session acceptance.
 
 ---
 
@@ -178,7 +208,9 @@ backend/
 | `case_relationships` | Links between entities for network graph | `rel_id` (PK), `entity_a_type`/`entity_a_id`, `entity_b_type`/`entity_b_id`, `relationship_type` (ENUM of 6 types) |
 | `evidence_media` | Media files attached to FIRs (Stratus) | `media_id` (PK), `fir_id` (FK), `media_type` (ENUM), `stratus_folder_id`, `stratus_file_id` |
 | `chat_sessions` | One row per conversation (Step 4) | `session_id` (PK, VARCHAR 36), `officer_id` (FK→officers), `title`, `created_at`, `updated_at` (auto-update), `message_count`, `is_active`; INDEX `(officer_id, updated_at)` |
-| `chat_messages` | One row per turn — user OR assistant (Step 4) | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data_json` (MEDIUMTEXT), `created_at`; INDEX `(session_id, created_at)` |
+| `chat_messages` | One row per turn — user OR assistant (Step 4) | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data_json` (MEDIUMTEXT, nullable), `created_at`; INDEX `(session_id, created_at)` |
+
+**Rich data storage migration:** The `table_data_json` column (MEDIUMTEXT) was added to `chat_messages` to co-locate tabular query results with the message they belong to. Previously, this data lived in a separate NoSQL document (`message_rich_data`). The new approach eliminates a round-trip, simplifies recovery logic, and keeps all message data in one indexed query. The `_serialize()` helper in `chat_store.py` handles `date`/`datetime`/`timedelta` objects during JSON serialization.
 
 **Design rationale:** Case-type tables are separate (not one giant table) because: (1) smaller tables mean faster queries without full-scan WHERE clauses on type, (2) the schema linker can inject only the relevant table, (3) each case type has distinct columns.
 
@@ -552,9 +584,9 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 | `create_session(session_id, officer_id, title) -> bool` | `INSERT IGNORE` a new `chat_sessions` row (title clipped to 60 chars). Returns `True`/`False`. |
 | `update_session_timestamp(session_id, increment_count=True)` | Touches `updated_at` and (by default) bumps `message_count` by 2 (one user + one assistant turn). Called after every successful pipeline run. |
 | `get_sessions_for_officer(officer_id, limit=30) -> list[dict]` | Loads the officer's active sessions newest-first (`ORDER BY updated_at DESC`), datetimes serialized to ISO strings. Backs the sidebar. Returns `[]` on error. |
-| `verify_session_owner(session_id, officer_id) -> bool` | Ownership check used before loading messages or exporting. Returns `False` if not found or owned by another officer. |
-| `save_message_pair(session_id, question, answer_text, sql_generated, has_table, has_media, graph_available, table_data, media_attachments) -> int \| None` | Inserts the user row + assistant row; when the assistant turn has a table/media, saves the rich data to NoSQL keyed by the assistant `message_id`. Returns the assistant `message_id`. |
-| `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); hydrates `table_data`/`media_attachments` from NoSQL or the local fallback for assistant messages that carry them. |
+| `verify_session_owner(session_id, officer_id) -> bool` | **Read authorization:** checks that `session_id` exists and belongs to `officer_id`. Used before loading messages (`GET .../messages`) or exporting. Returns `False` if not found or owned by another officer. Enables BOLA/IDOR mitigation on read paths. |
+| `save_message_pair(session_id, question, answer_text, sql_generated, has_table, has_media, graph_available, table_data, media_attachments) -> int \| None` | Inserts the user row + assistant row. When `has_table` is True, serializes `table_data` directly into the `table_data_json` MEDIUMTEXT column (replacing the old NoSQL `save_rich_data` pattern). Returns the assistant `message_id`. |
+| `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); deserializes `table_data` from the `table_data_json` column for assistant messages. |
 | `save_rich_data(message_id, table_data, media_attachments)` | Writes `{table_data, media_attachments}` to NoSQL `message_rich_data` under key `msg_rich_{message_id}`. Falls back to `local_rich_data.json` on any NoSQL error. Non-fatal. |
 | `load_rich_data(message_id) -> dict \| None` | Reads and parses the rich-data document for a message from NoSQL, or from `local_rich_data.json` if NoSQL is missing/fails. Returns `None` on miss/error. |
 
@@ -627,12 +659,13 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 | Function | Description |
 |----------|-------------|
 | `_sse(event) -> str` | Formats a dict as an SSE `data:` line with `\n\n` terminator |
-| `_persist_turn(session_id, officer, question, result)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message, saves the user+assistant pair via `chat_store.save_message_pair` (rich data to NoSQL when present), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. Called after `save_turn` in both chat endpoints. |
+| `_authorize_session_write(session_id, officer_id) -> bool` | **Authorization gate for write paths.** Mitigates BOLA/IDOR (OWASP API1:2023) by verifying that `session_id` either (a) doesn't exist yet (create-or-append: officer will own it), or (b) exists and belongs to `officer_id`. Raises HTTP 404 (not 403) if owned by another officer. Returns the existence flag (True if session exists) so `_persist_turn` avoids a duplicate query. Single indexed PK lookup — negligible cost. |
+| `_persist_turn(session_id, officer, question, result, session_exists)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message (when `session_exists=False`), saves the user+assistant pair via `chat_store.save_message_pair` (table data serialized to MySQL `table_data_json` column), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. Called after `save_turn` in both chat endpoints. |
 | `list_chat_sessions(officer)` | `GET /api/chat/sessions` — lists the officer's sessions newest-first **from MySQL** (`chat_store.get_sessions_for_officer`). Always HTTP 200 (returns `[]` on DB error). |
 | `create_chat_session(officer)` | `POST /api/chat/sessions` — creates a NoSQL `session_metadata` doc and returns `SessionMetadata` (HTTP 201). **Currently unused by the UI** (see [9.5](#95-backend-created-sessions-on-new-chat--deprecated-flow-change)). |
-| `get_session_messages(session_id, officer)` | `GET /api/chat/sessions/{id}/messages` — verifies ownership via `chat_store.verify_session_owner` (404 on mismatch/not-found), then returns all messages oldest-first from MySQL + NoSQL rich data. **No pagination** (the prior `limit`/`before_message_id` cursor flow was removed — see [9.9](#99-message-pagination--removed)). |
-| `chat(request, officer)` | `POST /api/chat` — non-streaming endpoint (testing/fallback). Fetches history, runs pipeline, `save_turn` (with `assistant_table`), then `_persist_turn`. Always returns HTTP 200 with `ChatResponse`. |
-| `chat_stream(question, session_id, officer)` | `GET /api/chat/stream` — SSE streaming endpoint. Protected by `get_current_officer_sse` (header or query param). After the pipeline, `save_turn` (with `assistant_table`) then `_persist_turn`. Returns `StreamingResponse` with `text/event-stream`. |
+| `get_session_messages(session_id, officer)` | `GET /api/chat/sessions/{id}/messages` — **read authorization:** verifies ownership via `chat_store.verify_session_owner` (404 on mismatch/not-found), then returns all messages oldest-first from MySQL with `table_data` deserialized from the `table_data_json` column. **No pagination** (the prior `limit`/`before_message_id` cursor flow was removed — see [9.9](#99-message-pagination--removed)). |
+| `chat(request, officer)` | `POST /api/chat` — non-streaming endpoint (testing/fallback). **Enforces write authorization** via `_authorize_session_write` before any pipeline work. Fetches history, runs pipeline, `save_turn` (with `assistant_table`), then `_persist_turn`. Always returns HTTP 200 with `ChatResponse`. Returns HTTP 404 if `session_id` belongs to another officer. |
+| `chat_stream(question, session_id, officer)` | `GET /api/chat/stream` — SSE streaming endpoint. Protected by `get_current_officer_sse` (header or query param). **Enforces write authorization** via `_authorize_session_write` before opening the stream, so a forged `session_id` returns a clean HTTP 404 instead of an in-stream error. After the pipeline, `save_turn` (with `assistant_table`) then `_persist_turn`. Returns `StreamingResponse` with `text/event-stream`. |
 | `_tokenize(text) -> list[str]` | Splits text into space-preserving tokens for word-by-word streaming. Each token (except last) includes trailing space. |
 
 **SSE event types emitted by `chat_stream`:**
@@ -683,8 +716,10 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 
 | Function | Description |
 |----------|-------------|
-| `_build_html(officer_name, badge_number, title, messages) -> str` | Builds a styled, self-contained HTML document: a header (officer + badge + session title + export date), each message (user bubbles right-aligned, assistant blocks with any result table rendered, max 50 rows), and a confidential footer. |
-| `export_session_pdf(session_id, officer)` | `POST /api/chat/sessions/{id}/export` — (1) verifies ownership via `verify_session_owner` (404 on mismatch); (2) loads messages via `get_messages_for_session` (400 if none); (3) fetches session title + officer name/badge from MySQL; (4) builds HTML; (5) POSTs to `SMARTBROWZ_URL` for a PDF. On success streams `application/pdf` (`KSP-Chat-{id}.pdf`). **Fallback:** if SmartBrowz returns non-200 or errors, streams the raw HTML as a downloadable `.html` so the export button always works. |
+| `_escape(value) -> str` | HTML-escapes a value (including quotes) so user content, table headers, and cells are safely rendered in the PDF. Returns empty string for `None`. |
+| `_merge_history_tables(messages, history) -> list[dict]` | Recovery helper: fills missing assistant `table_data` from conversation history snapshots. The UI can show tables from a live stream even when rich persistence is unavailable; this helper ensures exports recover them from the bounded history snapshot so older/partially-saved turns still include visible DB rows. |
+| `_build_html(officer_name, badge_number, title, messages) -> str` | Builds a styled, self-contained HTML document: a header (officer + badge + session title + export date), each message (user bubbles right-aligned, assistant blocks with any result table rendered, max 50 rows, with a record-count footer), and a confidential footer. All content is HTML-escaped. |
+| `export_session_pdf(session_id, officer)` | `POST /api/chat/sessions/{id}/export` — **(1) read authorization:** verifies ownership via `verify_session_owner` (404 on mismatch); **(2)** loads messages via `get_messages_for_session` (400 if none); merges table snapshots from history; **(3)** fetches session title + officer name/badge from MySQL; **(4)** builds HTML; **(5)** POSTs to `SMARTBROWZ_URL` with auth header (`Zoho-oauthtoken`) to convert to PDF. On success streams `application/pdf` (`KSP-Chat-{id}.pdf`). **Fallback:** if SmartBrowz returns non-200 or errors, streams the raw HTML as a downloadable `.html` so the export button always works. |
 
 > Note: `SMARTBROWZ_URL` was previously a reserved/optional env var; it is now actively read by this router. The exact SmartBrowz request shape should be verified against Catalyst docs before a production demo — the HTML fallback covers the case where it differs.
 
@@ -702,15 +737,16 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 - `_decode_file(data_base64)`: Decodes the base64 payload into raw bytes, limiting file size to 5MB.
 - `_decode_text(raw)`: Decodes bytes to string trying `utf-8-sig`, `utf-8`, `cp1252`, `latin-1` or ignoring errors.
 - `_extract_docx_text(raw)`: Parses DOCX OpenXML ZIP content to extract paragraph text.
-- `_extract_pdf_text(raw)`: Decodes PDF content, resolving compressed zlib streams and textual literals.
-- `extract_report_text(raw, file_name, mime_type)`: Dispatches text extraction depending on file extension or mime type. Truncates results to 14,000 characters.
+- `_extract_html_text(text)`: Strips `<script>` and `<style>` blocks, removes all HTML tags, and unescapes entities.
+- `extract_report_text(raw, file_name, mime_type)`: Dispatches text extraction depending on file extension or mime type. Supports: DOCX (unzip + XML parse), text/markdown/HTML/JSON/CSV (decode + optional tag-stripping). **Rejects PDF and unknown binary types** with HTTP 415 and an actionable message; PDF requires a real library (pypdf/pdfminer) and scanned PDFs need OCR. Truncates results to 14,000 characters.
 - `build_report_prompt(prompt, file_name, text, history)`: Assembles system and user prompts, blending the officer's request, recent conversation context, and report content.
+- `_persist_report_turn(session_id, officer, question, answer, session_exists)`: Persists the report-analysis turn to MySQL (creates session if `session_exists` is False). Non-fatal — logs errors instead of raising.
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `analyze_report(request, officer)` | `POST /api/reports/analyze` — Decodes report, extracts text, queries `MODEL_ANSWER` via QuickML with a customized analysis prompt, appends the turn to history/DB, and returns the markdown response. |
+| `analyze_report(request, officer)` | `POST /api/reports/analyze` — **Enforces session ownership authorization (BOLA/IDOR mitigation)** before any expensive work. Decodes report (max 5MB), extracts text (DOCX/text/markdown/HTML supported; PDF/binary rejected), queries `MODEL_ANSWER` via QuickML (max_tokens=8000), appends turn to NoSQL history + MySQL, and returns the analysis. Returns HTTP 404 if `session_id` belongs to another officer (not 403, to avoid leaking existence). |
 
 ---
 
@@ -1741,3 +1777,140 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 - **What it was:** A custom hook that managed the language state locally using `useState`.
 - **Status:** Deleted from disk.
 - **Why removed:** Replaced by `frontend/src/context/LangContext.jsx` which manages the active language state globally as a single source of truth, synchronizes it with localStorage, and exports the `useLang` hook directly to components.
+
+
+---
+
+## 10. Recent Changes
+
+### 10.1 Security — BOLA/IDOR Mitigation (Authorization on Session Access)
+
+**Date:** June 19, 2026  
+**Issue:** Three write endpoints (`POST /api/chat`, `GET /api/chat/stream`, `POST /api/reports/analyze`) and the reports feature lacked object-level authorization. An authenticated officer could write turns into another officer's session by supplying its `session_id` — a textbook BOLA (Broken Object Level Authorization) / IDOR (Insecure Direct Object Reference) vulnerability (OWASP API1:2023).
+
+**Fix:**
+- **Read paths** (already correct): `GET /api/chat/sessions/{id}/messages` and `POST /api/chat/sessions/{id}/export` call `verify_session_owner()` and return HTTP 404 (not 403) on mismatch, to avoid leaking that a foreign session exists.
+- **Write paths** (added authorization):
+  - `POST /api/chat` and `GET /api/chat/stream` now call `_authorize_session_write()` **before** any pipeline work, returning HTTP 404 if the `session_id` exists and belongs to another officer. Create-or-append semantics are preserved: a not-yet-existing `session_id` is allowed (the officer will own it on creation).
+  - `POST /api/reports/analyze` does an inline ownership check before file decode and the LLM call, reusing the existence result to avoid a duplicate query in `_persist_report_turn`.
+  - All three write paths reuse the existence flag so `_persist_turn` / `_persist_report_turn` no longer run a separate `SELECT` to check if the session exists — **same query count as before, now also doing authorization.**
+
+**Performance:** Single indexed PK lookup (session_id is the PK) — effectively free. Zero added round-trips.
+
+**Tests:** `backend/tests/test_session_authz.py` (6 tests) covers intruder rejection (404, asserting pipeline/LLM/decode never runs), owner acceptance, and brand-new-session acceptance across all three write endpoints.
+
+**Documentation:** Added [§3.1a Security — Authorization & BOLA/IDOR Mitigation](#31a-security--authorization--bolaidor-mitigation) section explaining the two patterns and why we return 404 instead of 403.
+
+---
+
+### 10.2 Report Text Extraction — Lean & Reliable (Removed Fragile PDF Parser)
+
+**Date:** June 19, 2026  
+**Issue:** `routers/reports.py` included a hand-rolled PDF text extractor (`_extract_pdf_text`) that brute-forced `zlib.decompress` on every stream in the PDF and ran multiple regex passes over PDF operators. High compute, unreliable output (garbage on most real PDFs — compressed object streams, custom encodings, scanned pages).
+
+**Fix:**
+- **Kept** (cheap, stdlib-only, reliable): DOCX (unzip + XML parse), text/markdown/HTML/JSON/CSV (decode + optional tag-stripping via `_extract_html_text`).
+- **Removed**: `_pdf_literal_to_text()`, `_extract_pdf_text()`, and the `zlib` import.
+- **PDF and unknown binary types now reject cleanly** with HTTP 415 (`UnsupportedReportFormat`) and an actionable message: *"PDF analysis isn't supported yet. Please upload the report as text, Markdown, or a Word (.docx) file."*
+- Proper PDF support, if the feature gets prioritized, should use a real library (pypdf/pdfminer) — a deliberate dependency, not a hack.
+
+**Rationale:** Aligns with the "least compute, enough results" principle. DOCX extraction is a trivial unzip + XML read, and text/markdown/HTML are just decode + optional tag-strip. The PDF brute-forcer was the only compute-heavy, fragile part.
+
+**Tests:** `backend/tests/test_report_extraction.py` (7 tests) covers DOCX by extension + by MIME, plain text, Markdown, HTML tag-stripping + entity unescaping, PDF rejection with helpful message, and unknown-binary rejection.
+
+**Documentation:** Updated [§3.21 `backend/routers/reports.py`](#321-backendreporterspy) key helpers list and function table to reflect the new extraction behavior and the `UnsupportedReportFormat` exception.
+
+---
+
+### 10.3 LLM Token Budget — Report Analysis (12000 → 8000)
+
+**Date:** June 19, 2026  
+**Issue:** `POST /api/reports/analyze` called `call_llm(max_tokens=12000)` when assembling the analysis prompt. QuickML treats `max_tokens` as the **total** budget (input + output), not just the output length. The report prompt embeds up to ~3,500 tokens of extracted text plus a short history slice, so 12000 was over-allocated.
+
+**Fix:** Changed to `max_tokens=8000`, matching the existing `answer_formatter` convention. Still comfortably covers the prompt (input) plus a full intelligence note (output), without over-allocating.
+
+**Documentation:** Added an inline comment explaining the QuickML token semantics and the sizing rationale.
+
+---
+
+### 10.4 CSS — Removed Duplicate `.chat-header` Block
+
+**Date:** June 19, 2026  
+**Issue:** `frontend/src/styles/main.css` contained two `.chat-header` / `.chat-header__title` / `.chat-header__export-btn` blocks — one at line ~568, another at line ~1925. The second block won the cascade, making the first block dead overridden code (a merge artifact).
+
+**Fix:** Removed the first block (lines 568–616). Rendering is byte-for-byte identical; confirmed by a clean frontend production build.
+
+**Documentation:** No behavior change, so no doc update needed beyond this changelog entry.
+
+---
+
+### 10.5 Rich Data Storage — NoSQL → MySQL `table_data_json` Column
+
+**Date:** Prior to June 19, 2026 (teammate change)  
+**What changed:** Previously, tabular query results attached to an assistant message were stored in a separate Catalyst NoSQL document keyed by `msg_rich_{message_id}`. Now they're serialized directly into a `table_data_json MEDIUMTEXT` column on the `chat_messages` table.
+
+**Rationale:** Eliminates a round-trip, simplifies recovery logic (no need to hydrate from a separate store), and keeps all message data in one indexed query. The `_serialize()` helper in `chat_store.py` handles `date`/`datetime`/`timedelta` objects.
+
+**Functions affected:**
+- `chat_store.save_message_pair()`: now serializes `table_data` to `table_data_json` instead of calling a separate `save_rich_data()` helper.
+- `chat_store.get_messages_for_session()`: deserializes from `table_data_json` instead of calling `load_rich_data()`.
+- `save_rich_data()` and `load_rich_data()` removed from `chat_store.py`.
+
+**Schema change:** `backend/db/schema.sql` — `chat_messages` table gained `table_data_json MEDIUMTEXT DEFAULT NULL`.
+
+**Documentation:** Updated [§3.4 `backend/db/schema.sql`](#34-backenddbschemasql) with a "Rich data storage migration" note and [§3.16b `backend/db/chat_store.py`](#316b-backenddbchat_storepy) function descriptions.
+
+---
+
+### 10.6 NoSQL Client Centralization
+
+**Date:** Prior to June 19, 2026 (teammate change)  
+**What changed:** `conversation/history.py` and `conversation/session_store.py` previously had their own inline `httpx` calls to Catalyst NoSQL, each with duplicate `_nosql_headers()`, `_nosql_url()`, and `_nosql_collection_url()` helpers. These were replaced with calls to `db.nosql_client.get_document()`, `insert_document()`, `update_document()`, `delete_document()`, `list_documents()`.
+
+**Auth header change:** `Authorization` header changed from `"Bearer {TOKEN}"` to `"Zoho-oauthtoken {TOKEN}"` (the correct Catalyst API convention, per the BLUEPRINT).
+
+**Documentation:** Added [§3.16c `backend/db/nosql_client.py`](#316c-backenddbnosql_clientpy) section documenting the centralized NoSQL wrapper.
+
+
+---
+
+### 10.7 Network Graph Visualization (Step 5 — Part 1)
+
+**Date:** June 19, 2026  
+**What:** Renders the criminal network from `case_relationships` on demand.
+
+**Backend:**
+- `backend/graph/network_builder.py` (new) — `build_graph_for_fir(fir_id)` and `build_graph_for_accused(accused_id)` return vis.js-compatible `{"nodes": [...], "edges": [...]}`. Node ids are namespaced by entity type (`fir_2`, `accused_5`) to avoid cross-table id collisions. Labels resolved in grouped queries (≤4 per call). Degree-based trim to `MAX_NODES=50`, always keeping the center node. Both builders never raise — empty graph on error.
+- `backend/routers/chat.py` — `GET /api/graph/fir/{fir_id}` and `GET /api/graph/accused/{accused_id}`. Auth-gated via `get_current_officer`. **No ownership check** by design: FIR/accused data is station-scoped, not officer-owned (unlike chat sessions). Always HTTP 200 (empty graph on error, never 500).
+
+**Frontend:**
+- `NetworkGraph.jsx` (new) — vis-network modal, color-coded by entity group, loading/empty/error states, instance destroyed on unmount. **Lazy-loaded** via `React.lazy` so vis-network (≈653 KB) is code-split into its own chunk fetched only when an officer first opens a graph — main bundle unchanged.
+- `MessageBubble.jsx` — "View network" button shown when `graphAvailable` and a `fir_id` is extractable from the table rows.
+- `ChatWindow.jsx` — graph modal state, `onGraphAvailable` stream callback, `graphAvailable` persisted on history reload.
+- `Icons.jsx` — `IconNetwork`. `main.css` — graph overlay + button styles.
+
+**Dependency:** `vis-network` + `vis-data` (MIT, actively maintained). `npm audit` confirmed zero vulnerabilities in these packages (pre-existing dev-only esbuild/vite advisories are unrelated).
+
+**Tests:** `backend/tests/test_network_graph.py` (10 tests) — node/edge construction, id namespacing, edge dedupe, fallback labels, center-node-preserving trim, and async builders with `execute_query` monkeypatched.
+
+---
+
+### 10.8 Voice Pipeline (Step 5 — Part 2)
+
+**Date:** June 19, 2026  
+**What:** Mic input (Zia STT), Kannada→English translation, and on-demand read-aloud (Zia TTS).
+
+**Backend:**
+- `backend/voice/zia_voice.py` (new) — `transcribe_audio()`, `translate_to_english()`, `synthesize_speech()`. House conventions: `Zoho-oauthtoken` auth + `CATALYST-ORG` header, `{"data": ...}` envelope unwrap. STT/TTS raise `VoiceError`; translation degrades gracefully (returns original text on any failure so the pipeline still runs untranslated).
+- `backend/routers/voice.py` (new) — `POST /api/voice/transcribe` (multipart audio, 10 MB cap; auto-translates when `language="kn"`) and `POST /api/voice/speak` (text → `audio/mpeg` stream). Auth-gated. Failures return HTTP 502 so the UI degrades (STT → "please type"; TTS → simply no audio).
+- `backend/main.py` — registered `voice_router`.
+
+**Frontend:**
+- `api/voice.js` (new) — `recordAndTranscribe()` and `speakText()` (best-effort, revokes blob URLs after playback).
+- `VoiceInput.jsx` (new) — mic button with idle/recording/processing states, 30 s auto-stop, mic-stream cleanup on unmount. Replaces the old placeholder mic in `Composer.jsx`; transcript is appended to the composer for review (not auto-sent). Language comes from `useLang()`.
+- `MessageBubble.jsx` — on-demand "Read aloud" button on assistant messages (demo choice: on-demand, not auto-play).
+- `Icons.jsx` — `IconSpeaker`. `main.css` — mic recording pulse, spinner, message action row, read-aloud button styles.
+
+**Contract caveat:** The exact Zia REST request/response field names are not in the publicly fetchable docs (behind the console), so request bodies and response extraction are best-guesses based on Catalyst conventions. `_extract_transcript` / `_extract_translation` try several likely field names and log the raw response shape on a miss. When tested against live Catalyst, only those field mappings may need adjustment — not the routes or frontend.
+
+**Tests:** `backend/tests/test_voice.py` (19 tests) — envelope/extraction helpers, the three network functions with a fake httpx client, and both routes with `zia_voice` monkeypatched (Kannada translation path, English no-translation path, 502 on failure, empty-audio 400, audio streaming).

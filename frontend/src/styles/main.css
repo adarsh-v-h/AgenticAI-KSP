@@ -564,56 +564,6 @@ textarea {
   overflow: hidden;
 }
 
-/* ---------- Chat area header ---------- */
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--canvas);
-  flex-shrink: 0;
-}
-
-.chat-header__title {
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 500;
-  margin: 0;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-
-.chat-header__export-btn {
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.15s ease;
-}
-
-.chat-header__export-btn:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--primary);
-  color: var(--primary-active);
-}
-
-.chat-header__export-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .messages-scroll {
   flex: 1;
   overflow-y: auto;
@@ -2002,4 +1952,173 @@ textarea {
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* ---------- Network graph (View network button + modal) ---------- */
+
+.view-network-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: transparent;
+  border: 1px solid var(--primary);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.view-network-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.graph-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 20, 19, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.graph-panel {
+  width: 80vw;
+  height: 80vh;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(20, 20, 19, 0.25);
+}
+
+.graph-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--hairline);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.graph-close-btn {
+  border: none;
+  background: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0 4px;
+}
+
+.graph-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.graph-canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+.graph-loading,
+.graph-error {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* ---------- Voice input (mic) + read-aloud (TTS) ---------- */
+
+.voice-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Recording state: pulsing coral mic so it's obvious the mic is live. */
+.composer-action-btn.recording {
+  color: #fff;
+  background: var(--primary);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(204, 120, 92, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(204, 120, 92, 0); }
+}
+
+.voice-error-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--primary-active);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 4px 8px;
+  box-shadow: 0 4px 12px rgba(20, 20, 19, 0.12);
+  z-index: 5;
+}
+
+/* Small inline spinner reused by the mic (processing) and read-aloud buttons. */
+.voice-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-pill);
+  border: 2px solid var(--hairline);
+  border-top-color: var(--primary);
+  animation: spin 700ms linear infinite;
+}
+
+/* Assistant message action row (Read aloud + View network). */
+.message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.message__actions .view-network-btn {
+  margin-top: 0;
+}
+
+.message-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.message-action-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+  color: var(--primary-active);
+}
+
+.message-action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

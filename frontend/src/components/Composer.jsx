@@ -1,21 +1,23 @@
 import { useEffect, useRef } from 'react'
-import { IconMic, IconArrowUp, IconPaperclip } from './Icons.jsx'
+import { IconArrowUp, IconPaperclip } from './Icons.jsx'
+import VoiceInput from './VoiceInput.jsx'
+import { useLang } from '../context/LangContext.jsx'
 
 /**
- * Composer – the message input box, always at the bottom of the screen.
+ * Composer ï¿½ the message input box, always at the bottom of the screen.
  *
  * Props:
  *   value: string
  *   onChange: (val: string) => void
  *   onSend: (text: string) => void
- *   onStop: () => void – called when the stop button is clicked while streaming
- *   disabled: bool – true while streaming
- *   statusText: string | null – pipeline status shown above composer
+ *   onStop: () => void ï¿½ called when the stop button is clicked while streaming
+ *   disabled: bool ï¿½ true while streaming
+ *   statusText: string | null ï¿½ pipeline status shown above composer
  *
  * Features:
  *   - Textarea auto-grows up to 160px, then scrolls
  *   - Enter sends, Shift+Enter adds newline
- *   - Voice button (placeholder – not yet functional)
+ *   - Voice button (placeholder ï¿½ not yet functional)
  *   - Send button (coral, arrow icon, disabled while streaming or input empty)
  *   - While streaming, the send button is replaced by a stop button so the
  *     officer can cancel a long-running query
@@ -46,6 +48,16 @@ export default function Composer({
 }) {
   const textareaRef = useRef(null)
   const canSend = !disabled && value.trim()
+  const { lang } = useLang()
+
+  // Append a voice transcript into the composer instead of auto-sending, so the
+  // officer can review/edit before sending. A trailing space keeps typing fluid.
+  function handleVoiceTranscript(text) {
+    if (!text) return
+    const next = value && value.trim() ? `${value.trim()} ${text}` : text
+    onChange(next)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
 
   // Auto-resize textarea up to 160px, then scroll.
   useEffect(() => {
@@ -95,7 +107,7 @@ export default function Composer({
 
           <div className="composer-actions">
             <div className="composer-left-actions">
-              {/* Attach – UI only, file analysis coming via Zoho Catalyst */}
+              {/* Attach ï¿½ UI only, file analysis coming via Zoho Catalyst */}
               <button
                 className="composer-action-btn not-yet"
                 title="Attach report (coming soon)"
@@ -106,15 +118,12 @@ export default function Composer({
                 <IconPaperclip size={18} />
               </button>
 
-              {/* Voice – placeholder, not yet functional */}
-              <button
-                className="composer-action-btn not-yet"
-                title="Voice input (coming soon)"
-                onClick={() => {}}
-                type="button"
-              >
-                <IconMic size={18} />
-              </button>
+              {/* Voice input â€” Zia STT (+ Kannada translation when lang=kn) */}
+              <VoiceInput
+                onTranscript={handleVoiceTranscript}
+                language={lang}
+                disabled={disabled}
+              />
             </div>
 
             {disabled ? (
