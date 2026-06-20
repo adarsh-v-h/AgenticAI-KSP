@@ -230,6 +230,8 @@ This inserts:
 
 The seeder is deterministic (`random.seed(42)`) and skips execution if data already exists.
 
+> Note: If you are migrating an existing database and need to populate the new `table_data_json` field for older assistant messages, run `python backfill.py` after setting up `.env`. This is not required for a fresh install.
+
 ### 9. Start the backend
 
 ```bash

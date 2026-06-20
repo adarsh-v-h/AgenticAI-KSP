@@ -69,7 +69,7 @@ async def resolve_media(results: list[dict]) -> list[dict]:
         out.append(
             {
                 "media_type": r.get("media_type"),
-                "url": f"/api/media/{r.get('stratus_file_id')}",
+                "url": f"/api/media/unavailable?file={r.get('stratus_file_id')}",
                 "description": r.get("description") or r.get("file_name") or "",
                 "fir_id": r.get("fir_id"),
             }
