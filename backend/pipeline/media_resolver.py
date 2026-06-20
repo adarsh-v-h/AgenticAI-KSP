@@ -5,6 +5,8 @@ evidence_media records and emit placeholder signed URLs.
 Step 5 will swap the placeholder URL for a real Catalyst Stratus signed URL.
 """
 
+import hashlib
+
 from db.connection import execute_query
 
 
@@ -33,12 +35,46 @@ def collect_fir_ids(results: list[dict]) -> list[int]:
     return out
 
 
+def _stable_seed_value(value: str) -> int:
+    """Return a deterministic numeric seed from a string."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return int(digest[:16], 16)
+
+
+def _dummy_media_url(media_type: str | None, stratus_file_id: str | None) -> str | None:
+    """Map seeded Stratus placeholder IDs to a public dummy media URL."""
+    if not stratus_file_id:
+        return None
+
+    seed = str(stratus_file_id).replace(" ", "_")
+    stable_value = _stable_seed_value(seed)
+
+    if media_type == "image":
+        return f"https://picsum.photos/seed/{seed}/680/450"
+
+    video_samples = [
+        "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
+        "https://samplelib.com/lib/preview/mp4/sample-10s.mp4",
+    ]
+    audio_samples = [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+    ]
+
+    if media_type == "video":
+        return video_samples[stable_value % len(video_samples)]
+    if media_type == "audio":
+        return audio_samples[stable_value % len(audio_samples)]
+
+    return None
+
+
 async def resolve_media(results: list[dict]) -> list[dict]:
     """
     Find attached media for every fir_id present in `results`. Returns a list of:
         {
           "media_type": str,
-          "url": str,             # placeholder route until Step 5
+          "url": str,
           "description": str,
           "fir_id": int,
         }
@@ -66,10 +102,14 @@ async def resolve_media(results: list[dict]) -> list[dict]:
 
     out: list[dict] = []
     for r in rows:
+        url = _dummy_media_url(r.get("media_type"), r.get("stratus_file_id"))
+        if url is None:
+            url = f"/api/media/unavailable?file={r.get('stratus_file_id')}"
+
         out.append(
             {
                 "media_type": r.get("media_type"),
-                "url": f"/api/media/unavailable?file={r.get('stratus_file_id')}",
+                "url": url,
                 "description": r.get("description") or r.get("file_name") or "",
                 "fir_id": r.get("fir_id"),
             }

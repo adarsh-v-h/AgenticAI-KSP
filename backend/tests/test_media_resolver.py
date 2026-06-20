@@ -84,7 +84,7 @@ def test_resolve_media_returns_unavailable_url(monkeypatch):
 
     assert len(media) == 1
     assert media[0]["media_type"] == "image"
-    assert media[0]["url"] == "/api/media/unavailable?file=file123"
+    assert media[0]["url"].startswith("https://picsum.photos/seed/file123/680/450")
     assert media[0]["description"] == "Crime scene photo"
     assert media[0]["fir_id"] == 100
 
@@ -131,6 +131,32 @@ def test_resolve_media_multiple_files(monkeypatch):
 
     assert len(media) == 3
     urls = [m["url"] for m in media]
-    assert "/api/media/unavailable?file=file1" in urls
-    assert "/api/media/unavailable?file=file2" in urls
-    assert "/api/media/unavailable?file=file3" in urls
+    assert any(u.startswith("https://picsum.photos/seed/file1/680/450") for u in urls)
+    assert any(u.startswith("https://samplelib.com/lib/preview/mp4/") for u in urls)
+    assert any(u.startswith("https://www.soundhelix.com/examples/mp3/") for u in urls)
+
+
+def test_resolve_media_falls_back_on_unknown_type(monkeypatch):
+    """Test resolve_media falls back to unavailable URL for unsupported media types."""
+    mock_rows = [
+        {
+            "media_id": 4,
+            "fir_id": 300,
+            "media_type": "document",
+            "file_name": "report.pdf",
+            "stratus_folder_id": "folder3",
+            "stratus_file_id": "file999",
+            "description": "Investigation report",
+        }
+    ]
+
+    async def mock_execute_query(sql, params):
+        return mock_rows
+
+    monkeypatch.setattr("pipeline.media_resolver.execute_query", mock_execute_query)
+
+    results = [{"fir_id": 300}]
+    media = _run_async(resolve_media(results))
+
+    assert len(media) == 1
+    assert media[0]["url"] == "/api/media/unavailable?file=file999"
