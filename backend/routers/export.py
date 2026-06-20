@@ -216,7 +216,7 @@ async def export_session_pdf(
                     "CATALYST-ORG": get("CATALYST_ORG_ID"),
                 },
                 json={"html": html, "output": "pdf"},
-                timeout=30.0
+                timeout=8.0
             )
             if response.status_code == 200:
                 pdf_bytes = response.content
