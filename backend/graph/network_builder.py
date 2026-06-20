@@ -215,7 +215,7 @@ async def build_graph_for_fir(fir_id: int) -> dict:
         fir_rels = await _fetch_relationships("fir", [fir_id])
         accused_rels = await _fetch_relationships("accused", accused_ids)
 
-        relationships = _dedupe_relationships(fir_rels + accused_rels)
+        relationships = _dedupe_relationships(list(fir_rels) + list(accused_rels))
         if not relationships:
             return {"nodes": [], "edges": []}
 
