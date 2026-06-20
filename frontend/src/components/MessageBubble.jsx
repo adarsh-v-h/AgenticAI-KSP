@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import TableRenderer from './TableRenderer.jsx'
+import MediaViewer from './MediaViewer.jsx'
 import { IconNetwork, IconSpeaker } from './Icons.jsx'
 import { speakText } from '../api/voice.js'
 import { useLang } from '../context/LangContext.jsx'
@@ -157,26 +158,7 @@ export default function MessageBubble({
         ) : null}
       </div>
 
-      {Array.isArray(mediaAttachments) && mediaAttachments.length > 0 ? (
-        <div className="media-list">
-          <div className="media-list__title">Evidence attachments</div>
-          <ul>
-            {mediaAttachments.map((m, i) => (
-              <li key={i}>
-                <span className={`media-pill media-pill--${m.media_type}`}>
-                  {m.media_type}
-                </span>
-                <span className="media-list__desc">
-                  {m.description || m.url || 'attachment'}
-                </span>
-                {m.fir_id ? (
-                  <span className="media-list__fir">FIR #{m.fir_id}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <MediaViewer attachments={mediaAttachments} />
     </div>
   )
 }

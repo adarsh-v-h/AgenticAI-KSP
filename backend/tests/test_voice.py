@@ -124,7 +124,9 @@ def test_transcribe_raises_on_empty_transcript(monkeypatch):
 
 def test_translate_returns_translation(monkeypatch):
     _patch_env(monkeypatch)
-    _patch_client(monkeypatch, _FakeResp(200, {"data": {"translated_text": "how many thefts"}}))
+    # Zia Translate returns translated_text at the TOP level (not nested under
+    # "data") — confirmed via the Catalyst console sample request.
+    _patch_client(monkeypatch, _FakeResp(200, {"status": "success", "translated_text": "how many thefts"}))
     out = asyncio.run(zv.translate_to_english("ಎಷ್ಟು ಕಳ್ಳತನ", "kn"))
     assert out == "how many thefts"
 
@@ -169,6 +171,33 @@ def test_synthesize_raises_on_non_200(monkeypatch):
     _patch_client(monkeypatch, _FakeResp(502, text="bad gateway"))
     with pytest.raises(zv.VoiceError):
         asyncio.run(zv.synthesize_speech("hello", "en"))
+
+
+# --------------------------------------------------------------------------- #
+# Speech text normalization (TTS pre-processing)
+# --------------------------------------------------------------------------- #
+
+
+def test_strip_markdown_for_speech_removes_tables_and_symbols():
+    text = "## Heading\n| FIR | Status |\n|---|---|\nSome **bold** text"
+    out = zv._strip_markdown_for_speech(text)
+    assert "|" not in out
+    assert "*" not in out
+    assert "#" not in out
+    assert "Heading" in out
+    assert "Some bold text" in out
+
+
+def test_numbers_to_words_expands_digits():
+    assert zv._numbers_to_words("42 cases") == "four two cases"
+    assert zv._numbers_to_words("case 7") == "case seven"
+
+
+def test_normalize_for_speech_expands_abbreviations():
+    out = zv._normalize_for_speech("FIR in KOR and HSR")
+    assert "F I R" in out
+    assert "Koramangala" in out
+    assert "H S R Layout" in out
 
 
 # --------------------------------------------------------------------------- #

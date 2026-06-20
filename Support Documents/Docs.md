@@ -485,7 +485,9 @@ Attempt 2:
 | Function | Description |
 |----------|-------------|
 | `collect_fir_ids(results) -> list[int]` | Extracts unique integer `fir_id` values from result rows. **Shared** with `query_pipeline.py` (imported there) so the logic exists in exactly one place. |
-| `resolve_media(results) -> list[dict]` | (1) Collects `fir_id`s from results. (2) Builds a parameterized `IN` query against `evidence_media`. (3) Executes one DB query. (4) Returns list of `{media_type, url, description, fir_id}`. URLs are placeholders (`/api/media/{stratus_file_id}`) until real Stratus integration in Step 5. Returns `[]` if no `fir_id` column or no matches. |
+| `resolve_media(results) -> list[dict]` | (1) Collects `fir_id`s from results. (2) Builds a parameterized `IN` query against `evidence_media`. (3) Executes one DB query. (4) Returns list of `{media_type, url, description, fir_id}`. URLs are placeholders using the explicit `/api/media/unavailable?file={stratus_file_id}` format so the frontend can render a clean unavailable-media state instead of a broken file reference. Returns `[]` if no `fir_id` column or no matches. |
+
+> **Step 5 note:** `resolve_media()` now returns explicit unavailable preview URLs for placeholder demo data. This is intentional; the frontend renders neutral cards for unavailable media rather than broken media elements.
 
 ---
 
@@ -533,7 +535,7 @@ Attempt 2:
 | `_local_set(session_id, turns)` | Thread-safe write to `_local_history`, trims to `MAX_TURNS` |
 | `_local_clear(session_id)` | Thread-safe delete from `_local_history` |
 | `get_history(session_id) -> list[dict]` | Fetches history. Tries NoSQL first. On success: parses JSON from `data.history` field. On 404 or error: falls back to `_local_get()`. Never raises. |
-| `save_turn(session_id, user_message, assistant_message, assistant_sql=None, assistant_table=None)` | Appends a user+assistant turn. Updates in-memory first (always). Then PUTs to NoSQL. If PUT returns 404 (document doesn't exist), POSTs to create it. `assistant_sql` is stored on the assistant turn so follow-up SQL generation can preserve filter clauses; `assistant_table` stores a bounded (`_TABLE_SNAPSHOT_ROWS`) snapshot of the result set so the next turn can answer follow-ups via the DIRECT path **without re-querying**. Never raises. |
+| `save_turn(session_id, user_message, assistant_message, assistant_sql=None, assistant_table=None)` | Appends a user+assistant turn. Updates in-memory first (always). Then PUTs to NoSQL. If PUT returns 404 (document doesn't exist), POSTs to create it. `assistant_sql` is stored on the assistant turn so follow-up SQL generation can preserve filter clauses; `assistant_table` stores a bounded (`_TABLE_SNAPSHOT_ROWS`) snapshot of the result set so the next turn can answer follow-ups via the DIRECT path **without re-querying**. Uses `json.dumps(..., default=str)` when serializing history payloads so `date`/`datetime`/`timedelta` values persist cleanly. Never raises. |
 | `clear_history(session_id)` | Deletes from both NoSQL and in-memory. Never raises. |
 | `init_nosql_table()` | Probes NoSQL by fetching a non-existent document (`__probe__`). Status 200 or 404 means the service is alive. Called once at startup. Never raises. |
 
@@ -1016,6 +1018,7 @@ frontend/
     │   ├── WelcomeScreen.jsx # Centered greeting + suggestion chips (empty chat)
     │   ├── Composer.jsx      # Auto-growing input box, send/attach/voice buttons
     │   ├── MessageBubble.jsx # Single message renderer (+ markdown-table stripping)
+    │   ├── MediaViewer.jsx   # Evidence media viewer (lightbox, audio/video, placeholder cards)
     │   ├── TableRenderer.jsx # HTML table from JSON data
     │   ├── SessionList.jsx   # Scrollable session list (loading/empty/error states)
     │   ├── SessionItem.jsx   # One session row (title + timestamp + count + export button)
@@ -1871,6 +1874,22 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Documentation:** Added [§3.16c `backend/db/nosql_client.py`](#316c-backenddbnosql_clientpy) section documenting the centralized NoSQL wrapper.
 
+---
+
+### 10.7 Backfill Migration Script
+
+**Date:** June 20, 2026  
+**What changed:** Added `backfill.py` to populate the new `table_data_json` field for existing chat messages that were previously `has_table=1` but still had `table_data_json=NULL`.
+
+**How it works:**
+- Reads `.env` for DB credentials
+- Queries `chat_messages` for rows with `has_table=1` and `table_data_json IS NULL`
+- Re-executes each row's original `sql_generated` query against the same database
+- Serializes results with `json.dumps(..., default=serialize)` where dates/datetimes use ISO format and timedeltas become `HH:MM:SS`
+- Updates `chat_messages.table_data_json` for each backfilled message
+
+**Usage note:** This is a migration helper only; it should be run after the new schema is deployed and only when existing data needs to be backfilled. See `README.md` for the install/setup note.
+
 
 ---
 
@@ -1902,6 +1921,8 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Backend:**
 - `backend/voice/zia_voice.py` (new) — `transcribe_audio()`, `translate_to_english()`, `synthesize_speech()`. House conventions: `Zoho-oauthtoken` auth + `CATALYST-ORG` header, `{"data": ...}` envelope unwrap. STT/TTS raise `VoiceError`; translation degrades gracefully (returns original text on any failure so the pipeline still runs untranslated).
+- `translate_to_english()` now uses `src_lang`/`tgt_lang` instead of `source_language`/`target_language`, and correctly extracts `translated_text` from the top-level payload rather than a nested `data` object.
+- `synthesize_speech()` pre-processes text before sending it to TTS by stripping markdown tables/symbols, expanding digits into spoken words, and normalizing common police abbreviations like `FIR`, `KOR`, `HSR`, `JPN`, and `BTM` so the voice output is intelligible. The TTS payload is clipped to 400 characters and includes the required speaker/pitch/speed/emotion fields.
 - `backend/routers/voice.py` (new) — `POST /api/voice/transcribe` (multipart audio, 10 MB cap; auto-translates when `language="kn"`) and `POST /api/voice/speak` (text → `audio/mpeg` stream). Auth-gated. Failures return HTTP 502 so the UI degrades (STT → "please type"; TTS → simply no audio).
 - `backend/main.py` — registered `voice_router`.
 
@@ -1914,3 +1935,5 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 **Contract caveat:** The exact Zia REST request/response field names are not in the publicly fetchable docs (behind the console), so request bodies and response extraction are best-guesses based on Catalyst conventions. `_extract_transcript` / `_extract_translation` try several likely field names and log the raw response shape on a miss. When tested against live Catalyst, only those field mappings may need adjustment — not the routes or frontend.
 
 **Tests:** `backend/tests/test_voice.py` (19 tests) — envelope/extraction helpers, the three network functions with a fake httpx client, and both routes with `zia_voice` monkeypatched (Kannada translation path, English no-translation path, 502 on failure, empty-audio 400, audio streaming).
+
+**Tests:** `backend/tests/test_media_resolver.py` (8 tests) — `collect_fir_ids()` extraction and `resolve_media()` behavior for empty results, no FIR IDs, unavailable preview URL generation, and multiple media files across FIRs.

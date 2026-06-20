@@ -263,7 +263,7 @@ async def save_turn(
     # when NoSQL is misbehaving.
     await _local_set(session_id, trimmed)
 
-    document = {"history": json.dumps(trimmed)}
+    document = {"history": json.dumps(trimmed, default=str)}
 
     await _sync_session_metadata(
         session_id=session_id,
