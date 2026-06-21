@@ -1,12 +1,12 @@
-import { memo, useState } from 'react'
+﻿import { memo, useState } from 'react'
 import { exportSession } from '../api/chat.js'
 import { IconDownload } from './Icons.jsx'
 
 // Format an ISO 8601 timestamp into a short, human-friendly relative label.
-//   - Today        → time, e.g. "12:30 PM"
-//   - Yesterday    → "Yesterday"
-//   - This week    → weekday name, e.g. "Monday"
-//   - Older        → short date, e.g. "Jan 15"
+//   - Today        â†’ time, e.g. "12:30 PM"
+//   - Yesterday    â†’ "Yesterday"
+//   - This week    â†’ weekday name, e.g. "Monday"
+//   - Older        â†’ short date, e.g. "Jan 15"
 // Returns an empty string when the timestamp is missing or unparseable.
 function formatRelativeTimestamp(iso) {
   if (!iso) return ''
@@ -81,8 +81,8 @@ function SessionItem({ session, isActive, onClick }) {
       <button
         type="button"
         className="session-export-btn"
-        title="Export as PDF"
-        aria-label="Export conversation as PDF"
+        title="Export conversation"
+        aria-label="Export conversation"
         onClick={handleExport}
         disabled={isExporting}
       >
@@ -102,3 +102,4 @@ function SessionItem({ session, isActive, onClick }) {
 // this memoization mitigates re-render cost; list virtualization (react-window)
 // is a documented future enhancement, not required for the MVP.
 export default memo(SessionItem)
+

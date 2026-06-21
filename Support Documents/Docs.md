@@ -73,7 +73,7 @@ backend/
 │   └── simple_auth.py         # JWT auth (dev) with Catalyst Auth swap path
 └── routers/
     ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
-    ├── export.py              # POST /api/chat/sessions/{id}/export (PDF via SmartBrowz)
+    ├── export.py              # POST /api/chat/sessions/{id}/export (HTML conversation export)
     ├── reports.py             # POST /api/reports/analyze (Report analysis & upload)
     ├── voice.py               # POST /api/voice/transcribe, /api/voice/speak (Zia STT/TTS)
     └── auth.py                # POST /api/auth/login + /api/auth/logout
@@ -712,7 +712,7 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 
 ### 3.20 `backend/routers/export.py`
 
-**Purpose:** PDF export of a chat session (Step 4). Renders the conversation as print-ready HTML and converts it to PDF via Catalyst SmartBrowz, with a graceful HTML fallback.
+**Purpose:** HTML export of a chat session. Renders the conversation as a self-contained, downloadable HTML file. No external dependencies -- pure stdlib. SmartBrowz integration was removed; the export always succeeds.
 
 **Functions:**
 
@@ -721,9 +721,9 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 | `_escape(value) -> str` | HTML-escapes a value (including quotes) so user content, table headers, and cells are safely rendered in the PDF. Returns empty string for `None`. |
 | `_merge_history_tables(messages, history) -> list[dict]` | Recovery helper: fills missing assistant `table_data` from conversation history snapshots. The UI can show tables from a live stream even when rich persistence is unavailable; this helper ensures exports recover them from the bounded history snapshot so older/partially-saved turns still include visible DB rows. |
 | `_build_html(officer_name, badge_number, title, messages) -> str` | Builds a styled, self-contained HTML document: a header (officer + badge + session title + export date), each message (user bubbles right-aligned, assistant blocks with any result table rendered, max 50 rows, with a record-count footer), and a confidential footer. All content is HTML-escaped. |
-| `export_session_pdf(session_id, officer)` | `POST /api/chat/sessions/{id}/export` — **(1) read authorization:** verifies ownership via `verify_session_owner` (404 on mismatch); **(2)** loads messages via `get_messages_for_session` (400 if none); merges table snapshots from history; **(3)** fetches session title + officer name/badge from MySQL; **(4)** builds HTML; **(5)** POSTs to `SMARTBROWZ_URL` with auth header (`Zoho-oauthtoken`) to convert to PDF. On success streams `application/pdf` (`KSP-Chat-{id}.pdf`). **Fallback:** if SmartBrowz returns non-200 or errors, streams the raw HTML as a downloadable `.html` so the export button always works. |
+| `export_session_pdf(session_id, officer) | POST /api/chat/sessions/{id}/export - **(1) read authorization:** verifies ownership via erify_session_owner (404 on mismatch); **(2)** loads messages via get_messages_for_session (400 if none); merges table snapshots from history via _merge_history_tables; **(3)** fetches session title + officer name/badge from MySQL; **(4)** builds HTML via _build_html; **(5)** streams HTML directly as downloadable .html file (KSP-{id[:8]}.html). Always succeeds - no external service calls.
 
-> Note: `SMARTBROWZ_URL` was previously a reserved/optional env var; it is now actively read by this router. The exact SmartBrowz request shape should be verified against Catalyst docs before a production demo — the HTML fallback covers the case where it differs.
+> Note: SmartBrowz integration removed. SMARTBROWZ_URL is no longer read by this router. Export always returns a self-contained HTML file. The html stdlib module is aliased as html_lib to prevent variable shadowing.
 
 ---
 
@@ -979,7 +979,7 @@ On opening a past session:
       → get_messages_for_session(...)      # MySQL rows + NoSQL rich data (table/media)
 
 Export:
-  → POST /api/chat/sessions/{id}/export    # build HTML → SmartBrowz PDF (HTML fallback)
+  → POST /api/chat/sessions/{id}/export    # build HTML → stream as downloadable .html file
 ```
 
 **Source of truth:** MySQL (`chat_sessions`, `chat_messages`) for the session list
