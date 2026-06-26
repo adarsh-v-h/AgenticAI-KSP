@@ -11,228 +11,246 @@ Used by:
 _MAX_SCHEMA_CHARS = 3000
 
 SCHEMA_CATALOG = {
-    "fir_master": {
-        "description": "Central FIR registry. Parent record for all cases. Every case starts here.",
+    "CaseMaster": {
+        "description": "Central case/FIR registry. Every case starts here.",
         "columns": {
-            "fir_id": "INT PRIMARY KEY",
-            "fir_number": "VARCHAR(30) UNIQUE - format: FIR/YEAR/PREFIX/SEQ e.g. FIR/2024/KOR/0042",
-            "station_code": "VARCHAR(20)",
-            "date_filed": "DATE",
-            "time_filed": "TIME",
-            "case_type": "ENUM: theft, robbery, assault, murder, fraud, cybercrime, missing_person, vehicle_theft, drug_offense, domestic_violence, other",
-            "incident_date": "DATE",
-            "incident_time": "TIME",
-            "incident_location": "VARCHAR(200) - Bengaluru area name e.g. Koramangala",
-            "incident_lat": "DECIMAL(10,8)",
-            "incident_lng": "DECIMAL(11,8)",
-            "description": "TEXT",
-            "status": "ENUM: open, under_investigation, closed, chargesheeted",
-            "investigating_officer_id": "INT FOREIGN KEY -> officers.officer_id",
+            "CaseMasterID": "INT PRIMARY KEY",
+            "CrimeNo": "VARCHAR(30) UNIQUE - structured crime number",
+            "CaseNo": "VARCHAR(20)",
+            "CrimeRegisteredDate": "DATE",
+            "PolicePersonID": "INT FK -> Employee.EmployeeID",
+            "PoliceStationID": "INT FK -> Unit.UnitID",
+            "CaseCategoryID": "INT FK -> CaseCategory.CaseCategoryID",
+            "GravityOffenceID": "INT FK -> GravityOffence.GravityOffenceID",
+            "CrimeMajorHeadID": "INT FK -> CrimeHead.CrimeHeadID",
+            "CrimeMinorHeadID": "INT FK -> CrimeSubHead.CrimeSubHeadID",
+            "CaseStatusID": "INT FK -> CaseStatusMaster.CaseStatusID",
+            "CourtID": "INT FK -> Court.CourtID",
+            "IncidentFromDate": "DATETIME",
+            "IncidentToDate": "DATETIME",
+            "latitude": "DECIMAL(10,8)",
+            "longitude": "DECIMAL(11,8)",
+            "BriefFacts": "TEXT - free text summary"
         },
-        "keywords": [
-            "fir", "case", "filed", "station", "status", "date", "location",
-            "all cases", "incident", "report", "complaint", "open", "closed",
-            "chargesheeted", "under investigation",
-        ],
-        "always_include": True,
+        "keywords": ["case", "fir", "crime", "registered", "status", "incident", "all cases"],
+        "always_include": True
     },
-    "accused": {
-        "description": "All accused persons linked to FIRs. One FIR can have multiple accused.",
+    "Accused": {
+        "description": "Accused persons linked to cases. One case can have multiple accused.",
         "columns": {
-            "accused_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "full_name": "VARCHAR(100)",
-            "alias": "VARCHAR(100)",
-            "age": "INT",
-            "gender": "ENUM: male, female, other, unknown",
-            "address": "TEXT",
-            "phone": "VARCHAR(15)",
-            "prior_fir_count": "INT - number of previous FIRs this person has been accused in",
-            "arrest_status": "ENUM: arrested, at_large, unknown",
-            "arrest_date": "DATE",
+            "AccusedMasterID": "INT PRIMARY KEY",
+            "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
+            "AccusedName": "VARCHAR(150)",
+            "AgeYear": "INT",
+            "GenderID": "INT",
+            "PersonID": "VARCHAR(10)"
         },
-        "keywords": [
-            "accused", "suspect", "arrested", "offender", "criminal", "person",
-            "name", "at large", "at_large", "repeat", "prior", "habitual",
-            "gang", "mahesh", "ravi", "suresh", "pavan", "anand", "bullet",
-        ],
+        "keywords": ["accused", "suspect", "offender", "criminal", "name", "repeat", "prior", "habitual", "gang"]
     },
-    "victims": {
-        "description": "All victims linked to FIRs. One FIR can have multiple victims.",
+    "Victim": {
+        "description": "Victims linked to cases. One case can have multiple victims.",
         "columns": {
-            "victim_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "full_name": "VARCHAR(100)",
-            "age": "INT",
-            "gender": "ENUM: male, female, other, unknown",
-            "address": "TEXT",
-            "phone": "VARCHAR(15)",
-            "injury_description": "TEXT",
+            "VictimID": "INT PRIMARY KEY",
+            "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
+            "VictimName": "VARCHAR(150)",
+            "AgeYear": "INT",
+            "GenderID": "INT",
+            "VictimPolice": "BIT"
         },
-        "keywords": [
-            "victim", "complainant", "injured", "affected", "hurt", "attacked",
-        ],
+        "keywords": ["victim", "injured", "affected", "hurt", "attacked", "dead"]
     },
-    "cases_theft": {
-        "description": "Theft case details. Join with fir_master on fir_id.",
+    "ComplainantDetails": {
+        "description": "Complainants who filed the cases.",
         "columns": {
-            "theft_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "stolen_items": "TEXT (JSON array as string)",
-            "estimated_value": "DECIMAL(12,2)",
-            "recovered": "BOOLEAN",
-            "recovery_date": "DATE",
+            "ComplainantDetailsID": "INT PRIMARY KEY",
+            "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
+            "ComplainantName": "VARCHAR(150)",
+            "MobileNo": "VARCHAR(15)",
+            "GenderID": "INT"
         },
-        "keywords": [
-            "theft", "stolen", "burglary", "items", "valuables", "recover",
-            "missing items", "break-in", "break in",
-        ],
+        "keywords": ["complainant", "reporter", "filed by", "complaint"]
     },
-    "cases_assault": {
-        "description": "Assault case details. Join with fir_master on fir_id.",
+    "Employee": {
+        "description": "Police employees/officers at the station.",
         "columns": {
-            "assault_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "weapon_used": "VARCHAR(100)",
-            "injury_severity": "ENUM: minor, moderate, severe, fatal",
-            "motive": "VARCHAR(200)",
-            "witnesses_count": "INT",
+            "EmployeeID": "INT PRIMARY KEY",
+            "DistrictID": "INT FK -> District.DistrictID",
+            "UnitID": "INT FK -> Unit.UnitID",
+            "RankID": "INT FK -> `Rank`.RankID",
+            "DesignationID": "INT FK -> Designation.DesignationID",
+            "KGID": "VARCHAR(30) UNIQUE",
+            "FirstName": "VARCHAR(100)",
+            "EmployeeDOB": "DATE",
+            "GenderID": "INT",
+            "BloodGroupID": "INT",
+            "PhysicallyChallenged": "BIT",
+            "AppointmentDate": "DATE",
+            "role": "ENUM('investigator', 'analyst', 'supervisor', 'policymaker')",
+            "is_active": "BOOLEAN"
         },
-        "keywords": [
-            "assault", "attack", "fight", "weapon", "injury", "violence",
-            "beat", "hit", "stab", "severity",
-        ],
+        "keywords": ["employee", "officer", "inspector", "constable", "si", "pi", "asi", "dysp", "assigned", "investigating", "staff", "head constable"]
     },
-    "cases_vehicle_theft": {
-        "description": "Vehicle theft details. Join with fir_master on fir_id.",
+    "`Rank`": {
+        "description": "Police ranks (escaped with backticks).",
         "columns": {
-            "vt_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "vehicle_type": "ENUM: two_wheeler, car, truck, auto, other",
-            "vehicle_make": "VARCHAR(50)",
-            "vehicle_model": "VARCHAR(50)",
-            "registration_no": "VARCHAR(20) - Karnataka format: KA-XX-XX-XXXX",
-            "color": "VARCHAR(30)",
-            "recovered": "BOOLEAN",
+            "RankID": "INT PRIMARY KEY",
+            "RankName": "VARCHAR(50)",
+            "Hierarchy": "INT",
+            "Active": "BIT"
         },
-        "keywords": [
-            "vehicle", "bike", "car", "motorcycle", "auto", "registration",
-            "two wheeler", "two_wheeler", "scooter", "truck", "ka-",
-        ],
+        "keywords": ["rank", "hierarchy"]
     },
-    "cases_fraud": {
-        "description": "Fraud case details. Join with fir_master on fir_id.",
+    "Unit": {
+        "description": "Police units / stations.",
         "columns": {
-            "fraud_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "fraud_type": "ENUM: online, offline, banking, property, other",
-            "amount_defrauded": "DECIMAL(14,2)",
-            "amount_recovered": "DECIMAL(14,2)",
-            "method_used": "TEXT",
+            "UnitID": "INT PRIMARY KEY",
+            "UnitName": "VARCHAR(150)",
+            "TypeID": "INT FK -> UnitType.UnitTypeID",
+            "ParentUnit": "INT FK -> Unit.UnitID",
+            "NationalityID": "INT",
+            "StateID": "INT FK -> State.StateID",
+            "DistrictID": "INT FK -> District.DistrictID",
+            "Active": "BIT"
         },
-        "keywords": [
-            "fraud", "cheat", "scam", "money", "financial", "banking",
-            "deceive", "amount", "rupees", "lakhs", "defrauded",
-        ],
+        "keywords": ["unit", "station", "police station", "ps"]
     },
-    "cases_cybercrime": {
-        "description": "Cybercrime case details. Join with fir_master on fir_id.",
+    "District": {
+        "description": "Districts.",
         "columns": {
-            "cyber_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "cyber_type": "ENUM: phishing, hacking, online_harassment, identity_theft, other",
-            "platform": "VARCHAR(100) - WhatsApp, Instagram, email, Facebook etc.",
-            "financial_loss": "DECIMAL(14,2)",
-            "digital_evidence": "TEXT (JSON)",
+            "DistrictID": "INT PRIMARY KEY",
+            "DistrictName": "VARCHAR(100)",
+            "StateID": "INT FK -> State.StateID",
+            "Active": "BIT"
         },
-        "keywords": [
-            "cyber", "online", "hacking", "phishing", "internet", "whatsapp",
-            "social media", "instagram", "email", "digital", "otp",
-            "identity theft", "harassment",
-        ],
+        "keywords": ["district", "area"]
     },
-    "cases_missing_person": {
-        "description": "Missing person case details. Join with fir_master on fir_id.",
+    "Court": {
+        "description": "Courts of law.",
         "columns": {
-            "mp_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "missing_since": "DATE",
-            "last_seen_location": "VARCHAR(200)",
-            "physical_description": "TEXT",
-            "found": "BOOLEAN",
-            "found_date": "DATE",
-            "found_condition": "ENUM: safe, injured, deceased, unknown",
+            "CourtID": "INT PRIMARY KEY",
+            "CourtName": "VARCHAR(150)",
+            "DistrictID": "INT FK -> District.DistrictID",
+            "StateID": "INT FK -> State.StateID",
+            "Active": "BIT"
         },
-        "keywords": [
-            "missing", "lost", "disappeared", "found", "search", "last seen",
-            "whereabouts", "missing person",
-        ],
+        "keywords": ["court", "judge", "trial"]
     },
-    "cases_drug_offense": {
-        "description": "Drug offense case details. Join with fir_master on fir_id.",
+    "CrimeHead": {
+        "description": "Major heads of crime groups.",
         "columns": {
-            "drug_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "drug_type": "VARCHAR(100) - ganja, cocaine, heroin, MDMA etc.",
-            "quantity_seized": "VARCHAR(100)",
-            "estimated_street_value": "DECIMAL(12,2)",
+            "CrimeHeadID": "INT PRIMARY KEY",
+            "CrimeGroupName": "VARCHAR(150)",
+            "Active": "BIT"
         },
-        "keywords": [
-            "drug", "narcotics", "ganja", "cocaine", "heroin", "seized",
-            "contraband", "substance", "possession", "mdma",
-        ],
+        "keywords": ["crime head", "crime group"]
     },
-    "case_relationships": {
-        "description": "Links between accused, FIRs, victims for network analysis.",
+    "CrimeSubHead": {
+        "description": "Minor heads of crime categories (crime types). Join with CrimeHead on CrimeHeadID.",
         "columns": {
-            "rel_id": "INT PRIMARY KEY",
-            "entity_a_type": "ENUM: accused, fir, victim, officer",
-            "entity_a_id": "INT",
-            "entity_b_type": "ENUM: accused, fir, victim, officer",
-            "entity_b_id": "INT",
-            "relationship_type": "ENUM: co_accused, repeat_location, same_modus_operandi, linked_gang, victim_of_same_accused, related_case",
+            "CrimeSubHeadID": "INT PRIMARY KEY",
+            "CrimeHeadID": "INT FK -> CrimeHead.CrimeHeadID",
+            "CrimeHeadName": "VARCHAR(150) - name of the crime type (e.g., 'Theft', 'Murder', 'Assault')",
+            "SeqID": "INT"
         },
-        "keywords": [
-            "linked", "connected", "gang", "network", "related", "associate",
-            "co-accused", "co_accused", "same gang", "accomplice",
-            "relationship", "modus operandi",
-        ],
+        "keywords": ["crime subhead", "crime type", "theft", "murder", "assault", "robbery", "fraud", "cybercrime", "missing", "drugs"]
     },
-    "evidence_media": {
-        "description": "Media evidence files (images, audio, video) attached to FIRs.",
+    "CaseStatusMaster": {
+        "description": "Case status lookup (e.g., Open, Under Investigation, Closed, Chargesheeted).",
         "columns": {
-            "media_id": "INT PRIMARY KEY",
-            "fir_id": "INT FOREIGN KEY -> fir_master.fir_id",
-            "media_type": "ENUM: image, audio, video, document",
-            "file_name": "VARCHAR(200)",
-            "stratus_folder_id": "VARCHAR(100)",
-            "stratus_file_id": "VARCHAR(100)",
-            "description": "VARCHAR(500)",
+            "CaseStatusID": "INT PRIMARY KEY",
+            "CaseStatusName": "VARCHAR(80)"
         },
-        "keywords": [
-            "photo", "image", "video", "audio", "evidence", "file",
-            "attachment", "picture", "footage", "recording", "cctv",
-            "document",
-        ],
+        "keywords": ["status", "open", "closed", "chargesheeted", "under investigation"]
     },
-    "officers": {
-        "description": "Officers at the station.",
+    "CaseCategory": {
+        "description": "Case category lookup.",
         "columns": {
-            "officer_id": "INT PRIMARY KEY",
-            "badge_number": "VARCHAR(20) UNIQUE",
-            "full_name": "VARCHAR(100)",
-            "rank": "ENUM: Constable, Head Constable, ASI, SI, PI, Inspector, DySP, SP (NOTE: rank is a reserved word in MySQL — escape with backticks: `rank`)",
-            "department": "VARCHAR(50)",
-            "phone": "VARCHAR(15)",
-            "email": "VARCHAR(100)",
-            "is_active": "BOOLEAN",
+            "CaseCategoryID": "INT PRIMARY KEY",
+            "LookupValue": "VARCHAR(50)"
         },
-        "keywords": [
-            "officer", "inspector", "constable", "si", "pi", "asi", "dysp",
-            "assigned", "investigating", "badge", "rank", "staff",
-            "head constable",
-        ],
+        "keywords": ["category"]
     },
+    "GravityOffence": {
+        "description": "Gravity of offence lookup.",
+        "columns": {
+            "GravityOffenceID": "INT PRIMARY KEY",
+            "LookupValue": "VARCHAR(50)"
+        },
+        "keywords": ["gravity", "heinous", "non-heinous"]
+    },
+    "Act": {
+        "description": "Acts (laws) under which sections are charged.",
+        "columns": {
+            "ActCode": "VARCHAR(20) PRIMARY KEY",
+            "ActDescription": "VARCHAR(200)",
+            "ShortName": "VARCHAR(50)",
+            "Active": "BIT"
+        },
+        "keywords": ["act", "law", "ipc", "crpc", "bns"]
+    },
+    "Section": {
+        "description": "Sections of acts charged. Join with Act on ActCode.",
+        "columns": {
+            "ActCode": "VARCHAR(20) PRIMARY KEY FK -> Act.ActCode",
+            "SectionCode": "VARCHAR(20) PRIMARY KEY",
+            "SectionDescription": "VARCHAR(300)",
+            "Active": "BIT"
+        },
+        "keywords": ["section", "ipc section", "bns section"]
+    },
+    "ActSectionAssociation": {
+        "description": "Links cases to acts and sections charged.",
+        "columns": {
+            "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
+            "ActID": "VARCHAR(20) FK -> Act.ActCode",
+            "SectionID": "VARCHAR(20) FK -> Section.SectionCode",
+            "ActOrderID": "INT",
+            "SectionOrderID": "INT"
+        },
+        "keywords": ["act section", "charged under", "section charged"]
+    },
+    "ArrestSurrender": {
+        "description": "Arrest or surrender details of accused. Join with Accused to find who is arrested or still at large.",
+        "columns": {
+            "ArrestSurrenderID": "INT PRIMARY KEY",
+            "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
+            "ArrestSurrenderTypeID": "INT",
+            "ArrestSurrenderDate": "DATE",
+            "ArrestSurrenderStateId": "INT FK -> State.StateID",
+            "ArrestSurrenderDistrictId": "INT FK -> District.DistrictID",
+            "PoliceStationID": "INT FK -> Unit.UnitID",
+            "IOID": "INT FK -> Employee.EmployeeID",
+            "CourtID": "INT FK -> Court.CourtID",
+            "AccusedMasterID": "INT FK -> Accused.AccusedMasterID",
+            "IsAccused": "BIT",
+            "IsComplainantAccused": "BIT"
+        },
+        "keywords": ["arrest", "surrender", "arrested", "at large", "investigating officer"]
+    },
+    "CasteMaster": {
+        "description": "Caste lookup table.",
+        "columns": {
+            "caste_master_id": "INT PRIMARY KEY",
+            "caste_master_name": "VARCHAR(100)"
+        },
+        "keywords": ["caste", "sociological"]
+    },
+    "ReligionMaster": {
+        "description": "Religion lookup table.",
+        "columns": {
+            "ReligionID": "INT PRIMARY KEY",
+            "ReligionName": "VARCHAR(100)"
+        },
+        "keywords": ["religion"]
+    },
+    "OccupationMaster": {
+        "description": "Occupation lookup table.",
+        "columns": {
+            "OccupationID": "INT PRIMARY KEY",
+            "OccupationName": "VARCHAR(100)"
+        },
+        "keywords": ["occupation", "profession"]
+    }
 }
 
 
@@ -250,17 +268,17 @@ def get_schema_for_tables(table_names: list[str]) -> str:
     """
     Build a compact schema string for LLM prompt injection.
 
-    Always includes fir_master (even if not in table_names) and lists it first.
+    Always includes CaseMaster (even if not in table_names) and lists it first.
     Output is capped at _MAX_SCHEMA_CHARS — column descriptions are progressively
     truncated to fit; table names and column names are never dropped.
     """
     seen = set()
     ordered = []
 
-    # Always include fir_master first.
-    if "fir_master" in SCHEMA_CATALOG:
-        ordered.append("fir_master")
-        seen.add("fir_master")
+    # Always include CaseMaster first.
+    if "CaseMaster" in SCHEMA_CATALOG:
+        ordered.append("CaseMaster")
+        seen.add("CaseMaster")
 
     for t in table_names:
         if t in SCHEMA_CATALOG and t not in seen:
@@ -291,218 +309,126 @@ def get_schema_for_tables(table_names: list[str]) -> str:
 # example useful. We always score against the user's table set.
 _FEW_SHOT_BANK: list[dict] = [
     {
-        "tables": {"fir_master"},
+        "tables": {"CaseMaster"},
         "q": "How many cases are open?",
         "sql": (
             "SELECT COUNT(*) AS open_cases\n"
-            "FROM fir_master\n"
-            "WHERE status = 'open'"
+            "FROM CaseMaster AS cm\n"
+            "JOIN CaseStatusMaster AS csm ON csm.CaseStatusID = cm.CaseStatusID\n"
+            "WHERE csm.CaseStatusName = 'Open'"
         ),
     },
     {
-        "tables": {"fir_master"},
-        "q": "Show me the last 5 FIRs filed.",
+        "tables": {"CaseMaster"},
+        "q": "Show me the last 5 cases registered.",
         "sql": (
-            "SELECT fir_id, fir_number, case_type, incident_location, date_filed, status\n"
-            "FROM fir_master\n"
-            "ORDER BY date_filed DESC, time_filed DESC\n"
+            "SELECT cm.CaseMasterID, cm.CrimeNo, cm.BriefFacts, cm.CrimeRegisteredDate\n"
+            "FROM CaseMaster AS cm\n"
+            "ORDER BY cm.CrimeRegisteredDate DESC\n"
             "LIMIT 5"
         ),
     },
     {
-        "tables": {"fir_master"},
-        "q": "How many cases were filed in 2024?",
+        "tables": {"CaseMaster"},
+        "q": "How many cases were registered in 2024?",
         "sql": (
             "SELECT COUNT(*) AS cases_in_2024\n"
-            "FROM fir_master\n"
-            "WHERE YEAR(date_filed) = 2024"
+            "FROM CaseMaster AS cm\n"
+            "WHERE YEAR(cm.CrimeRegisteredDate) = 2024"
         ),
     },
     {
-        "tables": {"fir_master", "cases_theft"},
+        "tables": {"CaseMaster", "CrimeSubHead"},
         "q": "How many theft cases are still open?",
         "sql": (
             "SELECT COUNT(*) AS open_theft_cases\n"
-            "FROM fir_master AS f\n"
-            "JOIN cases_theft AS t ON t.fir_id = f.fir_id\n"
-            "WHERE f.status = 'open'"
+            "FROM CaseMaster AS cm\n"
+            "JOIN CaseStatusMaster AS csm ON csm.CaseStatusID = cm.CaseStatusID\n"
+            "JOIN CrimeSubHead AS csh ON csh.CrimeSubHeadID = cm.CrimeMinorHeadID\n"
+            "WHERE csm.CaseStatusName = 'Open' AND csh.CrimeHeadName = 'Theft'"
         ),
     },
     {
-        "tables": {"fir_master", "cases_theft"},
-        "q": "List recovered theft cases with their estimated value.",
+        "tables": {"CaseMaster", "CrimeSubHead"},
+        "q": "List theft cases.",
         "sql": (
-            "SELECT f.fir_number, f.incident_location, t.estimated_value, t.recovery_date\n"
-            "FROM fir_master AS f\n"
-            "JOIN cases_theft AS t ON t.fir_id = f.fir_id\n"
-            "WHERE t.recovered = TRUE\n"
-            "ORDER BY t.recovery_date DESC\n"
+            "SELECT cm.CaseMasterID, cm.CrimeNo, cm.BriefFacts, cm.CrimeRegisteredDate\n"
+            "FROM CaseMaster AS cm\n"
+            "JOIN CrimeSubHead AS csh ON csh.CrimeSubHeadID = cm.CrimeMinorHeadID\n"
+            "WHERE csh.CrimeHeadName = 'Theft'\n"
+            "ORDER BY cm.CrimeRegisteredDate DESC\n"
             "LIMIT 50"
         ),
     },
     {
-        "tables": {"fir_master", "accused"},
+        "tables": {"CaseMaster", "Accused"},
         "q": "Show me all cases involving Mahesh Gowda.",
         "sql": (
-            "SELECT f.fir_id, f.fir_number, f.case_type, f.incident_location,\n"
-            "       f.date_filed, f.status, a.full_name, a.alias, a.arrest_status\n"
-            "FROM accused AS a\n"
-            "JOIN fir_master AS f ON f.fir_id = a.fir_id\n"
-            "WHERE a.full_name LIKE '%Mahesh Gowda%'\n"
-            "ORDER BY f.date_filed DESC"
-        ),
-    },
-    {
-        "tables": {"accused"},
-        "q": "Who are the top 5 repeat offenders?",
-        "sql": (
-            "SELECT full_name, COUNT(DISTINCT fir_id) AS fir_count, MAX(prior_fir_count) AS prior_fir_count, MAX(arrest_status) AS arrest_status\n"
-            "FROM accused\n"
-            "WHERE full_name IS NOT NULL\n"
-            "GROUP BY full_name\n"
-            "ORDER BY fir_count DESC\n"
-            "LIMIT 5"
-        ),
-    },
-    {
-        "tables": {"fir_master", "cases_vehicle_theft"},
-        "q": "List all vehicle theft cases with the registration number.",
-        "sql": (
-            "SELECT f.fir_number, f.incident_location, f.date_filed,\n"
-            "       v.vehicle_type, v.vehicle_make, v.registration_no, v.recovered\n"
-            "FROM fir_master AS f\n"
-            "JOIN cases_vehicle_theft AS v ON v.fir_id = f.fir_id\n"
-            "ORDER BY f.date_filed DESC\n"
+            "SELECT cm.CaseMasterID, cm.CrimeNo, cm.BriefFacts, a.AccusedName\n"
+            "FROM CaseMaster AS cm\n"
+            "JOIN Accused AS a ON a.CaseMasterID = cm.CaseMasterID\n"
+            "WHERE a.AccusedName LIKE '%Mahesh Gowda%'\n"
+            "ORDER BY cm.CrimeRegisteredDate DESC\n"
             "LIMIT 50"
         ),
     },
     {
-        "tables": {"fir_master", "cases_cybercrime"},
-        "q": "Show all phishing cases on WhatsApp.",
+        "tables": {"Accused"},
+        "q": "Who are the top 5 accused with the most cases?",
         "sql": (
-            "SELECT f.fir_number, f.incident_location, f.date_filed,\n"
-            "       c.cyber_type, c.platform, c.financial_loss\n"
-            "FROM fir_master AS f\n"
-            "JOIN cases_cybercrime AS c ON c.fir_id = f.fir_id\n"
-            "WHERE c.cyber_type = 'phishing' AND c.platform = 'WhatsApp'\n"
-            "ORDER BY f.date_filed DESC\n"
-            "LIMIT 50"
-        ),
-    },
-    {
-        "tables": {"fir_master", "cases_fraud"},
-        "q": "What is the total amount defrauded in online fraud cases?",
-        "sql": (
-            "SELECT SUM(fr.amount_defrauded) AS total_defrauded\n"
-            "FROM cases_fraud AS fr\n"
-            "JOIN fir_master AS f ON f.fir_id = fr.fir_id\n"
-            "WHERE fr.fraud_type = 'online'"
-        ),
-    },
-    {
-        "tables": {"fir_master", "cases_missing_person"},
-        "q": "Show me missing person cases that are still not found.",
-        "sql": (
-            "SELECT f.fir_number, f.incident_location, m.missing_since,\n"
-            "       m.last_seen_location\n"
-            "FROM fir_master AS f\n"
-            "JOIN cases_missing_person AS m ON m.fir_id = f.fir_id\n"
-            "WHERE m.found = FALSE\n"
-            "ORDER BY m.missing_since DESC\n"
-            "LIMIT 50"
-        ),
-    },
-    {
-        "tables": {"fir_master", "evidence_media"},
-        "q": "Show me FIRs that have photo evidence.",
-        "sql": (
-            "SELECT f.fir_id, f.fir_number, f.case_type, f.incident_location,\n"
-            "       e.media_type, e.description\n"
-            "FROM fir_master AS f\n"
-            "JOIN evidence_media AS e ON e.fir_id = f.fir_id\n"
-            "WHERE e.media_type = 'image'\n"
-            "ORDER BY f.date_filed DESC\n"
-            "LIMIT 50"
-        ),
-    },
-    {
-        "tables": {"fir_master", "officers"},
-        "q": "Which officer is investigating the most cases?",
-        "sql": (
-            "SELECT o.full_name, o.`rank`, o.badge_number, COUNT(f.fir_id) AS case_count\n"
-            "FROM officers AS o\n"
-            "JOIN fir_master AS f ON f.investigating_officer_id = o.officer_id\n"
-            "GROUP BY o.officer_id, o.full_name, o.`rank`, o.badge_number\n"
+            "SELECT a.AccusedName, COUNT(DISTINCT a.CaseMasterID) AS case_count\n"
+            "FROM Accused AS a\n"
+            "WHERE a.AccusedName IS NOT NULL\n"
+            "GROUP BY a.AccusedName\n"
             "ORDER BY case_count DESC\n"
             "LIMIT 5"
         ),
     },
     {
-        "tables": {"fir_master", "officers"},
+        "tables": {"CaseMaster", "Accused", "ArrestSurrender"},
+        "q": "Which accused are still at large?",
+        "sql": (
+            "SELECT a.AccusedMasterID, a.AccusedName, cm.CrimeNo\n"
+            "FROM Accused AS a\n"
+            "JOIN CaseMaster AS cm ON cm.CaseMasterID = a.CaseMasterID\n"
+            "LEFT JOIN ArrestSurrender AS ar ON ar.AccusedMasterID = a.AccusedMasterID\n"
+            "WHERE ar.ArrestSurrenderID IS NULL\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "tables": {"CaseMaster", "ActSectionAssociation", "Section"},
+        "q": "What sections were charged in case CrimeNo FIR/2024/KOR/0042?",
+        "sql": (
+            "SELECT s.SectionCode, s.SectionDescription\n"
+            "FROM ActSectionAssociation AS asa\n"
+            "JOIN CaseMaster AS cm ON cm.CaseMasterID = asa.CaseMasterID\n"
+            "JOIN Section AS s ON s.ActCode = asa.ActID AND s.SectionCode = asa.SectionID\n"
+            "WHERE cm.CrimeNo = 'FIR/2024/KOR/0042'"
+        ),
+    },
+    {
+        "tables": {"CaseMaster", "Employee", "`Rank`"},
+        "q": "Which officer is investigating the most cases?",
+        "sql": (
+            "SELECT e.FirstName, r.RankName, COUNT(cm.CaseMasterID) AS case_count\n"
+            "FROM Employee AS e\n"
+            "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID\n"
+            "JOIN CaseMaster AS cm ON cm.PolicePersonID = e.EmployeeID\n"
+            "GROUP BY e.EmployeeID, e.FirstName, r.RankName\n"
+            "ORDER BY case_count DESC\n"
+            "LIMIT 5"
+        ),
+    },
+    {
+        "tables": {"CaseMaster", "Employee"},
         "q": "Give me cases handled by Harish Kumar.",
         "sql": (
-            "SELECT f.fir_id, f.fir_number, f.case_type, f.incident_location,\n"
-            "       f.date_filed, f.status\n"
-            "FROM fir_master AS f\n"
-            "JOIN officers AS o ON o.officer_id = f.investigating_officer_id\n"
-            "WHERE o.full_name LIKE '%Harish Kumar%'\n"
-            "ORDER BY f.date_filed DESC\n"
-            "LIMIT 50"
-        ),
-    },
-    {
-        "tables": {"fir_master"},
-        "q": "Break down all cases by type with counts.",
-        "sql": (
-            "SELECT case_type, COUNT(*) AS case_count\n"
-            "FROM fir_master\n"
-            "GROUP BY case_type\n"
-            "ORDER BY case_count DESC"
-        ),
-    },
-    {
-        "tables": {"fir_master"},
-        "q": "Show me all assault cases reported in Koramangala.",
-        "sql": (
-            "SELECT fir_number, date_filed, incident_location, status\n"
-            "FROM fir_master\n"
-            "WHERE case_type = 'assault'\n"
-            "  AND incident_location LIKE '%Koramangala%'\n"
-            "ORDER BY date_filed DESC\n"
-            "LIMIT 50"
-        ),
-    },
-    {
-        "tables": {"fir_master", "accused"},
-        "q": "Show accused who appear in more than one open FIR.",
-        "sql": (
-            "SELECT a.full_name, COUNT(DISTINCT a.fir_id) AS open_fir_count\n"
-            "FROM accused AS a\n"
-            "WHERE a.fir_id IN (\n"
-            "    SELECT f.fir_id\n"
-            "    FROM fir_master AS f\n"
-            "    WHERE f.status = 'open'\n"
-            ")\n"
-            "GROUP BY a.full_name\n"
-            "HAVING COUNT(DISTINCT a.fir_id) > 1\n"
-            "ORDER BY open_fir_count DESC\n"
-            "LIMIT 50"
-        ),
-    },
-    {
-        "tables": {"fir_master", "accused"},
-        "q": "Which accused have been involved in more cases than the average accused?",
-        "sql": (
-            "WITH accused_counts AS (\n"
-            "    SELECT full_name, COUNT(DISTINCT fir_id) AS fir_count\n"
-            "    FROM accused\n"
-            "    WHERE full_name IS NOT NULL\n"
-            "    GROUP BY full_name\n"
-            ")\n"
-            "SELECT full_name, fir_count\n"
-            "FROM accused_counts\n"
-            "WHERE fir_count > (SELECT AVG(fir_count) FROM accused_counts)\n"
-            "ORDER BY fir_count DESC\n"
+            "SELECT cm.CaseMasterID, cm.CrimeNo, cm.BriefFacts, cm.CrimeRegisteredDate\n"
+            "FROM CaseMaster AS cm\n"
+            "JOIN Employee AS e ON e.EmployeeID = cm.PolicePersonID\n"
+            "WHERE e.FirstName LIKE '%Harish Kumar%'\n"
+            "ORDER BY cm.CrimeRegisteredDate DESC\n"
             "LIMIT 50"
         ),
     },
@@ -516,7 +442,7 @@ def get_few_shot_examples(table_names: list[str]) -> str:
     Scoring: each example earns +1 for every table it shares with the caller's
     selected set. Ties broken by example order in the bank (stable).
     """
-    selected = set(table_names) | {"fir_master"}
+    selected = set(table_names) | {"CaseMaster"}
 
     scored = []
     for idx, ex in enumerate(_FEW_SHOT_BANK):

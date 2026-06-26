@@ -257,3 +257,44 @@ CREATE TABLE ArrestSurrender (
 
 CREATE INDEX idx_arrestsurrender_case ON ArrestSurrender(CaseMasterID);
 CREATE INDEX idx_arrestsurrender_accused ON ArrestSurrender(AccusedMasterID);
+
+CREATE TABLE evidence_media (
+    media_id INT AUTO_INCREMENT PRIMARY KEY,
+    case_master_id INT NOT NULL,
+    media_type ENUM('image','audio','video','document') NOT NULL,
+    file_name VARCHAR(200) NOT NULL,
+    stratus_folder_id VARCHAR(100) NOT NULL,
+    stratus_file_id VARCHAR(100) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    uploaded_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_media_case (case_master_id),
+    FOREIGN KEY (case_master_id) REFERENCES CaseMaster(CaseMasterID)
+);
+
+CREATE TABLE chat_sessions (
+    session_id VARCHAR(36) PRIMARY KEY,
+    officer_id INT NOT NULL,
+    title VARCHAR(200) NOT NULL DEFAULT 'Untitled Chat',
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    message_count INT DEFAULT 0,
+    is_active TINYINT(1) DEFAULT 1,
+    KEY idx_sessions_officer (officer_id, updated_at),
+    FOREIGN KEY (officer_id) REFERENCES Employee(EmployeeID)
+);
+
+CREATE TABLE chat_messages (
+    message_id INT AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    role ENUM('user', 'assistant') NOT NULL,
+    content TEXT NOT NULL,
+    sql_generated TEXT,
+    has_table TINYINT(1) DEFAULT 0,
+    has_media TINYINT(1) DEFAULT 0,
+    graph_available TINYINT(1) DEFAULT 0,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    table_data_json MEDIUMTEXT,
+    KEY idx_messages_session (session_id, created_at),
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+);
+

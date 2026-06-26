@@ -156,11 +156,11 @@ async def export_session_pdf(
     title = rows[0]["title"] if rows else "Chat Export"
 
     officer_rows = await execute_query(
-        "SELECT full_name, badge_number FROM officers WHERE officer_id = %s",
+        "SELECT FirstName, KGID FROM Employee WHERE EmployeeID = %s",
         (officer["officer_id"],),
     )
-    officer_name = officer_rows[0]["full_name"] if officer_rows else "Officer"
-    badge_number = officer_rows[0]["badge_number"] if officer_rows else ""
+    officer_name = officer_rows[0]["FirstName"] if officer_rows else "Officer"
+    badge_number = officer_rows[0]["KGID"] if officer_rows else ""
 
     output = _build_html(officer_name, badge_number, title, messages)
     filename = f"KSP-{session_id[:8]}.html"
