@@ -1,7 +1,3 @@
--- KSP official schema (post-migration). Source of truth for ksp_crime_db_v2.
--- Combines MIGRATE_STEP1 + MIGRATE_STEP2 DDL. Apply against a fresh database
--- with: mysql -u <user> -p<pass> <dbname> < schema.sql
-
 CREATE TABLE State (
     StateID         INT AUTO_INCREMENT PRIMARY KEY,
     StateName       VARCHAR(100) NOT NULL,
