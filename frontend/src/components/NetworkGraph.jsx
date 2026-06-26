@@ -60,10 +60,14 @@ export default function NetworkGraph({ firId, accusedId, onClose }) {
           return
         }
 
-        const nodes = data.nodes.map((n) => ({
-          ...n,
-          color: GROUP_COLORS[n.group] || GROUP_COLORS.fir,
-        }))
+        const nodes = data.nodes.map((n) => {
+          const type = n.group || n.type
+          const colorKey = type === 'case' ? 'fir' : type
+          return {
+            ...n,
+            color: GROUP_COLORS[colorKey] || GROUP_COLORS.fir,
+          }
+        })
 
         // vis-network mutates the data objects; pass plain arrays (the
         // standalone build accepts arrays directly without DataSet).
