@@ -6,8 +6,8 @@ Algorithm (intentionally simple — keyword presence):
   2. For each table in SCHEMA_CATALOG, score it by how many of its keywords
      appear in the question.
   3. Tables marked `always_include: True` are always added.
-  4. Cap result at 5 tables (fir_master plus 4 others) to avoid context bloat.
-  5. fir_master is always returned first.
+  4. Cap result at 5 tables (CaseMaster plus 4 others) to avoid context bloat.
+  5. CaseMaster is always returned first.
 """
 
 import re
@@ -44,11 +44,11 @@ def _keyword_matches(question_lower: str, keyword: str) -> bool:
 
 def select_relevant_tables(question: str) -> list[str]:
     """
-    Return a list of table names relevant to the question. fir_master always
+    Return a list of table names relevant to the question. CaseMaster always
     appears first. List length is capped at _MAX_TABLES.
     """
     if not question:
-        return ["fir_master"]
+        return ["CaseMaster"]
 
     q = question.lower()
 
@@ -69,12 +69,12 @@ def select_relevant_tables(question: str) -> list[str]:
 
     scored.sort(key=lambda x: (-x[0], x[1]))
 
-    # Build final list: fir_master first, then any other always_include tables,
+    # Build final list: CaseMaster first, then any other always_include tables,
     # then the highest-scoring keyword matches up to the cap.
     out: list[str] = []
-    if "fir_master" in always_in:
-        out.append("fir_master")
-        always_in.remove("fir_master")
+    if "CaseMaster" in always_in:
+        out.append("CaseMaster")
+        always_in.remove("CaseMaster")
     out.extend(always_in)
 
     for _, name in scored:

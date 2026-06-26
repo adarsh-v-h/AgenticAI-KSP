@@ -27,7 +27,7 @@ from llm.sql_generator import (
     MAX_ATTEMPTS,
 )
 from db.connection import execute_query
-from pipeline.media_resolver import resolve_media, collect_fir_ids
+from pipeline.media_resolver import resolve_media, collect_case_master_ids
 from llm.answer_formatter import format_answer, route_intent, generate_direct_answer
 from llm.client import LLMError
 
@@ -53,31 +53,16 @@ class PipelineResponse:
 _GENERIC_DB_ERROR = "I couldn't run that query. Try rephrasing."
 
 
-def _has_fir_id(results: list[dict]) -> bool:
+def _has_case_master_id(results: list[dict]) -> bool:
     if not results:
         return False
     first = results[0]
-    return isinstance(first, dict) and "fir_id" in first
+    return isinstance(first, dict) and ("CaseMasterID" in first or "case_master_id" in first)
 
 
-async def _check_graph_available(fir_ids: list[int]) -> bool:
-    if not fir_ids:
-        return False
-    placeholders = ",".join(["%s"] * len(fir_ids))
-    sql = (
-        "SELECT COUNT(*) AS c FROM case_relationships "
-        f"WHERE (entity_a_type = 'fir' AND entity_a_id IN ({placeholders})) "
-        f"   OR (entity_b_type = 'fir' AND entity_b_id IN ({placeholders}))"
-    )
-    try:
-        rows = await execute_query(sql, tuple(fir_ids) + tuple(fir_ids))
-        if not rows:
-            return False
-        count = rows[0].get("c") or rows[0].get("COUNT(*)") or 0
-        return int(count) > 0
-    except Exception as e:
-        _log(f"graph availability check failed: {e}")
-        return False
+async def _check_graph_available(case_master_ids: list[int]) -> bool:
+    # TODO: Step 4 — derive graph edges from Accused/CaseMaster per MIGRATE_STEP4.md
+    return False
 
 
 def _most_recent_table(history: list[dict]) -> list[dict]:
@@ -128,8 +113,8 @@ async def run_pipeline(
     fills `error` (and a user-friendly `answer_text`) on the response.
 
     `officer`, when provided, carries the authenticated officer's JWT payload
-    (officer_id, badge_number) so first-person questions ("cases I am handling")
-    resolve to the correct investigating_officer_id.
+    (EmployeeID, KGID) so first-person questions ("cases I am handling")
+    resolve to the correct PolicePersonID.
     """
     history = history or []
     start = time.monotonic()
@@ -260,11 +245,11 @@ async def run_pipeline(
 
     response.table_data = results
 
-    # 4. Media resolver — only if results carry a fir_id column
+    # 4. Media resolver — only if results carry a CaseMasterID column
     media: list[dict] = []
-    fir_ids: list[int] = []
-    if results and _has_fir_id(results):
-        fir_ids = collect_fir_ids(results)
+    case_master_ids: list[int] = []
+    if results and _has_case_master_id(results):
+        case_master_ids = collect_case_master_ids(results)
         try:
             media = await resolve_media(results)
         except Exception as e:
@@ -274,8 +259,8 @@ async def run_pipeline(
     response.media_attachments = media
 
     # 5. Graph availability probe
-    if fir_ids:
-        response.graph_available = await _check_graph_available(fir_ids)
+    if case_master_ids:
+        response.graph_available = await _check_graph_available(case_master_ids)
 
     # 6. Answer formatter — never let a formatter failure kill the pipeline
     try:

@@ -177,27 +177,27 @@ def validate_sql(sql: str, allowed_tables: list[str] | None = None) -> Validatio
 
 if __name__ == "__main__":
     cases = [
-        ("SELECT * FROM fir_master", True),
-        ("DROP TABLE fir_master", False),
-        ("SELECT * FROM fir_master; DROP TABLE accused", False),
-        ("select fir_id from fir_master where status = 'open'", True),
-        ("UPDATE fir_master SET status = 'closed'", False),
-        ("```sql\nSELECT * FROM fir_master\n```", True),
-        ("SELECT created_at FROM fir_master", True),  # no false positive on "create"
+        ("SELECT * FROM CaseMaster", True),
+        ("DROP TABLE CaseMaster", False),
+        ("SELECT * FROM CaseMaster; DROP TABLE Accused", False),
+        ("select CaseMasterID from CaseMaster where CaseStatusID = 1", True),
+        ("UPDATE CaseMaster SET CaseStatusID = 2", False),
+        ("```sql\nSELECT * FROM CaseMaster\n```", True),
+        ("SELECT created_at FROM CaseMaster", True),  # no false positive on "create"
         ("SELECT * FROM secret_table", False),  # unknown table
         ("", False),
         ("CANNOT_ANSWER", False),
         (
-            "SELECT f.fir_number FROM fir_master f JOIN accused a ON a.fir_id = f.fir_id WHERE a.full_name LIKE '%Mahesh%'",
+            "SELECT cm.CrimeNo FROM CaseMaster cm JOIN Accused a ON a.CaseMasterID = cm.CaseMasterID WHERE a.AccusedName LIKE '%Mahesh%'",
             True,
         ),
-        ("SELECT * FROM fir_master WHERE 1=1", False),  # injection-y
+        ("SELECT * FROM CaseMaster WHERE 1=1", False),  # injection-y
         (
-            "SELECT a.full_name FROM accused a WHERE a.fir_id IN (SELECT f.fir_id FROM fir_master f WHERE f.status = 'open')",
+            "SELECT a.AccusedName FROM Accused a WHERE a.CaseMasterID IN (SELECT cm.CaseMasterID FROM CaseMaster cm JOIN CaseStatusMaster csm ON csm.CaseStatusID = cm.CaseStatusID WHERE csm.CaseStatusName = 'open')",
             True,
         ),
         (
-            "WITH ac AS (SELECT full_name, COUNT(*) AS c FROM accused GROUP BY full_name) SELECT full_name FROM ac WHERE c > 1",
+            "WITH ac AS (SELECT AccusedName, COUNT(*) AS c FROM Accused GROUP BY AccusedName) SELECT AccusedName FROM ac WHERE c > 1",
             True,
         ),
     ]
