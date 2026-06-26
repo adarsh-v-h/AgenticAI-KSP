@@ -1,8 +1,8 @@
-"""
+﻿"""
 Simple JWT auth for local development.
 REPLACE with Catalyst Authentication before production deployment.
 
-The `get_current_officer` dependency is the only thing routes touch — swapping
+The `get_current_officer` dependency is the only thing routes touch â€” swapping
 the implementation here requires zero route changes.
 """
 
@@ -104,7 +104,7 @@ async def login(badge_number: str, password: str) -> dict:
         raise _unauthorized("Invalid badge number or password.")
 
     rows = await execute_query(
-        "SELECT e.EmployeeID, e.KGID, e.FirstName, r.RankName AS rank "
+        "SELECT e.EmployeeID, e.KGID, e.FirstName, r.RankName AS `rank` "
         "FROM Employee AS e "
         "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID "
         "WHERE e.KGID = %s AND e.is_active = TRUE",
@@ -128,3 +128,4 @@ async def login(badge_number: str, password: str) -> dict:
             "rank": employee["rank"] or "",
         },
     }
+
