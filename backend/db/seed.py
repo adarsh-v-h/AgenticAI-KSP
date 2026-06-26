@@ -1,21 +1,27 @@
 import sys
 import os
-# Append backend root to sys.path so we can import from config
-backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if backend_path not in sys.path:
-    sys.path.append(backend_path)
-
 import asyncio
 import random
-import json
-import aiomysql
-from datetime import date, timedelta
-from db.connection import create_pool, close_pool
+from datetime import date, datetime, timedelta
+from dotenv import load_dotenv
 
 # Set random seed for deterministic synthetic data generation
 random.seed(42)
 
-# Bengaluru Area locations with representative lat/lng
+# Ensure backend root is in sys.path
+backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_path not in sys.path:
+    sys.path.append(backend_path)
+
+# Set DB_NAME to DB_NAME_v2 dynamically at runtime
+load_dotenv()
+db_name = os.getenv("DB_NAME", "ksp_crime_db")
+if not db_name.endswith("_v2"):
+    db_name = f"{db_name}_v2"
+os.environ["DB_NAME"] = db_name
+
+from db.connection import create_pool, close_pool
+
 LOCATIONS = [
     {"name": "Koramangala", "prefix": "KOR", "lat": 12.9352, "lng": 77.6244},
     {"name": "Indiranagar", "prefix": "IND", "lat": 12.9719, "lng": 77.6412},
@@ -32,19 +38,6 @@ LOCATIONS = [
     {"name": "HSR Layout", "prefix": "HSR", "lat": 12.9103, "lng": 77.6450},
     {"name": "Marathahalli", "prefix": "MAR", "lat": 12.9562, "lng": 77.6967},
     {"name": "Yelahanka", "prefix": "YEL", "lat": 13.1007, "lng": 77.5963}
-]
-
-OFFICERS = [
-    {"name": "Manjunath Patil", "rank": "Inspector", "badge": "KSP-2010-0101"},
-    {"name": "Venkatesh Gowda", "rank": "PI", "badge": "KSP-2012-0202"},
-    {"name": "Ramesh Naik", "rank": "SI", "badge": "KSP-2014-0303"},
-    {"name": "Sandeep Hegde", "rank": "SI", "badge": "KSP-2015-0404"},
-    {"name": "Harish Kumar", "rank": "ASI", "badge": "KSP-2016-0505"},
-    {"name": "Vijay Raghavendra", "rank": "ASI", "badge": "KSP-2017-0606"},
-    {"name": "Lokesh Murthy", "rank": "Head Constable", "badge": "KSP-2018-0707"},
-    {"name": "Shivakumar Swamy", "rank": "Head Constable", "badge": "KSP-2019-0808"},
-    {"name": "Srinivas Raju", "rank": "Constable", "badge": "KSP-2020-0909"},
-    {"name": "Naveen Raj", "rank": "Constable", "badge": "KSP-2021-1010"}
 ]
 
 MOCK_NAMES_MALE = [
@@ -76,738 +69,740 @@ def random_time() -> str:
     second = random.randint(0, 59)
     return f"{hour:02d}:{minute:02d}:{second:02d}"
 
-async def seed_officers(conn) -> list[int]:
-    """Insert 10 officers."""
-    officer_ids = []
+async def seed_lookups(conn):
     async with conn.cursor() as cur:
-        for off in OFFICERS:
-            phone = f"9880{random.randint(100000, 999999)}"
-            email = f"{off['name'].lower().replace(' ', '.')}@ksp.gov.in"
-            date_joined = random_date(date(2010, 1, 1), date(2022, 1, 1))
+        # State
+        await cur.execute("INSERT INTO State (StateName, NationalityID, Active) VALUES (%s, %s, %s)", ('Karnataka', 1, 1))
+        state_id = cur.lastrowid
+
+        # District
+        districts = ['Bengaluru Urban', 'Bengaluru Rural', 'Mysuru', 'Mangaluru', 'Hubballi-Dharwad']
+        district_ids = []
+        for dist in districts:
+            await cur.execute("INSERT INTO District (DistrictName, StateID, Active) VALUES (%s, %s, %s)", (dist, state_id, 1))
+            district_ids.append(cur.lastrowid)
+
+        # UnitType
+        unit_types = [
+            ('Police Station', 'City', 1, 1),
+            ('Circle Office', 'District', 2, 1),
+            ('District Office', 'State', 3, 1)
+        ]
+        unit_type_ids = []
+        for ut in unit_types:
+            await cur.execute("INSERT INTO UnitType (UnitTypeName, CityDistState, Hierarchy, Active) VALUES (%s, %s, %s, %s)", ut)
+            unit_type_ids.append(cur.lastrowid)
+
+        # Unit (Police Stations in districts)
+        units = [
+            ('Koramangala PS', unit_type_ids[0], None, 1, state_id, district_ids[0], 1),
+            ('Whitefield PS', unit_type_ids[0], None, 1, state_id, district_ids[1], 1),
+            ('Mysuru Central PS', unit_type_ids[0], None, 1, state_id, district_ids[2], 1),
+            ('Mangaluru City PS', unit_type_ids[0], None, 1, state_id, district_ids[3], 1),
+            ('Hubballi PS', unit_type_ids[0], None, 1, state_id, district_ids[4], 1)
+        ]
+        unit_ids = []
+        for unit in units:
+            await cur.execute("INSERT INTO Unit (UnitName, TypeID, ParentUnit, NationalityID, StateID, DistrictID, Active) VALUES (%s, %s, %s, %s, %s, %s, %s)", unit)
+            unit_ids.append(cur.lastrowid)
+
+        # Court
+        courts = [
+            ('Bengaluru Urban Court', district_ids[0], state_id, 1),
+            ('Bengaluru Rural Court', district_ids[1], state_id, 1),
+            ('Mysuru District Court', district_ids[2], state_id, 1),
+            ('Mangaluru City Court', district_ids[3], state_id, 1),
+            ('Hubballi District Court', district_ids[4], state_id, 1)
+        ]
+        court_ids = []
+        for court in courts:
+            await cur.execute("INSERT INTO Court (CourtName, DistrictID, StateID, Active) VALUES (%s, %s, %s, %s)", court)
+            court_ids.append(cur.lastrowid)
+
+        # Rank (use backticks for `Rank`)
+        ranks = ['Constable', 'Head Constable', 'ASI', 'SI', 'PI', 'Inspector', 'DySP', 'SP']
+        rank_ids = {}
+        for idx, r in enumerate(ranks):
+            await cur.execute("INSERT INTO `Rank` (RankName, Hierarchy, Active) VALUES (%s, %s, %s)", (r, idx + 1, 1))
+            rank_ids[r] = cur.lastrowid
+
+        # Designation
+        designations = [
+            ('Investigating Officer', 1),
+            ('SHO', 2),
+            ('Beat Officer', 3),
+            ('Circle Inspector', 4)
+        ]
+        designation_ids = {}
+        for idx, d in enumerate(designations):
+            await cur.execute("INSERT INTO Designation (DesignationName, Active, SortOrder) VALUES (%s, %s, %s)", (d[0], 1, d[1]))
+            designation_ids[d[0]] = cur.lastrowid
+
+        # CrimeHead
+        heads = [
+            'Crimes Against Property',
+            'Crimes Against Person',
+            'Cyber Crimes',
+            'Crimes Against Society'
+        ]
+        head_ids = []
+        for h in heads:
+            await cur.execute("INSERT INTO CrimeHead (CrimeGroupName, Active) VALUES (%s, %s)", (h, 1))
+            head_ids.append(cur.lastrowid)
+
+        # CrimeSubHead
+        subheads = [
+            (head_ids[0], 'Theft', 1),
+            (head_ids[0], 'Robbery', 2),
+            (head_ids[0], 'Vehicle Theft', 3),
+            (head_ids[0], 'Fraud', 4),
+            (head_ids[1], 'Assault', 1),
+            (head_ids[1], 'Murder', 2),
+            (head_ids[1], 'Domestic Violence', 3),
+            (head_ids[1], 'Missing Person', 4),
+            (head_ids[2], 'Phishing', 1),
+            (head_ids[2], 'Online Harassment', 2),
+            (head_ids[2], 'Identity Theft', 3),
+            (head_ids[2], 'Hacking', 4),
+            (head_ids[3], 'Drug Offense', 1)
+        ]
+        subhead_ids = {}
+        for sh in subheads:
+            await cur.execute("INSERT INTO CrimeSubHead (CrimeHeadID, CrimeHeadName, SeqID) VALUES (%s, %s, %s)", sh)
+            subhead_ids[sh[1]] = cur.lastrowid
+
+        # CaseCategory
+        categories = ['FIR', 'UDR', 'Zero FIR', 'PAR']
+        category_ids = []
+        for cat in categories:
+            await cur.execute("INSERT INTO CaseCategory (LookupValue) VALUES (%s)", (cat,))
+            category_ids.append(cur.lastrowid)
+
+        # GravityOffence
+        gravity = ['Heinous', 'Non-Heinous']
+        gravity_ids = []
+        for grav in gravity:
+            await cur.execute("INSERT INTO GravityOffence (LookupValue) VALUES (%s)", (grav,))
+            gravity_ids.append(cur.lastrowid)
+
+        # CaseStatusMaster
+        statuses = ['Under Investigation', 'Charge Sheeted', 'Closed', 'Open']
+        status_ids = {}
+        for stat in statuses:
+            await cur.execute("INSERT INTO CaseStatusMaster (CaseStatusName) VALUES (%s)", (stat,))
+            status_ids[stat] = cur.lastrowid
+
+        # Act
+        acts = [
+            ('IPC', 'Indian Penal Code', 'IPC', 1),
+            ('NDPS', 'Narcotic Drugs and Psychotropic Substances Act', 'NDPS', 1),
+            ('IT Act', 'Information Technology Act', 'IT Act', 1)
+        ]
+        for act in acts:
+            await cur.execute("INSERT INTO Act (ActCode, ActDescription, ShortName, Active) VALUES (%s, %s, %s, %s)", act)
+
+        # Section
+        sections = [
+            ('IPC', '379', 'Theft', 1),
+            ('IPC', '302', 'Murder', 1),
+            ('IPC', '392', 'Robbery', 1),
+            ('IPC', '323', 'Assault', 1),
+            ('IPC', '498A', 'Domestic Violence', 1),
+            ('NDPS', '20', 'Drug possession/use', 1),
+            ('NDPS', '22', 'Drug trafficking', 1),
+            ('IT Act', '66C', 'Identity theft', 1),
+            ('IT Act', '66D', 'Cheating by impersonation', 1)
+        ]
+        for sec in sections:
+            await cur.execute("INSERT INTO Section (ActCode, SectionCode, SectionDescription, Active) VALUES (%s, %s, %s, %s)", sec)
+
+        # CasteMaster
+        castes = ['General', 'OBC', 'SC', 'ST', 'Other']
+        caste_ids = []
+        for caste in castes:
+            await cur.execute("INSERT INTO CasteMaster (caste_master_name) VALUES (%s)", (caste,))
+            caste_ids.append(cur.lastrowid)
+
+        # ReligionMaster
+        religions = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Jain', 'Buddhist', 'Other']
+        religion_ids = []
+        for rel in religions:
+            await cur.execute("INSERT INTO ReligionMaster (ReligionName) VALUES (%s)", (rel,))
+            religion_ids.append(cur.lastrowid)
+
+        # OccupationMaster
+        occupations = ['Farmer', 'Government Employee', 'Private Employee', 'Business Owner', 'Student', 'Unemployed', 'Homemaker', 'Other']
+        occupation_ids = []
+        for occ in occupations:
+            await cur.execute("INSERT INTO OccupationMaster (OccupationName) VALUES (%s)", (occ,))
+            occupation_ids.append(cur.lastrowid)
+
+        return {
+            "district_ids": district_ids,
+            "unit_ids": unit_ids,
+            "court_ids": court_ids,
+            "rank_ids": rank_ids,
+            "designation_ids": designation_ids,
+            "subhead_ids": subhead_ids,
+            "category_ids": category_ids,
+            "gravity_ids": gravity_ids,
+            "status_ids": status_ids,
+            "caste_ids": caste_ids,
+            "religion_ids": religion_ids,
+            "occupation_ids": occupation_ids,
+            "head_ids": head_ids
+        }
+
+async def seed_employees(conn, lookups):
+    officers_data = [
+        {"name": "Manjunath Patil", "rank": "Inspector", "badge": "KSP-2010-0101", "role": "supervisor", "desg": "SHO"},
+        {"name": "Venkatesh Gowda", "rank": "PI", "badge": "KSP-2012-0202", "role": "supervisor", "desg": "Circle Inspector"},
+        {"name": "Ramesh Naik", "rank": "SI", "badge": "KSP-2014-0303", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Sandeep Hegde", "rank": "SI", "badge": "KSP-2015-0404", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Harish Kumar", "rank": "ASI", "badge": "KSP-2016-0505", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Vijay Raghavendra", "rank": "ASI", "badge": "KSP-2017-0606", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Lokesh Murthy", "rank": "Head Constable", "badge": "KSP-2018-0707", "role": "investigator", "desg": "Beat Officer"},
+        {"name": "Shivakumar Swamy", "rank": "Head Constable", "badge": "KSP-2019-0808", "role": "investigator", "desg": "Beat Officer"},
+        {"name": "Srinivas Raju", "rank": "Constable", "badge": "KSP-2020-0909", "role": "analyst", "desg": "Beat Officer"},
+        {"name": "Naveen Raj", "rank": "Constable", "badge": "KSP-2021-1010", "role": "investigator", "desg": "Beat Officer"}
+    ]
+
+    employee_ids = []
+    async with conn.cursor() as cur:
+        for idx, off in enumerate(officers_data):
+            dist_id = lookups["district_ids"][idx % 5]
+            unit_id = lookups["unit_ids"][idx % 5]
+            rank_id = lookups["rank_ids"][off["rank"]]
+            desg_id = lookups["designation_ids"][off["desg"]]
+            
+            dob = date(1975, 1, 1) + timedelta(days=random.randint(0, 7000))
+            gender_id = 1
+            blood_group_id = random.randint(1, 8)
+            app_date = date(2010, 1, 1) + timedelta(days=random.randint(0, 4000))
             
             sql = """
-            INSERT INTO officers (badge_number, full_name, `rank`, department, phone, email, date_joined, is_active)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO Employee (DistrictID, UnitID, RankID, DesignationID, KGID, FirstName, 
+                                  EmployeeDOB, GenderID, BloodGroupID, PhysicallyChallenged, 
+                                  AppointmentDate, role, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             await cur.execute(sql, (
-                off['badge'], off['name'], off['rank'], "Crime Branch", phone, email, date_joined, True
+                dist_id, unit_id, rank_id, desg_id, off["badge"], off["name"],
+                dob, gender_id, blood_group_id, 0, app_date, off["role"], 1
             ))
-            officer_ids.append(cur.lastrowid)
-    return officer_ids
+            emp_id = cur.lastrowid
+            employee_ids.append({
+                "id": emp_id,
+                "district_id": dist_id,
+                "unit_id": unit_id
+            })
+    return employee_ids
 
-async def seed_fir_master(conn, officer_ids: list[int]) -> tuple[list[dict], dict]:
-    """Insert 220 FIRs and return mappings of inserted records."""
-    fir_records = []
-    fir_ids_by_type = {
-        'theft': [], 'robbery': [], 'assault': [], 'murder': [], 'fraud': [],
-        'cybercrime': [], 'missing_person': [], 'vehicle_theft': [],
-        'drug_offense': [], 'domestic_violence': [], 'other': []
+async def seed_cases(conn, lookups, employee_ids):
+    cases_to_generate = []
+    
+    # Mahesh Gowda: 8 cases (4 theft, 2 assault, 1 robbery, 1 vehicle_theft)
+    for _ in range(4):
+        cases_to_generate.append({"case_type": "theft", "assigned_accused": "mahesh"})
+    for _ in range(2):
+        cases_to_generate.append({"case_type": "assault", "assigned_accused": "mahesh"})
+    cases_to_generate.append({"case_type": "robbery", "assigned_accused": "mahesh"})
+    cases_to_generate.append({"case_type": "vehicle_theft", "assigned_accused": "mahesh"})
+
+    # Ravi Kumar: 5 cases (5 theft)
+    for _ in range(5):
+        cases_to_generate.append({"case_type": "theft", "assigned_accused": "ravi"})
+
+    # Suresh Naik: 4 cases (4 fraud)
+    for _ in range(4):
+        cases_to_generate.append({"case_type": "fraud", "assigned_accused": "suresh"})
+
+    # Deepak Rao: 3 cases (3 cybercrime)
+    for _ in range(3):
+        cases_to_generate.append({"case_type": "cybercrime", "assigned_accused": "deepak"})
+
+    remaining_counts = {
+        "theft": 41,
+        "assault": 33,
+        "vehicle_theft": 29,
+        "fraud": 21,
+        "cybercrime": 17,
+        "missing_person": 15,
+        "drug_offense": 15,
+        "robbery": 9,
+        "murder": 5,
+        "domestic_violence": 10,
+        "other": 5
     }
-    
-    # Target counts per case_type
-    case_type_counts = {
-        'theft': 50,
-        'assault': 35,
-        'vehicle_theft': 30,
-        'fraud': 25,
-        'cybercrime': 20,
-        'missing_person': 15,
-        'drug_offense': 15,
-        'robbery': 10,
-        'murder': 5,
-        'domestic_violence': 10,
-        'other': 5
-    }
-    
-    start_date = date(2022, 1, 1)
-    end_date = date(2025, 6, 30)
-    station_code = "STN-KSP-BLR-01"
-    
-    # We will generate sequence numbers per year-location to format FIR numbers
+
+    for c_type, count in remaining_counts.items():
+        for _ in range(count):
+            cases_to_generate.append({"case_type": c_type, "assigned_accused": None})
+
+    random.seed(42)
+    random.shuffle(cases_to_generate)
+
+    inserted_cases = []
+    start_date_val = date(2022, 1, 1)
+    end_date_val = date(2025, 6, 30)
     seq_counter = {}
-    
-    async with conn.cursor() as cur:
-        for case_type, count in case_type_counts.items():
-            for _ in range(count):
-                loc = random.choice(LOCATIONS)
-                dt_filed = random_date(start_date, end_date)
-                tm_filed = random_time()
-                year = dt_filed.year
-                
-                # Format FIR number
-                seq_key = (year, loc['prefix'])
-                seq_counter[seq_key] = seq_counter.get(seq_key, 0) + 1
-                fir_number = f"FIR/{year}/{loc['prefix']}/{seq_counter[seq_key]:04d}"
-                
-                # incident date-time slightly before file date-time
-                inc_date = dt_filed - timedelta(days=random.randint(0, 3))
-                inc_time = random_time()
-                
-                # Lat/lng slightly perturbed from location center
-                lat = float(loc['lat']) + random.uniform(-0.005, 0.005)
-                lng = float(loc['lng']) + random.uniform(-0.005, 0.005)
-                
-                # Descriptions
-                desc = f"Reported case of {case_type} at {loc['name']}. Under investigation."
-                if case_type == 'theft':
-                    desc = f"Complaint filed regarding theft of valuable personal assets from residential premises in {loc['name']}."
-                elif case_type == 'assault':
-                    desc = f"Incident of physical assault reported following a verbal dispute between neighbors in {loc['name']}."
-                elif case_type == 'vehicle_theft':
-                    desc = f"Theft of two-wheeler parked in front of owner's residence in {loc['name']}."
-                elif case_type == 'fraud':
-                    desc = f"Victim was defrauded of money by suspects claiming to be bank officers, incident occurred in {loc['name']}."
-                elif case_type == 'cybercrime':
-                    desc = f"Online phishing attempt resulting in unauthorized transactions on victim's credit card in {loc['name']}."
-                elif case_type == 'missing_person':
-                    desc = f"Report filed regarding missing individual who was last seen walking near {loc['name']} bus stop."
-                elif case_type == 'drug_offense':
-                    desc = f"Seizure of contraband substances and arrest of suspect in possession near local park in {loc['name']}."
-                elif case_type == 'robbery':
-                    desc = f"Robbery at gun/knife point in a commercial area of {loc['name']}. Suspect fled scene."
-                elif case_type == 'murder':
-                    desc = f"Homicide case registered following discovery of deceased person in an abandoned site in {loc['name']}."
-                elif case_type == 'domestic_violence':
-                    desc = f"Domestic dispute and assault report registered by complainant in {loc['name']}."
-                
-                # Status distribution: 60% open, 25% under_investigation, 10% closed, 5% chargesheeted
-                status_roll = random.random()
-                if status_roll < 0.60:
-                    status = 'open'
-                elif status_roll < 0.85:
-                    status = 'under_investigation'
-                elif status_roll < 0.95:
-                    status = 'closed'
-                else:
-                    status = 'chargesheeted'
-                    
-                officer_id = random.choice(officer_ids)
-                
-                sql = """
-                INSERT INTO fir_master (fir_number, station_code, date_filed, time_filed, case_type, 
-                                        incident_date, incident_time, incident_location, incident_lat, 
-                                        incident_lng, description, status, investigating_officer_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                await cur.execute(sql, (
-                    fir_number, station_code, dt_filed, tm_filed, case_type,
-                    inc_date, inc_time, f"{loc['name']}, Bengaluru", lat, lng,
-                    desc, status, officer_id
-                ))
-                
-                fir_id = cur.lastrowid
-                record = {
-                    "fir_id": fir_id,
-                    "fir_number": fir_number,
-                    "case_type": case_type,
-                    "incident_location": loc['name'],
-                    "date_filed": dt_filed
-                }
-                fir_records.append(record)
-                fir_ids_by_type[case_type].append(fir_id)
-                
-    return fir_records, fir_ids_by_type
 
-async def seed_accused(conn, fir_records: list[dict], fir_ids_by_type: dict):
-    """Insert accused persons, ensuring repeat offender patterns are preserved."""
-    
-    # Extract FIR IDs for specific categories
-    theft_firs = fir_ids_by_type['theft']
-    assault_firs = fir_ids_by_type['assault']
-    robbery_firs = fir_ids_by_type['robbery']
-    vehicle_theft_firs = fir_ids_by_type['vehicle_theft']
-    fraud_firs = fir_ids_by_type['fraud']
-    cybercrime_firs = fir_ids_by_type['cybercrime']
-    
-    # Store explicit repeat offender allocations to ensure we meet count criteria
-    # Mahesh Gowda: 8 FIRs (4 theft, 2 assault, 1 robbery, 1 vehicle_theft)
-    mahesh_firs = [
-        theft_firs.pop(0), theft_firs.pop(0), theft_firs.pop(0), theft_firs.pop(0),
-        assault_firs.pop(0), assault_firs.pop(0),
-        robbery_firs.pop(0),
-        vehicle_theft_firs.pop(0)
-    ]
-    
-    # Ravi Kumar: 5 theft FIRs
-    ravi_firs = [theft_firs.pop(0) for _ in range(5)]
-    
-    # Suresh Nayak: 4 fraud FIRs
-    suresh_firs = [fraud_firs.pop(0) for _ in range(4)]
-    
-    # Pavan Reddy: 3 cybercrime FIRs
-    pavan_firs = [cybercrime_firs.pop(0) for _ in range(3)]
-    
-    # Anand Shetty: 3 assault FIRs
-    anand_firs = [assault_firs.pop(0) for _ in range(3)]
-    
-    repeat_offenders = [
-        {
-            "name": "Mahesh Gowda",
-            "alias": "Bullet Mahesh",
-            "age": 34,
-            "gender": "male",
-            "address": "No 42, 1st Cross, Koramangala, Bengaluru",
-            "id_type": "Aadhaar",
-            "id_number": "3421-9988-1002",
-            "prior_fir_count": 8,
-            "arrest_status": "at_large",
-            "notes": "Known leader of regional theft and assault gang. Frequents Koramangala and HSR Layout.",
-            "firs": mahesh_firs
-        },
-        {
-            "name": "Ravi Kumar",
-            "alias": "Ravi Thief",
-            "age": 28,
-            "gender": "male",
-            "address": "Slum Area near Shivajinagar, Bengaluru",
-            "id_type": "PAN",
-            "id_number": "BVPPR4532L",
-            "prior_fir_count": 5,
-            "arrest_status": "arrested",
-            "notes": "Habitual house thief. Specializes in breaking window grilles.",
-            "firs": ravi_firs
-        },
-        {
-            "name": "Suresh Nayak",
-            "alias": "None",
-            "age": 45,
-            "gender": "male",
-            "address": "Flat 302, Green Glen Layout, Bellandur, Bengaluru",
-            "id_type": "Aadhaar",
-            "id_number": "9088-7711-2233",
-            "prior_fir_count": 4,
-            "arrest_status": "at_large",
-            "notes": "White-collar criminal involved in property sales fraud.",
-            "firs": suresh_firs
-        },
-        {
-            "name": "Pavan Reddy",
-            "alias": "None",
-            "age": 26,
-            "gender": "male",
-            "address": "PG Accommodation, Hebbal, Bengaluru",
-            "id_type": "Aadhaar",
-            "id_number": "5432-8877-1199",
-            "prior_fir_count": 3,
-            "arrest_status": "at_large",
-            "notes": "Handles phishing page design and domain deployment.",
-            "firs": pavan_firs
-        },
-        {
-            "name": "Anand Shetty",
-            "alias": "None",
-            "age": 39,
-            "gender": "male",
-            "address": "Benson Town, Shivajinagar, Bengaluru",
-            "id_type": "Aadhaar",
-            "id_number": "1290-7856-3412",
-            "prior_fir_count": 3,
-            "arrest_status": "arrested",
-            "notes": "Short-tempered, involved in multiple bar fights and street brawls.",
-            "firs": anand_firs
-        }
-    ]
-    
-    # Track which FIRs are already allocated to repeat offenders
-    allocated_firs = set(mahesh_firs + ravi_firs + suresh_firs + pavan_firs + anand_firs)
-    
-    # We need to assign accused to the remaining FIRs.
-    # Total FIRs = 220. We will seed:
-    # - 30 FIRs: 2 accused
-    # - 10 FIRs: 3 accused
-    # - The rest: 1 accused (except missing_person cases, where there's usually no accused, but we can seed 'unknown' or a suspect for some)
-    # Let's collect all remaining non-missing FIR IDs.
-    remaining_firs = [f["fir_id"] for f in fir_records if f["fir_id"] not in allocated_firs and f["case_type"] != "missing_person"]
-    
     async with conn.cursor() as cur:
-        # 1. Insert repeat offenders
-        for rep in repeat_offenders:
-            for f_id in rep["firs"]:
-                sql = """
-                INSERT INTO accused (fir_id, full_name, alias, age, gender, address, id_type, id_number, prior_fir_count, arrest_status, notes)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                await cur.execute(sql, (
-                    f_id, rep["name"], rep["alias"], rep["age"], rep["gender"],
-                    rep["address"], rep["id_type"], rep["id_number"], rep["prior_fir_count"],
-                    rep["arrest_status"], rep["notes"]
-                ))
-                
-        # 2. Distribute remaining accused
-        # Let's partition the remaining FIRs:
-        # First 10 FIRs: 3 accused each
-        # Next 30 FIRs: 2 accused each
-        # Remaining FIRs: 1 accused each
-        
-        three_accused_firs = remaining_firs[:10]
-        two_accused_firs = remaining_firs[10:40]
-        one_accused_firs = remaining_firs[40:]
-        
-        # Helper to generate a random accused person
-        def make_random_accused(f_id):
-            gender = random.choices(["male", "female", "unknown"], weights=[0.85, 0.10, 0.05])[0]
-            if gender == "male":
-                first = random.choice(MOCK_NAMES_MALE)
-            elif gender == "female":
-                first = random.choice(MOCK_NAMES_FEMALE)
+        for idx, case_data in enumerate(cases_to_generate):
+            c_type = case_data["case_type"]
+            assigned = case_data["assigned_accused"]
+            
+            emp = random.choice(employee_ids)
+            emp_id = emp["id"]
+            unit_id = emp["unit_id"]
+            district_id = emp["district_id"]
+            court_id = district_id
+            
+            reg_date = random_date(start_date_val, end_date_val)
+            year = reg_date.year
+            
+            inc_from_time = random_time()
+            inc_from = datetime.combine(reg_date - timedelta(days=random.randint(0, 3)), datetime.strptime(inc_from_time, "%H:%M:%S").time())
+            inc_to = inc_from + timedelta(hours=random.randint(1, 4)) if random.random() < 0.5 else None
+            info_received = datetime.combine(reg_date, datetime.strptime(random_time(), "%H:%M:%S").time())
+            
+            category_id = random.choices(lookups["category_ids"], weights=[0.90, 0.05, 0.03, 0.02])[0]
+            seq_key = (district_id, unit_id, year)
+            seq_counter[seq_key] = seq_counter.get(seq_key, 0) + 1
+            
+            crime_no = f"{category_id}{district_id:04d}{unit_id:04d}{year:04d}{seq_counter[seq_key]:05d}"
+            case_no = crime_no[-9:]
+            
+            major_id = None
+            minor_id = None
+            if c_type in ['theft', 'robbery', 'vehicle_theft', 'fraud']:
+                major_id = lookups["head_ids"][0]
+                if c_type == 'theft':
+                    minor_id = lookups["subhead_ids"]["Theft"]
+                elif c_type == 'robbery':
+                    minor_id = lookups["subhead_ids"]["Robbery"]
+                elif c_type == 'vehicle_theft':
+                    minor_id = lookups["subhead_ids"]["Vehicle Theft"]
+                elif c_type == 'fraud':
+                    minor_id = lookups["subhead_ids"]["Fraud"]
+            elif c_type in ['assault', 'murder', 'domestic_violence', 'missing_person']:
+                major_id = lookups["head_ids"][1]
+                if c_type == 'assault':
+                    minor_id = lookups["subhead_ids"]["Assault"]
+                elif c_type == 'murder':
+                    minor_id = lookups["subhead_ids"]["Murder"]
+                elif c_type == 'domestic_violence':
+                    minor_id = lookups["subhead_ids"]["Domestic Violence"]
+                elif c_type == 'missing_person':
+                    minor_id = lookups["subhead_ids"]["Missing Person"]
+            elif c_type == 'cybercrime':
+                major_id = lookups["head_ids"][2]
+                sub_key = random.choice(["Phishing", "Online Harassment", "Identity Theft", "Hacking"])
+                minor_id = lookups["subhead_ids"][sub_key]
             else:
-                first = "Suspect"
-            last = random.choice(MOCK_SURNAMES) if first != "Suspect" else ""
-            name = f"{first} {last}".strip()
+                major_id = lookups["head_ids"][3]
+                minor_id = lookups["subhead_ids"]["Drug Offense"]
             
-            alias = random.choice(["None", f"\"{first} Thief\"", "None", "None"])
-            age = random.randint(18, 60)
-            addr = f"No {random.randint(1, 100)}, Cross Road, Bengaluru"
-            phone = f"9{random.randint(100000000, 999999999)}"
-            id_type = random.choice(["Aadhaar", "PAN", "Voter ID", "None"])
-            id_num = f"{random.randint(1000, 9999)}-{random.randint(1000, 9999)}-{random.randint(1000, 9999)}" if id_type == "Aadhaar" else f"ID-{random.randint(10000, 99999)}"
-            prior = random.choices([0, 1, 2], weights=[0.8, 0.15, 0.05])[0]
-            arr_status = random.choices(["arrested", "at_large", "unknown"], weights=[0.4, 0.5, 0.1])[0]
-            
-            return (f_id, name, alias, age, gender, addr, phone, id_type, id_num, prior, arr_status)
-
-        for f_id in three_accused_firs:
-            for _ in range(3):
-                data = make_random_accused(f_id)
-                sql = """
-                INSERT INTO accused (fir_id, full_name, alias, age, gender, address, phone, id_type, id_number, prior_fir_count, arrest_status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                await cur.execute(sql, data)
+            status_roll = random.random()
+            if status_roll < 0.60:
+                status_id = lookups["status_ids"]["Open"]
+            elif status_roll < 0.85:
+                status_id = lookups["status_ids"]["Under Investigation"]
+            elif status_roll < 0.95:
+                status_id = lookups["status_ids"]["Closed"]
+            else:
+                status_id = lookups["status_ids"]["Charge Sheeted"]
                 
-        for f_id in two_accused_firs:
-            for _ in range(2):
-                data = make_random_accused(f_id)
-                sql = """
-                INSERT INTO accused (fir_id, full_name, alias, age, gender, address, phone, id_type, id_number, prior_fir_count, arrest_status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                await cur.execute(sql, data)
-
-        for f_id in one_accused_firs:
-            data = make_random_accused(f_id)
-            sql = """
-            INSERT INTO accused (fir_id, full_name, alias, age, gender, address, phone, id_type, id_number, prior_fir_count, arrest_status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            await cur.execute(sql, data)
+            if c_type in ['murder', 'robbery', 'domestic_violence']:
+                gravity_id = lookups["gravity_ids"][0]
+            else:
+                gravity_id = lookups["gravity_ids"][1]
+                
+            loc = random.choice(LOCATIONS)
+            lat = round(float(loc['lat']) + random.uniform(-0.005, 0.005), 8)
+            lng = round(float(loc['lng']) + random.uniform(-0.005, 0.005), 8)
             
-        # Add suspects/unknowns to missing_person cases as notes or optional accused in 5 of them
-        missing_person_firs = fir_ids_by_type['missing_person']
-        for mp_f_id in missing_person_firs[:5]:
+            desc = f"Reported case of {c_type} at {loc['name']}. Under investigation."
+            if c_type == 'theft':
+                desc = f"Complaint filed regarding theft of valuable personal assets from residential premises in {loc['name']}."
+            elif c_type == 'assault':
+                desc = f"Incident of physical assault reported following a verbal dispute between neighbors in {loc['name']}."
+            elif c_type == 'vehicle_theft':
+                desc = f"Theft of two-wheeler parked in front of owner's residence in {loc['name']}."
+            elif c_type == 'fraud':
+                desc = f"Victim was defrauded of money by suspects claiming to be bank officers, incident occurred in {loc['name']}."
+            elif c_type == 'cybercrime':
+                desc = f"Online phishing attempt resulting in unauthorized transactions on victim's credit card in {loc['name']}."
+            elif c_type == 'missing_person':
+                desc = f"Report filed regarding missing individual who was last seen walking near {loc['name']} bus stop."
+            elif c_type == 'drug_offense':
+                desc = f"Seizure of contraband substances and arrest of suspect in possession near local park in {loc['name']}."
+            elif c_type == 'robbery':
+                desc = f"Robbery at gun/knife point in a commercial area of {loc['name']}. Suspect fled scene."
+            elif c_type == 'murder':
+                desc = f"Homicide case registered following discovery of deceased person in an abandoned site in {loc['name']}."
+            elif c_type == 'domestic_violence':
+                desc = f"Domestic dispute and assault report registered by complainant in {loc['name']}."
+                
             sql = """
-            INSERT INTO accused (fir_id, full_name, alias, age, gender, notes)
-            VALUES (%s, 'Unknown Suspect', 'None', NULL, 'unknown', 'Suspicion of kidnapping or foul play.')
+            INSERT INTO CaseMaster (CrimeNo, CaseNo, CrimeRegisteredDate, PolicePersonID, PoliceStationID, 
+                                    CaseCategoryID, GravityOffenceID, CrimeMajorHeadID, CrimeMinorHeadID, 
+                                    CaseStatusID, CourtID, IncidentFromDate, IncidentToDate, InfoReceivedPSDate, 
+                                    latitude, longitude, BriefFacts)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (mp_f_id,))
+            await cur.execute(sql, (
+                crime_no, case_no, reg_date, emp_id, unit_id,
+                category_id, gravity_id, major_id, minor_id,
+                status_id, court_id, inc_from, inc_to, info_received,
+                lat, lng, desc
+            ))
+            case_master_id = cur.lastrowid
+            inserted_cases.append({
+                "CaseMasterID": case_master_id,
+                "case_type": c_type,
+                "assigned_accused": assigned,
+                "DistrictID": district_id,
+                "PoliceStationID": unit_id,
+                "CourtID": court_id,
+                "PolicePersonID": emp_id,
+                "CrimeRegisteredDate": reg_date,
+                "location_name": loc["name"]
+            })
+            
+    return inserted_cases
 
-async def seed_victims(conn, fir_records: list[dict]):
-    """Insert one victim per FIR."""
+async def seed_complainants(conn, lookups, cases):
     async with conn.cursor() as cur:
-        for rec in fir_records:
-            f_id = rec["fir_id"]
-            case_type = rec["case_type"]
-            
-            gender = random.choice(["male", "female"])
-            if gender == "male":
+        for case in cases:
+            gender_id = random.choices([1, 2], weights=[0.60, 0.40])[0]
+            if gender_id == 1:
                 first = random.choice(MOCK_NAMES_MALE)
             else:
                 first = random.choice(MOCK_NAMES_FEMALE)
             name = f"{first} {random.choice(MOCK_SURNAMES)}"
+            age = random.randint(18, 75)
+            caste_id = random.choice(lookups["caste_ids"])
+            religion_id = random.choice(lookups["religion_ids"])
+            occupation_id = random.choice(lookups["occupation_ids"])
             
-            age = random.randint(18, 70)
-            addr = f"Resident of {rec['incident_location']}, Bengaluru"
-            phone = f"9845{random.randint(100000, 999999)}"
-            
-            if case_type == "missing_person":
-                inj = "Missing individual (complainant's relative)."
-            elif case_type == "assault" or case_type == "domestic_violence":
-                inj = random.choice(["Bruises on face and arms", "Laceration on right hand", "Minor head injury", "No visible external injury"])
-            else:
-                inj = "No physical injury reported."
-                
             sql = """
-            INSERT INTO victims (fir_id, full_name, age, gender, address, phone, injury_description)
+            INSERT INTO ComplainantDetails (CaseMasterID, ComplainantName, AgeYear, OccupationID, 
+                                            ReligionID, CasteID, GenderID)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (f_id, name, age, gender, addr, phone, inj))
+            await cur.execute(sql, (
+                case["CaseMasterID"], name, age, occupation_id,
+                religion_id, caste_id, gender_id
+            ))
 
-async def seed_case_type_tables(conn, fir_ids_by_type: dict):
-    """Populate details in specific child case tables."""
+async def seed_victims(conn, lookups, cases):
+    police_victim_indices = set(random.sample(range(len(cases)), 5))
+    
     async with conn.cursor() as cur:
-        
-        # 1. cases_theft
-        theft_items = [
-            '["gold necklace", "gold bangles"]',
-            '["Dell Laptop", "Office Files"]',
-            '["iPhone 14 Pro Max", "Leather Wallet"]',
-            '["Cash INR 50,000"]',
-            '["Bicycle", "Toolbox"]',
-            '["Television", "Soundbar"]'
-        ]
-        for f_id in fir_ids_by_type['theft']:
-            items = random.choice(theft_items)
-            val = random.randint(500, 150000)
-            recovered = random.random() < 0.20
-            rec_dt = None
-            rec_notes = None
-            if recovered:
-                rec_dt = date(2024, 1, 1) + timedelta(days=random.randint(1, 100))
-                rec_notes = "Recovered from local pawn shop."
-                
-            sql = """
-            INSERT INTO cases_theft (fir_id, stolen_items, estimated_value, recovered, recovery_date, recovery_notes)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            await cur.execute(sql, (f_id, items, val, recovered, rec_dt, rec_notes))
-
-        # 2. cases_assault
-        weapons = ["iron rod", "knife", "bare hands", "stone", "bottle"]
-        severities = ["minor", "moderate", "severe", "fatal"]
-        severities_weights = [0.60, 0.25, 0.12, 0.03]
-        for f_id in fir_ids_by_type['assault']:
-            w = random.choice(weapons)
-            sev = random.choices(severities, weights=severities_weights)[0]
-            mot = random.choice(["Property dispute", "Personal enmity", "Drunk brawl", "Road rage"])
-            w_count = random.randint(0, 4)
+        for idx, case in enumerate(cases):
+            gender_id = random.choices([1, 2], weights=[0.50, 0.50])[0]
+            if gender_id == 1:
+                first = random.choice(MOCK_NAMES_MALE)
+            else:
+                first = random.choice(MOCK_NAMES_FEMALE)
+            name = f"{first} {random.choice(MOCK_SURNAMES)}"
+            age = random.randint(1, 80)
+            is_police = 1 if idx in police_victim_indices else 0
             
             sql = """
-            INSERT INTO cases_assault (fir_id, weapon_used, injury_severity, motive, witnesses_count)
+            INSERT INTO Victim (CaseMasterID, VictimName, AgeYear, GenderID, VictimPolice)
             VALUES (%s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (f_id, w, sev, mot, w_count))
-            
-        # 3. cases_vehicle_theft
-        makes = {
-            "two_wheeler": ["Honda", "Hero", "TVS", "Royal Enfield", "Yamaha"],
-            "car": ["Maruti Suzuki", "Hyundai", "Tata Motors", "Mahindra", "Toyota"],
-            "truck": ["Tata", "Ashok Leyland"],
-            "auto": ["Bajaj", "Piaggio"],
-            "other": ["Electric Scooter"]
-        }
-        for f_id in fir_ids_by_type['vehicle_theft']:
-            v_type = random.choices(
-                ["two_wheeler", "car", "auto", "truck", "other"],
-                weights=[0.50, 0.35, 0.10, 0.03, 0.02]
-            )[0]
-            make = random.choice(makes[v_type])
-            model = "Model-" + random.choice(["A", "B", "C", "Classic", "Deluxe"])
-            reg = f"KA-{random.randint(1, 5):02d}-{random.choice(['M', 'N', 'P', 'R'])}{random.choice(['A', 'B', 'C'])}-{random.randint(1000, 9999)}"
-            color = random.choice(["Black", "White", "Silver", "Red", "Blue"])
-            
-            recovered = random.random() < 0.25
-            rec_dt = None
-            rec_loc = None
-            if recovered:
-                recovered = True
-                rec_dt = date(2024, 1, 1) + timedelta(days=random.randint(1, 100))
-                rec_loc = random.choice(LOCATIONS)["name"] + ", Bengaluru"
-                
-            sql = """
-            INSERT INTO cases_vehicle_theft (fir_id, vehicle_type, vehicle_make, vehicle_model, registration_no, color, recovered, recovery_date, recovery_location)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            await cur.execute(sql, (f_id, v_type, make, model, reg, color, recovered, rec_dt, rec_loc))
+            await cur.execute(sql, (
+                case["CaseMasterID"], name, age, gender_id, is_police
+            ))
 
-        # 4. cases_fraud
-        fraud_types = ["online", "banking", "property", "offline"]
-        for f_id in fir_ids_by_type['fraud']:
-            f_type = random.choices(fraud_types, weights=[0.40, 0.30, 0.20, 0.10])[0]
-            amt = random.randint(5000, 2000000)
-            recovered_amt = int(amt * random.choice([0.0, 0.0, 0.0, 0.1, 0.25, 0.5]))
-            method = random.choice(["UPI fraudulent link", "Fake real estate documentation", "Phishing calls for OTP", "Duplicate check clearance"])
-            accs = json.dumps([f"SBI-{random.randint(100000000, 999999999)}", f"HDFC-{random.randint(100000000, 999999999)}"])
+async def seed_accused(conn, lookups, cases):
+    accused_records = []
+    
+    mahesh_cases = [c for c in cases if c["assigned_accused"] == "mahesh"]
+    ravi_cases = [c for c in cases if c["assigned_accused"] == "ravi"]
+    suresh_cases = [c for c in cases if c["assigned_accused"] == "suresh"]
+    deepak_cases = [c for c in cases if c["assigned_accused"] == "deepak"]
+    
+    missing_cases = [c for c in cases if c["case_type"] == "missing_person"]
+    other_cases = [c for c in cases if c["assigned_accused"] is None and c["case_type"] != "missing_person"]
+    
+    async with conn.cursor() as cur:
+        # Mahesh Gowda: 8 cases
+        for c in mahesh_cases:
+            name = "Mahesh Gowda (alias Bullet Mahesh)"
+            age = 34
+            gender_id = 1
+            person_id = "A1"
             
             sql = """
-            INSERT INTO cases_fraud (fir_id, fraud_type, amount_defrauded, amount_recovered, method_used, account_numbers)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
+            VALUES (%s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (f_id, f_type, amt, recovered_amt, method, accs))
-
-        # 5. cases_cybercrime
-        cyber_types = ["phishing", "online_harassment", "identity_theft", "hacking"]
-        platforms = ["WhatsApp", "Instagram", "email", "Facebook", "unknown"]
-        for f_id in fir_ids_by_type['cybercrime']:
-            c_type = random.choices(cyber_types, weights=[0.40, 0.25, 0.20, 0.15])[0]
-            plat = random.choice(platforms)
-            loss = random.randint(1000, 500000) if c_type in ["phishing", "identity_theft", "hacking"] else 0
-            devs = json.dumps({
-                "source_ip": f"192.168.{random.randint(1, 254)}.{random.randint(1, 254)}",
-                "device_id": f"DEV-{random.randint(100000, 999999)}",
-                "urls": ["http://fake-banking-portal.net", "http://update-kyc-now.co"]
+            await cur.execute(sql, (c["CaseMasterID"], name, age, gender_id, person_id))
+            accused_records.append({
+                "AccusedMasterID": cur.lastrowid,
+                "CaseMasterID": c["CaseMasterID"],
+                "AccusedName": name
             })
             
+        # Ravi Kumar: 5 cases
+        for c in ravi_cases:
+            name = "Ravi Kumar"
+            age = 28
+            gender_id = 1
+            person_id = "A1"
+            
             sql = """
-            INSERT INTO cases_cybercrime (fir_id, cyber_type, platform, financial_loss, digital_evidence)
+            INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
             VALUES (%s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (f_id, c_type, plat, loss, devs))
+            await cur.execute(sql, (c["CaseMasterID"], name, age, gender_id, person_id))
+            accused_records.append({
+                "AccusedMasterID": cur.lastrowid,
+                "CaseMasterID": c["CaseMasterID"],
+                "AccusedName": name
+            })
 
-        # 6. cases_missing_person
-        conditions = ["safe", "injured", "deceased", "unknown"]
-        for f_id in fir_ids_by_type['missing_person']:
-            since = date(2023, 1, 1) + timedelta(days=random.randint(1, 500))
-            last_seen = random.choice(LOCATIONS)["name"] + " Bus Stop"
-            phys_desc = "Height: 5'6\", Age: 25, Wearing blue shirt and jeans. Mole on right cheek."
-            
-            found = random.random() < 0.40
-            f_dt = None
-            f_loc = None
-            f_cond = "unknown"
-            if found:
-                f_dt = since + timedelta(days=random.randint(1, 60))
-                f_loc = random.choice(LOCATIONS)["name"] + ", Bengaluru"
-                f_cond = random.choices(conditions, weights=[0.75, 0.15, 0.05, 0.05])[0]
-                
-            sql = """
-            INSERT INTO cases_missing_person (fir_id, missing_since, last_seen_location, physical_description, found, found_date, found_location, found_condition)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            await cur.execute(sql, (f_id, since, last_seen, phys_desc, found, f_dt, f_loc, f_cond))
-
-        # 7. cases_drug_offense
-        drugs = ["ganja", "cocaine", "heroin", "MDMA", "methamphetamine"]
-        seized_text = ["500 grams", "2 kg", "100 tablets", "50 grams", "1.5 kg"]
-        for f_id in fir_ids_by_type['drug_offense']:
-            d_type = random.choice(drugs)
-            qty = random.choice(seized_text)
-            val = random.randint(10000, 500000)
-            src = random.choice(LOCATIONS)["name"] + " High School Road"
+        # Suresh Naik: 4 cases
+        for c in suresh_cases:
+            name = "Suresh Naik"
+            age = 45
+            gender_id = 1
+            person_id = "A1"
             
             sql = """
-            INSERT INTO cases_drug_offense (fir_id, drug_type, quantity_seized, estimated_street_value, source_location)
+            INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
             VALUES (%s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (f_id, d_type, qty, val, src))
+            await cur.execute(sql, (c["CaseMasterID"], name, age, gender_id, person_id))
+            accused_records.append({
+                "AccusedMasterID": cur.lastrowid,
+                "CaseMasterID": c["CaseMasterID"],
+                "AccusedName": name
+            })
 
-async def seed_case_relationships(conn):
-    """Insert 35 relationship records that form network clusters."""
-    async with conn.cursor(aiomysql.DictCursor) as cur:
-        # We need the IDs of accused, which we can fetch by name or index
-        # Let's get the accused IDs
-        await cur.execute("SELECT accused_id, full_name, fir_id FROM accused")
-        accused_rows = await cur.fetchall()
-        
-        # Group accused by full name
-        accused_by_name = {}
-        for row in accused_rows:
-            name = row["full_name"]
-            accused_by_name.setdefault(name, []).append(row)
+        # Deepak Rao: 3 cases
+        for c in deepak_cases:
+            name = "Deepak Rao"
+            age = 31
+            gender_id = 1
+            person_id = "A1"
             
-        mahesh_records = accused_by_name.get("Mahesh Gowda", [])
-        ravi_records = accused_by_name.get("Ravi Kumar", [])
-        suresh_records = accused_by_name.get("Suresh Nayak", [])
-        pavan_records = accused_by_name.get("Pavan Reddy", [])
-        
-        # Let's also fetch a few other random accused to link them
-        other_accused = [row for name, rows in accused_by_name.items() if name not in ["Mahesh Gowda", "Ravi Kumar", "Suresh Nayak", "Pavan Reddy"] for row in rows]
-        random.shuffle(other_accused)
-
-        relationship_count = 0
-
-        # Cluster 1 — The Bullet Mahesh gang (8 entries):
-        # Link Mahesh Gowda as co_accused with 3 other accused across his FIRs.
-        # Link his 8 FIRs as related_case to each other.
-        if len(mahesh_records) >= 8 and len(other_accused) >= 3:
-            # Pick 3 other accused
-            gang_members = other_accused[:3]
-            # Link Mahesh's accused_id to these members in the same FIR
-            for member in gang_members:
-                sql = """
-                INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-                VALUES ('accused', %s, 'accused', %s, 'co_accused', 'Active members of the Bullet Mahesh network.')
-                """
-                await cur.execute(sql, (mahesh_records[0]["accused_id"], member["accused_id"]))
-                relationship_count += 1
-                
-            # Link Mahesh's 5 FIRs in pairs (related_case)
-            for i in range(5):
-                sql = """
-                INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-                VALUES ('fir', %s, 'fir', %s, 'related_case', 'Cases associated with the Mahesh Gowda gang.')
-                """
-                await cur.execute(sql, (mahesh_records[i]["fir_id"], mahesh_records[i+1]["fir_id"]))
-                relationship_count += 1
-
-        # Cluster 2 — Ravi Thief network (5 entries):
-        # Link Ravi Kumar's 5 FIRs as related_case.
-        # Link him as co_accused with 1 other accused in 2 of his cases.
-        if len(ravi_records) >= 5 and len(other_accused) >= 5:
-            # Link Ravi's 5 FIRs sequentially
-            for i in range(4):
-                sql = """
-                INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-                VALUES ('fir', %s, 'fir', %s, 'related_case', 'Series of break-ins linked to Ravi Thief.')
-                """
-                await cur.execute(sql, (ravi_records[i]["fir_id"], ravi_records[i+1]["fir_id"]))
-                relationship_count += 1
-                
-            # Link him as co_accused with another accused
             sql = """
-            INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-            VALUES ('accused', %s, 'accused', %s, 'co_accused', 'Accomplice in home robbery.')
+            INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
+            VALUES (%s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (ravi_records[0]["accused_id"], other_accused[4]["accused_id"]))
-            relationship_count += 1
+            await cur.execute(sql, (c["CaseMasterID"], name, age, gender_id, person_id))
+            accused_records.append({
+                "AccusedMasterID": cur.lastrowid,
+                "CaseMasterID": c["CaseMasterID"],
+                "AccusedName": name
+            })
 
-        # Cluster 3 — Online fraud ring (6 entries):
-        # Link Suresh Nayak and Pavan Reddy as co_accused.
-        # Link their FIRs as same_modus_operandi.
-        if suresh_records and pavan_records:
-            # Link Suresh and Pavan
-            sql = """
-            INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-            VALUES ('accused', %s, 'accused', %s, 'co_accused', 'Suresh coordinates bank accounts; Pavan deploys phishing URLs.')
-            """
-            await cur.execute(sql, (suresh_records[0]["accused_id"], pavan_records[0]["accused_id"]))
-            relationship_count += 1
+        # Unknown Suspect in 5 missing person cases
+        for c in missing_cases[:5]:
+            name = "Unknown Suspect"
+            age = None
+            gender_id = 3
+            person_id = "A1"
             
-            # Link 5 of their FIRs as same_modus_operandi
-            limit = min(len(suresh_records), len(pavan_records))
-            for i in range(limit):
-                sql = """
-                INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-                VALUES ('fir', %s, 'fir', %s, 'same_modus_operandi', 'Online banking scams using similar domain registration details.')
-                """
-                await cur.execute(sql, (suresh_records[i]["fir_id"], pavan_records[i]["fir_id"]))
-                relationship_count += 1
-
-        # Cluster 4 — Same location repeat (4 entries):
-        # Pick 4 unrelated theft FIRs that all have incident_location = "Koramangala".
-        # Link them as repeat_location.
-        # Let's query Koramangala theft FIRs
-        await cur.execute("SELECT fir_id FROM fir_master WHERE incident_location LIKE 'Koramangala%' AND case_type='theft' LIMIT 4")
-        kor_thefts = await cur.fetchall()
-        if len(kor_thefts) >= 4:
-            for i in range(3):
-                sql = """
-                INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-                VALUES ('fir', %s, 'fir', %s, 'repeat_location', 'Multiple thefts reported in near vicinity in Koramangala.')
-                """
-                await cur.execute(sql, (kor_thefts[i]["fir_id"], kor_thefts[i+1]["fir_id"]))
-                relationship_count += 1
-
-        # Remaining: misc linked cases across different types
-        while relationship_count < 35 and len(other_accused) >= 2:
-            acc_a = other_accused.pop(0)
-            acc_b = other_accused.pop(0)
             sql = """
-            INSERT INTO case_relationships (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship_type, notes)
-            VALUES ('accused', %s, 'accused', %s, 'co_accused', 'Suspected gang association.')
+            INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
+            VALUES (%s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (acc_a["accused_id"], acc_b["accused_id"]))
-            relationship_count += 1
+            await cur.execute(sql, (c["CaseMasterID"], name, age, gender_id, person_id))
+            accused_records.append({
+                "AccusedMasterID": cur.lastrowid,
+                "CaseMasterID": c["CaseMasterID"],
+                "AccusedName": name
+            })
 
-async def seed_evidence_media(conn, fir_records: list[dict]):
-    """Insert 25 evidence_media records."""
-    # Pick 25 random FIR IDs
-    firs_to_seed = random.sample(fir_records, 25)
+        # Partition remaining 185 cases
+        three_acc_cases = other_cases[:10]
+        two_acc_cases = other_cases[10:40]
+        one_acc_cases = other_cases[40:]
+        
+        def get_random_accused_info():
+            while True:
+                gender = random.choices([1, 2, 3], weights=[0.85, 0.10, 0.05])[0]
+                if gender == 1:
+                    first = random.choice(MOCK_NAMES_MALE)
+                elif gender == 2:
+                    first = random.choice(MOCK_NAMES_FEMALE)
+                else:
+                    first = "Suspect"
+                last = random.choice(MOCK_SURNAMES) if first != "Suspect" else ""
+                name = f"{first} {last}".strip()
+                if name not in ["Mahesh Gowda", "Ravi Kumar", "Suresh Naik", "Deepak Rao", "Mahesh Gowda (alias Bullet Mahesh)"]:
+                    break
+            age = random.randint(18, 65) if first != "Suspect" else None
+            return name, age, gender
+
+        for c in three_acc_cases:
+            for p_idx in range(3):
+                name, age, gender = get_random_accused_info()
+                person_id = f"A{p_idx + 1}"
+                sql = """
+                INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                await cur.execute(sql, (c["CaseMasterID"], name, age, gender, person_id))
+                accused_records.append({
+                    "AccusedMasterID": cur.lastrowid,
+                    "CaseMasterID": c["CaseMasterID"],
+                    "AccusedName": name
+                })
+
+        for c in two_acc_cases:
+            for p_idx in range(2):
+                name, age, gender = get_random_accused_info()
+                person_id = f"A{p_idx + 1}"
+                sql = """
+                INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                await cur.execute(sql, (c["CaseMasterID"], name, age, gender, person_id))
+                accused_records.append({
+                    "AccusedMasterID": cur.lastrowid,
+                    "CaseMasterID": c["CaseMasterID"],
+                    "AccusedName": name
+                })
+
+        for c in one_acc_cases:
+            name, age, gender = get_random_accused_info()
+            person_id = "A1"
+            sql = """
+                INSERT INTO Accused (CaseMasterID, AccusedName, AgeYear, GenderID, PersonID)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+            await cur.execute(sql, (c["CaseMasterID"], name, age, gender, person_id))
+            accused_records.append({
+                "AccusedMasterID": cur.lastrowid,
+                "CaseMasterID": c["CaseMasterID"],
+                "AccusedName": name
+            })
+
+    return accused_records
+
+async def seed_act_sections(conn, cases):
+    async with conn.cursor() as cur:
+        for case in cases:
+            c_type = case["case_type"]
+            c_id = case["CaseMasterID"]
+            sections_to_add = []
+            
+            if c_type == "theft":
+                sections_to_add.append(("IPC", "379"))
+                if random.random() < 0.15:
+                    sections_to_add.append(("IPC", "323"))
+            elif c_type == "murder":
+                sections_to_add.append(("IPC", "302"))
+                if random.random() < 0.25:
+                    sections_to_add.append(("IPC", "323"))
+            elif c_type == "robbery":
+                sections_to_add.append(("IPC", "392"))
+                if random.random() < 0.30:
+                    sections_to_add.append(("IPC", "323"))
+            elif c_type == "assault":
+                sections_to_add.append(("IPC", "323"))
+            elif c_type == "domestic_violence":
+                sections_to_add.append(("IPC", "498A"))
+                if random.random() < 0.20:
+                    sections_to_add.append(("IPC", "323"))
+            elif c_type == "drug_offense":
+                sections_to_add.append(("NDPS", "20"))
+                if random.random() < 0.20:
+                    sections_to_add.append(("NDPS", "22"))
+            elif c_type == "cybercrime":
+                sec = random.choice(["66C", "66D"])
+                sections_to_add.append(("IT Act", sec))
+            else:
+                if c_type != "missing_person":
+                    sections_to_add.append(("IPC", "379"))
+            
+            for idx, (act_id, sec_id) in enumerate(sections_to_add):
+                sql = """
+                INSERT INTO ActSectionAssociation (CaseMasterID, ActID, SectionID, ActOrderID, SectionOrderID)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                await cur.execute(sql, (c_id, act_id, sec_id, 1, idx + 1))
+
+async def seed_arrest_surrender(conn, cases, accused_records):
+    shuffled_accused = list(accused_records)
+    random.shuffle(shuffled_accused)
     
-    descriptions = {
-        "image": [
-            "Crime scene photo showing point of entry",
-            "CCTV image of vehicle suspect fled in",
-            "Recovered stolen gold jewelry picture",
-            "Assault victim injury photo (evidence record)"
-        ],
-        "video": [
-            "CCTV footage from street camera at incident time",
-            "Suspect dashcam recording from traffic signal",
-            "Video recording of witness identifying suspect at station"
-        ],
-        "audio": [
-            "Witness statement audio recording",
-            "911 emergency call audio backup",
-            "Suspect voice call record intercepts"
-        ]
-    }
+    num_to_arrest = int(len(shuffled_accused) * 0.60)
+    accused_to_arrest = shuffled_accused[:num_to_arrest]
+    case_lookup = {c["CaseMasterID"]: c for c in cases}
     
     async with conn.cursor() as cur:
-        for idx, rec in enumerate(firs_to_seed):
-            f_id = rec["fir_id"]
-            # Distribute: 15 image, 6 video, 4 audio
-            if idx < 15:
-                m_type = "image"
-            elif idx < 21:
-                m_type = "video"
-            else:
-                m_type = "audio"
-                
-            desc = random.choice(descriptions[m_type])
-            f_name = f"evidence_{f_id}_{idx:02d}.mp4" if m_type == "video" else (f"evidence_{f_id}_{idx:02d}.mp3" if m_type == "audio" else f"evidence_{f_id}_{idx:02d}.jpg")
-            folder_id = f"folder_placeholder_{random.randint(100, 999)}"
-            file_id = f"file_placeholder_{random.randint(10000, 99999)}"
+        for acc in accused_to_arrest:
+            case = case_lookup[acc["CaseMasterID"]]
+            arrest_date = case["CrimeRegisteredDate"] + timedelta(days=random.randint(1, 15))
+            type_id = random.choices([1, 2], weights=[0.85, 0.15])[0]
             
             sql = """
-            INSERT INTO evidence_media (fir_id, media_type, file_name, stratus_folder_id, stratus_file_id, description)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO ArrestSurrender (CaseMasterID, ArrestSurrenderTypeID, ArrestSurrenderDate, 
+                                         ArrestSurrenderStateId, ArrestSurrenderDistrictId, PoliceStationID, 
+                                         IOID, CourtID, AccusedMasterID, IsAccused, IsComplainantAccused)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            await cur.execute(sql, (f_id, m_type, f_name, folder_id, file_id, desc))
+            await cur.execute(sql, (
+                case["CaseMasterID"], type_id, arrest_date,
+                1, case["DistrictID"], case["PoliceStationID"],
+                case["PolicePersonID"], case["CourtID"], acc["AccusedMasterID"],
+                1, 0
+            ))
 
 async def main():
-    """Entry point. Checks if DB already has data (count fir_master rows)."""
-    # Create the DB pool
     pool = await create_pool()
-    
     try:
         async with pool.acquire() as conn:
-            # Check row count
             async with conn.cursor() as cur:
-                await cur.execute("SELECT COUNT(*) as count FROM fir_master")
+                await cur.execute("SELECT COUNT(*) FROM CaseMaster")
                 row = await cur.fetchone()
                 if row[0] > 0:
                     print("DB already seeded. Skipping seeder execution.")
                     return
             
-            print("Seeding officers...")
-            officer_ids = await seed_officers(conn)
-            print(f"Seeding officers... done ({len(officer_ids)} rows)")
+            print("Seeding lookups...")
+            lookups = await seed_lookups(conn)
+            print("Seeding lookups... done")
             
-            print("Seeding FIR master...")
-            fir_records, fir_ids_by_type = await seed_fir_master(conn, officer_ids)
-            print(f"Seeding FIR master... done ({len(fir_records)} rows)")
+            print("Seeding employees...")
+            employee_ids = await seed_employees(conn, lookups)
+            print(f"Seeding employees... done ({len(employee_ids)} rows)")
             
-            print("Seeding accused...")
-            await seed_accused(conn, fir_records, fir_ids_by_type)
+            print("Seeding CaseMaster...")
+            cases = await seed_cases(conn, lookups, employee_ids)
+            print(f"Seeding CaseMaster... done ({len(cases)} rows)")
             
-            # Print total count of accused
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT COUNT(*) FROM accused")
-                accused_count = (await cur.fetchone())[0]
-            print(f"Seeding accused... done ({accused_count} rows)")
+            print("Seeding ComplainantDetails...")
+            await seed_complainants(conn, lookups, cases)
+            print("Seeding ComplainantDetails... done")
             
-            print("Seeding victims...")
-            await seed_victims(conn, fir_records)
-            print("Seeding victims... done")
+            print("Seeding Victim...")
+            await seed_victims(conn, lookups, cases)
+            print("Seeding Victim... done")
             
-            print("Seeding case type tables...")
-            await seed_case_type_tables(conn, fir_ids_by_type)
-            print("Seeding case type tables... done")
+            print("Seeding Accused...")
+            accused_records = await seed_accused(conn, lookups, cases)
+            print(f"Seeding Accused... done ({len(accused_records)} rows)")
             
-            print("Seeding case relationships...")
-            await seed_case_relationships(conn)
+            print("Seeding ActSectionAssociation...")
+            await seed_act_sections(conn, cases)
+            print("Seeding ActSectionAssociation... done")
             
-            # Print total count of relationships
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT COUNT(*) FROM case_relationships")
-                rel_count = (await cur.fetchone())[0]
-            print(f"Seeding case relationships... done ({rel_count} rows)")
-            
-            print("Seeding evidence media...")
-            await seed_evidence_media(conn, fir_records)
-            print("Seeding evidence media... done")
+            print("Seeding ArrestSurrender...")
+            await seed_arrest_surrender(conn, cases, accused_records)
+            print("Seeding ArrestSurrender... done")
             
             print("Seed complete.")
-            
     finally:
         await close_pool()
 
 if __name__ == "__main__":
-    # Standard check to allow running standalone or inside package
-    import sys
-    import os
-    # Append backend root to sys.path so we can import from config
-    backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if backend_path not in sys.path:
-        sys.path.append(backend_path)
     asyncio.run(main())
