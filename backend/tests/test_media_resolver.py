@@ -86,7 +86,7 @@ def test_resolve_media_returns_unavailable_url(monkeypatch):
     assert media[0]["media_type"] == "image"
     assert media[0]["url"].startswith("https://picsum.photos/seed/file123/680/450")
     assert media[0]["description"] == "Crime scene photo"
-    assert media[0]["fir_id"] == 100 # external API key remains fir_id
+    assert media[0]["case_master_id"] == 100
 
 
 def test_resolve_media_multiple_files(monkeypatch):
