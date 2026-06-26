@@ -298,3 +298,17 @@ CREATE TABLE chat_messages (
     FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
 );
 
+
+-- Local addition — NOT in official KSP ER diagram.
+-- Tracks evidence files. FK repointed to CaseMaster.CaseMasterID.
+CREATE TABLE evidence_media (
+    media_id          INT AUTO_INCREMENT PRIMARY KEY,
+    case_master_id    INT NOT NULL,
+    media_type        ENUM('image','audio','video','document') NOT NULL,
+    file_name         VARCHAR(200) NOT NULL,
+    stratus_folder_id VARCHAR(100) NOT NULL,
+    stratus_file_id   VARCHAR(100) NOT NULL,
+    description       VARCHAR(500),
+    uploaded_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (case_master_id) REFERENCES CaseMaster(CaseMasterID)
+);

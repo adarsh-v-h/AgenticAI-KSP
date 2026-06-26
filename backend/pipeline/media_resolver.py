@@ -1,5 +1,5 @@
-"""
-Media resolver — for any result rows that carry a fir_id, look up attached
+﻿"""
+Media resolver â€” for any result rows that carry a case_master_id, look up attached
 evidence_media records and emit placeholder signed URLs.
 
 Step 5 will swap the placeholder URL for a real Catalyst Stratus signed URL.
@@ -76,7 +76,7 @@ async def resolve_media(results: list[dict]) -> list[dict]:
           "media_type": str,
           "url": str,
           "description": str,
-          "fir_id": int,
+          "case_master_id": int,
         }
 
     Returns [] when nothing applies (empty results, no CaseMasterID column,
@@ -90,7 +90,7 @@ async def resolve_media(results: list[dict]) -> list[dict]:
     if not case_master_ids:
         return []
 
-    # Build a parameterized IN clause — never interpolate ids into SQL.
+    # Build a parameterized IN clause â€” never interpolate ids into SQL.
     placeholders = ",".join(["%s"] * len(case_master_ids))
     sql = (
         "SELECT media_id, case_master_id, media_type, file_name, "
@@ -111,7 +111,9 @@ async def resolve_media(results: list[dict]) -> list[dict]:
                 "media_type": r.get("media_type"),
                 "url": url,
                 "description": r.get("description") or r.get("file_name") or "",
-                "fir_id": r.get("case_master_id"),
+                "case_master_id": r.get("case_master_id"),
             }
         )
     return out
+
+

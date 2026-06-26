@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AuthError,
   fetchMessages,
@@ -15,7 +15,7 @@ import { IconSidebarOpen, IconSidebarClose, IconNewChat, IconDownload } from './
 
 // Lazy-loaded: vis-network is a large dependency only needed when an officer
 // opens a network graph. Code-splitting it keeps the main bundle small and the
-// initial chat load fast — the graph chunk is fetched on first use.
+// initial chat load fast â€” the graph chunk is fetched on first use.
 const NetworkGraph = lazy(() => import('./NetworkGraph.jsx'))
 
 const SIDEBAR_COLLAPSED_KEY = 'chs.sidebarCollapsed'
@@ -581,7 +581,7 @@ export default function ChatWindow({ officer, onLogout }) {
       {graphTarget ? (
         <Suspense fallback={null}>
           <NetworkGraph
-            firId={graphTarget.firId ?? null}
+            firId={graphTarget.caseMasterId ?? null}
             accusedId={graphTarget.accusedId ?? null}
             onClose={() => setGraphTarget(null)}
           />
@@ -590,5 +590,6 @@ export default function ChatWindow({ officer, onLogout }) {
     </div>
   )
 }
+
 
 

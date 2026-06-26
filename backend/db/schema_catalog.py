@@ -1,5 +1,5 @@
-"""
-Schema catalog — table descriptions, columns, and keywords for the schema linker.
+﻿"""
+Schema catalog â€” table descriptions, columns, and keywords for the schema linker.
 Used by:
   - pipeline.schema_linker.select_relevant_tables()
   - get_schema_for_tables() to build a compact LLM prompt string
@@ -7,7 +7,7 @@ Used by:
 """
 
 # Maximum compact-schema size (chars) injected into the LLM SQL prompt.
-# Keep modest — Qwen Coder 7B context is finite and prompt cost == latency.
+# Keep modest â€” Qwen Coder 7B context is finite and prompt cost == latency.
 _MAX_SCHEMA_CHARS = 3000
 
 SCHEMA_CATALOG = {
@@ -50,7 +50,7 @@ SCHEMA_CATALOG = {
     "Victim": {
         "description": "Victims linked to cases. One case can have multiple victims.",
         "columns": {
-            "VictimID": "INT PRIMARY KEY",
+            "VictimMasterID": "INT PRIMARY KEY",
             "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
             "VictimName": "VARCHAR(150)",
             "AgeYear": "INT",
@@ -259,7 +259,7 @@ def _format_table(name: str, meta: dict, max_col_chars: int | None = None) -> st
     lines = [f"TABLE: {name}", f"Description: {meta['description']}", "Columns:"]
     for col_name, col_desc in meta["columns"].items():
         if max_col_chars is not None and len(col_desc) > max_col_chars:
-            col_desc = col_desc[: max_col_chars - 1].rstrip() + "…"
+            col_desc = col_desc[: max_col_chars - 1].rstrip() + "â€¦"
         lines.append(f"  - {col_name}: {col_desc}")
     return "\n".join(lines)
 
@@ -269,7 +269,7 @@ def get_schema_for_tables(table_names: list[str]) -> str:
     Build a compact schema string for LLM prompt injection.
 
     Always includes CaseMaster (even if not in table_names) and lists it first.
-    Output is capped at _MAX_SCHEMA_CHARS — column descriptions are progressively
+    Output is capped at _MAX_SCHEMA_CHARS â€” column descriptions are progressively
     truncated to fit; table names and column names are never dropped.
     """
     seen = set()
@@ -304,7 +304,7 @@ def get_schema_for_tables(table_names: list[str]) -> str:
     return out[:_MAX_SCHEMA_CHARS]
 
 
-# Few-shot bank — (relevant_tables_set, question, sql) tuples.
+# Few-shot bank â€” (relevant_tables_set, question, sql) tuples.
 # `relevant_tables` lists which tables in the question's selected set make this
 # example useful. We always score against the user's table set.
 _FEW_SHOT_BANK: list[dict] = [
@@ -447,7 +447,7 @@ def get_few_shot_examples(table_names: list[str]) -> str:
     scored = []
     for idx, ex in enumerate(_FEW_SHOT_BANK):
         score = len(ex["tables"] & selected)
-        # Penalize examples that reference tables NOT selected — those would
+        # Penalize examples that reference tables NOT selected â€” those would
         # confuse the LLM into using tables we didn't include in the schema.
         unknown = ex["tables"] - selected
         if unknown:
@@ -465,3 +465,4 @@ def get_few_shot_examples(table_names: list[str]) -> str:
 
 # A handy export for the validator to use without re-importing this dict.
 ALLOWED_TABLES: list[str] = list(SCHEMA_CATALOG.keys())
+
