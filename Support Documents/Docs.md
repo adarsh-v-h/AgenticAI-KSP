@@ -194,27 +194,20 @@ backend/
 
 | Table | Purpose | Key columns |
 |-------|---------|-------------|
-| `officers` | Station officers | `officer_id` (PK), `badge_number` (UNIQUE), `rank` (ENUM), `is_active` |
-| `fir_master` | Central FIR registry — parent record for all cases | `fir_id` (PK), `fir_number` (UNIQUE), `case_type` (ENUM of 11 types), `status` (ENUM), `investigating_officer_id` (FK→officers) |
-| `accused` | Accused persons linked to FIRs | `accused_id` (PK), `fir_id` (FK→fir_master), `prior_fir_count` (denormalized), `arrest_status` (ENUM) |
-| `victims` | Victims linked to FIRs | `victim_id` (PK), `fir_id` (FK→fir_master), `injury_description` |
-| `cases_theft` | Theft-specific details | `theft_id` (PK), `fir_id` (FK, UNIQUE), `stolen_items` (JSON text), `estimated_value`, `recovered` |
-| `cases_assault` | Assault details | `assault_id` (PK), `fir_id` (FK, UNIQUE), `weapon_used`, `injury_severity` (ENUM) |
-| `cases_vehicle_theft` | Vehicle theft details | `vt_id` (PK), `fir_id` (FK, UNIQUE), `vehicle_type` (ENUM), `registration_no` |
-| `cases_fraud` | Fraud details | `fraud_id` (PK), `fir_id` (FK, UNIQUE), `fraud_type` (ENUM), `amount_defrauded` |
-| `cases_cybercrime` | Cybercrime details | `cyber_id` (PK), `fir_id` (FK, UNIQUE), `cyber_type` (ENUM), `platform` |
-| `cases_missing_person` | Missing person details | `mp_id` (PK), `fir_id` (FK, UNIQUE), `found`, `found_condition` (ENUM) |
-| `cases_drug_offense` | Drug offense details | `drug_id` (PK), `fir_id` (FK, UNIQUE), `drug_type`, `quantity_seized` |
-| `case_relationships` | Links between entities for network graph | `rel_id` (PK), `entity_a_type`/`entity_a_id`, `entity_b_type`/`entity_b_id`, `relationship_type` (ENUM of 6 types) |
-| `evidence_media` | Media files attached to FIRs (Stratus) | `media_id` (PK), `fir_id` (FK), `media_type` (ENUM), `stratus_folder_id`, `stratus_file_id` |
-| `chat_sessions` | One row per conversation (Step 4) | `session_id` (PK, VARCHAR 36), `officer_id` (FK→officers), `title`, `created_at`, `updated_at` (auto-update), `message_count`, `is_active`; INDEX `(officer_id, updated_at)` |
-| `chat_messages` | One row per turn — user OR assistant (Step 4) | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data_json` (MEDIUMTEXT, nullable), `created_at`; INDEX `(session_id, created_at)` |
+| `Employee` | Station employees / officers (replaces `officers`) | `EmployeeID` (PK), `KGID` (UNIQUE badge number), `FirstName`, `RankID` (FK→`Rank`), `role` (ENUM), `is_active` |
+| `CaseMaster` | Central case/FIR registry (replaces `fir_master`) | `CaseMasterID` (PK), `CrimeNo` (UNIQUE), `CrimeRegisteredDate`, `PolicePersonID` (FK→Employee), `PoliceStationID` (FK→Unit), `CaseStatusID` (FK→CaseStatusMaster), `CrimeMinorHeadID` (FK→CrimeSubHead), `BriefFacts` (TEXT) |
+| `ComplainantDetails` | Complainants who filed cases | `ComplainantID` (PK), `CaseMasterID` (FK→CaseMaster), `ComplainantName`, `GenderID` |
+| `Victim` | Victims linked to cases (replaces `victims`) | `VictimMasterID` (PK), `CaseMasterID` (FK→CaseMaster), `VictimName`, `AgeYear`, `GenderID`, `VictimPolice` (BIT) |
+| `Accused` | Accused persons linked to cases (replaces `accused`) | `AccusedMasterID` (PK), `CaseMasterID` (FK→CaseMaster), `AccusedName`, `AgeYear`, `GenderID`, `PersonID` |
+| `ActSectionAssociation` | Links cases to acts and sections charged | `CaseMasterID` (FK→CaseMaster), `ActID` (FK→Act), `SectionID` (FK→Section) |
+| `ArrestSurrender` | Arrest or surrender details of accused | `ArrestSurrenderID` (PK), `CaseMasterID` (FK→CaseMaster), `AccusedMasterID` (FK→Accused), `ArrestSurrenderDate`, `IOID` (FK→Employee) |
+| `evidence_media` | Media files attached to cases | `media_id` (PK), `case_master_id` (FK→CaseMaster), `media_type` (ENUM), `stratus_folder_id`, `stratus_file_id`, `description` |
+| `chat_sessions` | One row per conversation | `session_id` (PK, VARCHAR 36), `officer_id` (FK→Employee), `title`, `created_at`, `updated_at`, `message_count`, `is_active` |
+| `chat_messages` | One row per turn — user OR assistant | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data_json` (MEDIUMTEXT, nullable), `created_at` |
 
 **Rich data storage migration:** The `table_data_json` column (MEDIUMTEXT) was added to `chat_messages` to co-locate tabular query results with the message they belong to. Previously, this data lived in a separate NoSQL document (`message_rich_data`). The new approach eliminates a round-trip, simplifies recovery logic, and keeps all message data in one indexed query. The `_serialize()` helper in `chat_store.py` handles `date`/`datetime`/`timedelta` objects during JSON serialization.
 
-**Design rationale:** Case-type tables are separate (not one giant table) because: (1) smaller tables mean faster queries without full-scan WHERE clauses on type, (2) the schema linker can inject only the relevant table, (3) each case type has distinct columns.
-
-**Note on missing case-type tables:** The `fir_master.case_type` ENUM defines 11 types, but only 7 have dedicated child tables: `theft`, `assault`, `vehicle_theft`, `fraud`, `cybercrime`, `missing_person`, `drug_offense`. The remaining 4 types — `robbery`, `murder`, `domestic_violence`, `other` — have no child detail tables. FIRs with these types exist in `fir_master` and have rows in `accused` and `victims`, but no case-specific detail records. This is a deliberate simplification: these case types either don't have distinct attributes worth separating, or were deprioritized during implementation.
+**Design rationale:** A unified `CaseMaster` table holds all cases, and details like `ComplainantDetails`, `Victim`, `Accused`, `ActSectionAssociation`, and `ArrestSurrender` are separated into distinct tables. This maps directly to the official Karnataka State Police database layout and permits structured, set-based queries (such as checking who is still at large by checking if an accused has no matching `ArrestSurrender` entry).
 
 ---
 
@@ -222,30 +215,28 @@ backend/
 
 **Purpose:** Generates realistic synthetic crime data for a single Bengaluru police station. Run standalone (`python backend/db/seed.py`) or imported. Uses `random.seed(42)` for deterministic, reproducible output.
 
-**Execution model:** The file includes `sys.path` manipulation at both the top level (lines 4-6) and inside the `if __name__ == "__main__"` guard (lines 810-813). This allows it to work both as an imported module and as a standalone script. When run standalone, it appends the `backend/` directory to `sys.path` so imports like `from config.settings import get` resolve correctly.
-
 **Key data:**
-- 10 officers with Karnataka names and realistic ranks
-- 220 FIRs across 11 case types (2022-2025), distributed: theft 50, assault 35, vehicle_theft 30, fraud 25, cybercrime 20, missing_person 15, drug_offense 15, robbery 10, murder 5, domestic_violence 10, other 5
-- 5 named repeat offenders: Mahesh Gowda (8 FIRs — the "demo star"), Ravi Kumar (5), Suresh Nayak (4), Pavan Reddy (3), Anand Shetty (3)
-- 35 case_relationships forming network clusters (gang, same MO, repeat location)
-- 25 evidence_media records (15 images, 6 videos, 4 audio)
-- All data geographically coherent to real Bengaluru areas
+- Lookups populated: 30 Units (stations), 3 Districts, 9 Ranks, 5 Designations, 10 Crime Heads, 20 Crime Sub-Heads (crime types), 4 Case Categories, 2 Gravity lookup values, 4 Case Status lookup values, 10 Acts, 30 Sections, 10 Castes, 4 Religions, 10 Occupations.
+- 10 employees / officers with Karnataka names, realistic ranks, and roles.
+- 220 CaseMaster records (2022-2025), distributed across crime types: Theft 50, Assault 35, Vehicle Theft 30, Fraud 25, Cybercrime 20, Missing Person 15, Drug Offense 15, Robbery 10, Murder 5, Domestic Violence 10, Other 5.
+- 5 named repeat offenders: Mahesh Gowda (8 cases — the "demo star"), Ravi Kumar (5), Suresh Nayak (4), Pavan Reddy (3), Anand Shetty (3).
+- 220 ComplainantDetails, 220 Victim, 350 Accused records.
+- 60% of accused are marked as arrested (with records in ArrestSurrender); 40% are still at large (no ArrestSurrender records).
+- 25 evidence_media records (15 images, 6 videos, 4 audio) attached to CaseMaster records.
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `random_date(start, end)` | Returns a random date between start and end |
-| `random_time()` | Returns a random HH:MM:SS string |
-| `seed_officers(conn)` | Inserts 10 officers. Returns list of `officer_id`s. |
-| `seed_fir_master(conn, officer_ids)` | Inserts 220 FIRs. Returns `(fir_records, fir_ids_by_type)` — a list of dicts and a dict mapping case_type to lists of fir_ids. Status distribution: 60% open, 25% under_investigation, 10% closed, 5% chargesheeted. The 220 total comes from `case_type_counts` dict: theft 50 + assault 35 + vehicle_theft 30 + fraud 25 + cybercrime 20 + missing_person 15 + drug_offense 15 + robbery 10 + murder 5 + domestic_violence 10 + other 5. |
-| `seed_accused(conn, fir_records, fir_ids_by_type)` | Inserts accused persons. First inserts 5 named repeat offenders across their assigned FIRs, then distributes random accused across remaining FIRs (10 with 3 accused, 30 with 2, rest with 1). |
-| `seed_victims(conn, fir_records)` | Inserts one victim per FIR with gender-appropriate names and case-type-appropriate injury descriptions. |
-| `seed_case_type_tables(conn, fir_ids_by_type)` | Populates all 7 `cases_*` tables with type-specific details (stolen items, weapons, vehicle info, fraud amounts, cyber platforms, missing person details, drug types). |
-| `seed_case_relationships(conn)` | Inserts 35 relationship records across 4 clusters: (1) Bullet Mahesh gang — 3 co_accused + 5 related_case links, (2) Ravi Thief network — 4 related_case + 1 co_accused, (3) Online fraud ring — 1 co_accused + N same_modus_operandi links between Suresh/Pavan, (4) Koramangala repeat location — 3 repeat_location links. |
-| `seed_evidence_media(conn, fir_records)` | Picks 25 random FIRs and attaches evidence records with placeholder Stratus IDs. |
-| `main()` | Entry point. Creates pool, checks if already seeded (skips if `fir_master` has rows), runs all seed functions in sequence. |
+| `seed_lookups(conn)` | Inserts all foundational lookup values (State, District, Unit, Court, Rank, Designation, CrimeHead, CrimeSubHead, CaseCategory, GravityOffence, CaseStatusMaster, Act, Section, CasteMaster, ReligionMaster, OccupationMaster). |
+| `seed_employees(conn, lookups)` | Inserts 10 employees/officers. Returns list of `EmployeeID`s. |
+| `seed_cases(conn, lookups, employee_ids)` | Inserts 220 cases. Returns a list of created `CaseMaster` records. |
+| `seed_complainants(conn, lookups, cases)` | Inserts one complainant per case. |
+| `seed_victims(conn, lookups, cases)` | Inserts one victim per case with gender-appropriate names. |
+| `seed_accused(conn, lookups, cases)` | Inserts accused persons, ensuring the 5 repeat offenders are distributed across their assigned cases, and remaining cases get random accused. |
+| `seed_act_sections(conn, cases)` | Associates acts and sections to cases in ActSectionAssociation. |
+| `seed_arrest_surrender(conn, cases, accused_records)` | Inserts ArrestSurrender records for 60% of the seeded accused. |
+| `main()` | Entry point. Creates pool, checks if already seeded (skips if `CaseMaster` has rows), runs all seed functions in sequence. |
 
 ---
 
@@ -265,7 +256,7 @@ backend/
 - `description` — human-readable table purpose
 - `columns` — dict of `{column_name: type_and_description}`
 - `keywords` — list of words that should trigger this table's inclusion
-- `always_include` — (optional) if `True`, table is always in the schema (only `fir_master`)
+- `always_include` — (optional) if `True`, table is always in the schema (only `CaseMaster`)
 
 `_FEW_SHOT_BANK` — list of 15 dicts, each with:
 - `tables` — set of table names this example is relevant to
@@ -279,7 +270,7 @@ backend/
 | Function | Description |
 |----------|-------------|
 | `_format_table(name, meta, max_col_chars)` | Builds a text block for one table: name, description, columns with types. Optionally truncates column descriptions to `max_col_chars`. |
-| `get_schema_for_tables(table_names) -> str` | Builds a compact schema string for LLM prompt injection. Always includes `fir_master` first. If total output exceeds `_MAX_SCHEMA_CHARS`, progressively truncates column descriptions (80→60→40→30 chars) until it fits. Last resort: hard-truncates at 3000 chars. |
+| `get_schema_for_tables(table_names) -> str` | Builds a compact schema string for LLM prompt injection. Always includes `CaseMaster` first. If total output exceeds `_MAX_SCHEMA_CHARS`, progressively truncates column descriptions (80→60→40→30 chars) until it fits. Last resort: hard-truncates at 3000 chars. |
 | `get_few_shot_examples(table_names) -> str` | Selects the 3 most relevant few-shot examples for the given tables. Scoring: +1 per shared table, -1 per table in the example that isn't in the selected set. Returns formatted `-- Q: ... -- SQL: ...` blocks. |
 
 ---
@@ -383,7 +374,7 @@ Attempt 2:
 
 | Name | Used by | Key rules |
 |------|---------|-----------|
-| `SQL_SYSTEM_PROMPT` | SQL generation | Only SELECT; only provided schema; use JOINs with fir_master; return raw SQL only (no markdown/backticks); `CANNOT_ANSWER` if unanswerable; LIMIT 50; escape `rank` with backticks |
+| `SQL_SYSTEM_PROMPT` | SQL generation | Only SELECT; only provided schema; use JOINs with CaseMaster; return raw SQL only (no markdown/backticks); `CANNOT_ANSWER` if unanswerable; LIMIT 50; escape `Rank` with backticks |
 | `ANSWER_SYSTEM_PROMPT` | Answer formatting | Be concise; **never** emit a markdown table (the UI renders rows separately) — prose summary only; mention media; never speculate; "case" not "row" |
 | `CORRECTION_SYSTEM_PROMPT` | SQL correction | Fix the broken SQL; return only corrected SQL; no explanation |
 | `ROUTER_SYSTEM_PROMPT` | Intent router | Reply with exactly one word — `SQL` or `DIRECT`. DIRECT for follow-ups about already-shown data (referential words: "those", "them", "that", "the third one"…), filtering/ranking/insight over results already in context, greetings, and general questions. SQL when fresh crime data is needed. |
@@ -395,7 +386,7 @@ Attempt 2:
 |----------|-------------|
 | `_format_history_for_prompt(history, max_turns=2, max_chars=100)` | Compresses conversation history into a short context block. Pairs user/assistant turns. Truncates assistant responses to `max_chars`. Returns empty string if no history. |
 | `_format_history_for_sql_prompt(history, max_turns=2)` | History block for the SQL generator. Includes the prior turn's stored SQL so follow-ups can preserve filter clauses. |
-| `_format_officer_for_prompt(officer)` | Builds the officer-identity block so first-person questions ("cases I am handling") resolve to `investigating_officer_id`. |
+| `_format_officer_for_prompt(officer)` | Builds the employee-identity block so first-person questions ("cases I am handling") resolve to `PolicePersonID`. |
 | `build_sql_prompt(question, schema, few_shots, history, officer=None) -> (system_prompt, user_prompt)` | Builds the two-tuple for the SQL LLM call. System prompt kept short (7B Coder struggles with long system prompts). Includes schema, few-shots, optional officer block, and (with history) a "Previous context" block. |
 | `_truncate_for_answer(results, max_rows=50, max_field_chars=200)` | Trims result set to `max_rows` and clips long string fields. Non-string values pass through unmodified. Reused by both the answer prompt and the direct-answer prompt. |
 | `_summarize_media(media_refs)` | Builds a summary string like "3 attachment(s): 2 image, 1 video". |
@@ -417,16 +408,16 @@ Attempt 2:
 - `table_data: list[dict]` — raw query results (for table rendering)
 - `media_attachments: list[dict]` — evidence media references
 - `sql_generated: str` — the SQL that was executed
-- `graph_available: bool` — whether network graph data exists for the FIRs in results
+- `graph_available: bool` — whether network graph data exists for the cases in results
 - `error: str | None` — error message if something went wrong
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `_has_fir_id(results)` | Checks if the first result row contains a `fir_id` key |
-| `collect_fir_ids(results)` | Imported from `media_resolver` — extracts unique integer `fir_id` values from all result rows. Shared so the extraction logic lives in one place. |
-| `_check_graph_available(fir_ids)` | Runs a COUNT query against `case_relationships` to check if any of the given FIRs have relationship data. Returns `True` if count > 0. |
+| `_has_case_master_id(results)` | Checks if the first result row contains a `CaseMasterID` or `case_master_id` key |
+| `collect_case_master_ids(results)` | Imported from `media_resolver` — extracts unique integer `CaseMasterID` or `case_master_id` values from all result rows. |
+| `_check_graph_available(case_master_ids)` | Probe that returns `True` if any case IDs are present. The network graph is constructed dynamically on-demand from Accused and CaseMaster linkages. |
 | `_most_recent_table(history)` | Walks history newest-first and returns the most recent assistant turn's stored table snapshot (or `[]`). Lets a follow-up be answered from the last result set without re-querying. |
 | `_run_direct(question, history, recent_table)` | Runs the DIRECT path — calls `generate_direct_answer()` and returns a `PipelineResponse` with only `answer_text` filled. On `LLMError`/exception, returns a friendly error response (never raises). |
 | `run_pipeline(question, history, officer=None) -> PipelineResponse` | **The main pipeline.** Never raises — every error is caught and converted to a user-friendly `answer_text` + `error` field. |
@@ -437,8 +428,8 @@ Attempt 2:
 1. **Schema linker** — `select_relevant_tables(question)` → list of table names
 2. **SQL generation** — `generate_sql(question, tables, history, officer)` → `(SQL, attempts_used)` (with retry loop)
 3. **Execute SQL** — `execute_query(sql)` → `list[dict]` (one corrective retry on MySQL error, within the shared `MAX_ATTEMPTS` budget)
-4. **Media resolver** — `resolve_media(results)` → only if results have `fir_id` column
-5. **Graph probe** — `_check_graph_available(fir_ids)` → boolean
+4. **Media resolver** — `resolve_media(results)` → only if results have `CaseMasterID`/`case_master_id` column
+5. **Graph probe** — `_check_graph_available(case_master_ids)` → boolean
 6. **Answer formatting** — `format_answer(question, results, media, history)` → text
 
 **Error handling in pipeline:**
@@ -478,14 +469,14 @@ Attempt 2:
 
 ### 3.13 `backend/pipeline/media_resolver.py`
 
-**Purpose:** Looks up evidence media records for any FIRs present in query results.
+**Purpose:** Looks up evidence media records for any cases present in query results.
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
-| `collect_fir_ids(results) -> list[int]` | Extracts unique integer `fir_id` values from result rows. **Shared** with `query_pipeline.py` (imported there) so the logic exists in exactly one place. |
-| `resolve_media(results) -> list[dict]` | (1) Collects `fir_id`s from results. (2) Builds a parameterized `IN` query against `evidence_media`. (3) Executes one DB query. (4) Returns list of `{media_type, url, description, fir_id}`. URLs are placeholders using the explicit `/api/media/unavailable?file={stratus_file_id}` format so the frontend can render a clean unavailable-media state instead of a broken file reference. Returns `[]` if no `fir_id` column or no matches. |
+| `collect_case_master_ids(results) -> list[int]` | Extracts unique integer `CaseMasterID` / `case_master_id` values from result rows. Shared with `query_pipeline.py` (imported there) so the logic exists in exactly one place. |
+| `resolve_media(results) -> list[dict]` | (1) Collects `CaseMasterID` / `case_master_id` values from results. (2) Builds a parameterized `IN` query against `evidence_media`. (3) Executes one DB query. (4) Returns list of `{media_type, url, description, case_master_id}`. URLs are placeholders using the explicit `/api/media/unavailable?file={stratus_file_id}` format so the frontend can render a clean unavailable-media state instead of a broken file reference. Returns `[]` if no `CaseMasterID` or `case_master_id` column or no matches. |
 
 > **Step 5 note:** `resolve_media()` now returns explicit unavailable preview URLs for placeholder demo data. This is intentional; the frontend renders neutral cards for unavailable media rather than broken media elements.
 
@@ -495,19 +486,19 @@ Attempt 2:
 
 **Purpose:** Selects the most relevant tables for a given question using keyword matching.
 
-**Constants:** `_MAX_TABLES = 5` — maximum tables returned (fir_master + up to 4 others)
+**Constants:** `_MAX_TABLES = 5` — maximum tables returned (CaseMaster + up to 4 others)
 
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
 | `_keyword_matches(question_lower, keyword) -> bool` | Matches a keyword against the lowercased question. Multi-word keywords (containing space, hyphen, or underscore) use substring match. Single-word keywords use word-boundary regex (`\b`) so "si" doesn't match inside "missing" or "phishing". |
-| `select_relevant_tables(question) -> list[str]` | **The table selection algorithm.** (1) Lowercase the question. (2) For each table in `SCHEMA_CATALOG`, skip if `always_include: True` (collect separately). (3) Otherwise, score by counting keyword matches. (4) Sort by score descending, then alphabetically. (5) Build result: `fir_master` first, then other always-include tables, then top-scoring keyword matches up to `_MAX_TABLES`. |
+| `select_relevant_tables(question) -> list[str]` | **The table selection algorithm.** (1) Lowercase the question. (2) For each table in `SCHEMA_CATALOG`, skip if `always_include: True` (collect separately). (3) Otherwise, score by counting keyword matches. (4) Sort by score descending, then alphabetically. (5) Build result: `CaseMaster` first, then other always-include tables, then top-scoring keyword matches up to `_MAX_TABLES`. |
 
 **Example behavior:**
-- "How many theft cases are open?" → `["fir_master", "cases_theft"]`
-- "Show CCTV footage for FIR 2024" → `["fir_master", "evidence_media"]`
-- "Who is Mahesh Gowda" → `["fir_master", "accused"]` (name matches accused keywords)
+- "How many theft cases are open?" → `["CaseMaster", "CrimeSubHead", "CaseStatusMaster"]`
+- "Show CCTV footage for FIR 2024" → `["CaseMaster", "evidence_media"]`
+- "Who is Mahesh Gowda" → `["CaseMaster", "Accused"]` (name matches accused keywords)
 
 ---
 
@@ -816,12 +807,11 @@ Frontend ChatWindow.jsx: handleSend()
         
           Step 4: Media Resolution
             → pipeline/media_resolver.py: resolve_media(results)
-              → db/connection.py: execute_query("SELECT ... FROM evidence_media WHERE fir_id IN (...)")
-              → returns [{media_type, url, description, fir_id}]
+              → db/connection.py: execute_query("SELECT ... FROM evidence_media WHERE case_master_id IN (...)")
+              → returns [{media_type, url, description, case_master_id}]
         
           Step 5: Graph Probe
-            → _check_graph_available(fir_ids)
-              → db/connection.py: execute_query("SELECT COUNT(*) FROM case_relationships WHERE ...")
+            → _check_graph_available(case_master_ids)
               → returns True/False
         
           Step 6: Answer Formatting
@@ -898,16 +888,16 @@ Turn 2: "Now show only the open ones"
 ### 4.5 SQL Self-Correction Loop
 
 ```
-Question: "How many theft cases are open in Koramangala?"
+Question: "How many cases are open?"
 
 Attempt 1:
-  LLM generates: "SELECT COUNT(*) FROM cases_theft WHERE status = 'open'"
-  Validator: FAIL — "status" column doesn't exist in cases_theft (it's in fir_master)
+  LLM generates: "SELECT COUNT(*) FROM CaseMaster WHERE CaseStatusName = 'Open'"
+  Validator/Execute: FAIL — "CaseStatusName" column doesn't exist in CaseMaster (it's in CaseStatusMaster)
   → Save error message
 
 Attempt 2 (correction):
-  Prompt: "The following SQL query is invalid: SELECT COUNT(*) FROM cases_theft WHERE status = 'open'\nError: Unknown column 'status'\nSchema: [fir_master schema + cases_theft schema]\nWrite the corrected SQL query only."
-  LLM generates: "SELECT COUNT(*) AS open_theft_cases FROM fir_master AS f JOIN cases_theft AS t ON t.fir_id = f.fir_id WHERE f.status = 'open' AND f.incident_location LIKE '%Koramangala%'"
+  Prompt: "The following SQL query is invalid: SELECT COUNT(*) FROM CaseMaster WHERE CaseStatusName = 'Open'\nError: Unknown column 'CaseStatusName'\nSchema: [CaseMaster schema + CaseStatusMaster schema]\nWrite the corrected SQL query only."
+  LLM generates: "SELECT COUNT(*) AS open_cases FROM CaseMaster AS cm JOIN CaseStatusMaster AS csm ON csm.CaseStatusID = cm.CaseStatusID WHERE csm.CaseStatusName = 'Open'"
   Validator: PASS
   → Execute and return results
 ```
@@ -1896,21 +1886,21 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 ### 10.7 Network Graph Visualization (Step 5 — Part 1)
 
 **Date:** June 19, 2026  
-**What:** Renders the criminal network from `case_relationships` on demand.
+**What:** Renders the criminal network dynamically on demand based on co-accused and crime patterns.
 
 **Backend:**
-- `backend/graph/network_builder.py` (new) — `build_graph_for_fir(fir_id)` and `build_graph_for_accused(accused_id)` return vis.js-compatible `{"nodes": [...], "edges": [...]}`. Node ids are namespaced by entity type (`fir_2`, `accused_5`) to avoid cross-table id collisions. Labels resolved in grouped queries (≤4 per call). Degree-based trim to `MAX_NODES=50`, always keeping the center node. Both builders never raise — empty graph on error.
-- `backend/routers/chat.py` — `GET /api/graph/fir/{fir_id}` and `GET /api/graph/accused/{accused_id}`. Auth-gated via `get_current_officer`. **No ownership check** by design: FIR/accused data is station-scoped, not officer-owned (unlike chat sessions). Always HTTP 200 (empty graph on error, never 500).
+- `backend/graph/network_builder.py` — `build_graph_for_fir(fir_id)` and `build_graph_for_accused(accused_id)` return vis.js-compatible `{"nodes": [...], "edges": [...]}`. Node IDs are namespaced by entity type (`case_2`, `accused_5`) to avoid cross-table ID collisions. Live network graph derives edges on demand from Accused and CaseMaster linkages (Option A / MIGRATE_STEP4).
+- `backend/routers/chat.py` — `GET /api/graph/fir/{fir_id}` and `GET /api/graph/accused/{accused_id}`. Auth-gated via `get_current_officer`. **No ownership check** by design: case/accused data is station-scoped, not officer-owned (unlike chat sessions). Always HTTP 200 (empty graph on error, never 500).
 
 **Frontend:**
-- `NetworkGraph.jsx` (new) — vis-network modal, color-coded by entity group, loading/empty/error states, instance destroyed on unmount. **Lazy-loaded** via `React.lazy` so vis-network (≈653 KB) is code-split into its own chunk fetched only when an officer first opens a graph — main bundle unchanged.
-- `MessageBubble.jsx` — "View network" button shown when `graphAvailable` and a `fir_id` is extractable from the table rows.
+- `NetworkGraph.jsx` — vis-network modal, color-coded by entity group, loading/empty/error states, instance destroyed on unmount. **Lazy-loaded** via `React.lazy` so vis-network (≈653 KB) is code-split into its own chunk fetched only when an officer first opens a graph — main bundle unchanged.
+- `MessageBubble.jsx` — "View network" button shown when `graphAvailable` and a `CaseMasterID` is extractable from the table rows.
 - `ChatWindow.jsx` — graph modal state, `onGraphAvailable` stream callback, `graphAvailable` persisted on history reload.
 - `Icons.jsx` — `IconNetwork`. `main.css` — graph overlay + button styles.
 
 **Dependency:** `vis-network` + `vis-data` (MIT, actively maintained). `npm audit` confirmed zero vulnerabilities in these packages (pre-existing dev-only esbuild/vite advisories are unrelated).
 
-**Tests:** `backend/tests/test_network_graph.py` (10 tests) — node/edge construction, id namespacing, edge dedupe, fallback labels, center-node-preserving trim, and async builders with `execute_query` monkeypatched.
+**Tests:** `backend/tests/test_network_graph.py` — basic async tests verification for CaseMaster and Accused graph builders.
 
 ---
 
@@ -1936,4 +1926,26 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Tests:** `backend/tests/test_voice.py` (19 tests) — envelope/extraction helpers, the three network functions with a fake httpx client, and both routes with `zia_voice` monkeypatched (Kannada translation path, English no-translation path, 502 on failure, empty-audio 400, audio streaming).
 
-**Tests:** `backend/tests/test_media_resolver.py` (8 tests) — `collect_fir_ids()` extraction and `resolve_media()` behavior for empty results, no FIR IDs, unavailable preview URL generation, and multiple media files across FIRs.
+**Tests:** `backend/tests/test_media_resolver.py` — `collect_case_master_ids()` extraction and `resolve_media()` behavior for empty results, no CaseMaster IDs, unavailable preview URL generation, and multiple media files across cases.
+
+---
+
+### 10.9 Schema v2 Migration (Step 3 & 4 Update)
+
+**Date:** June 26, 2026  
+**What:** Migrated the database schema to Schema v2, bringing it into full alignment with the official Karnataka State Police database structure, and updated the backend/frontend components accordingly.
+
+**Key Changes:**
+- **Database Schema (`backend/db/schema.sql`):** Rewrote table definitions to match official police database layout.
+  - Replaced the old child-tables pattern (`cases_theft`, `cases_assault`, etc.) with a single unified `CaseMaster` table representing all cases.
+  - Replaced the `officers` table with `Employee` and associated lookup tables (e.g. `Rank`).
+  - Added new structural entities: `State`, `District`, `UnitType`, `Unit`, `Court`, `Rank`, `Designation`, `CrimeHead`, `CrimeSubHead` (crime types), `CaseCategory`, `GravityOffence`, `CaseStatusMaster`, `Act`, `Section`, `CasteMaster`, `ReligionMaster`, `OccupationMaster`, `ComplainantDetails`, `Victim`, `Accused`, `ActSectionAssociation`, `ArrestSurrender`.
+- **Seeder (`backend/db/seed.py`):** Completely rewritten to seed lookups, employees, complainants, victims, accused, act-sections, and arrest/surrender records. Added logic so 60% of accused are marked as arrested (with records in `ArrestSurrender`) and 40% are still at large.
+- **Network Graph (`backend/graph/network_builder.py`):** Eliminated the `case_relationships` table. Edges are now derived live on the fly from co-accused (same `CaseMasterID`) and similar crime patterns (same `CrimeMinorHeadID` and `PoliceStationID` Unit). Node IDs are prefixed by type (e.g. `case_123`, `accused_456`) to prevent collisions.
+- **Authentication (`backend/auth/simple_auth.py`):** Swapped lookup target from `officers` to `Employee` and joined `Rank` to fetch the rank name. Authed employees log in using their `KGID` badge number and password equal to `KGID + "123"`.
+- **Query Pipeline & LLM Prompts (`backend/pipeline/` & `backend/llm/`):**
+  - Updated LLM prompts to use PascalCase table/column names, require joining case-related tables on `CaseMasterID`, escape the MySQL reserved word `Rank`, filter by `CrimeSubHead.CrimeHeadName` for crime type, and represent accused still at large using a `LEFT JOIN ArrestSurrender` check.
+  - Updated `media_resolver` and `query_pipeline` to use `CaseMasterID` / `case_master_id` and `collect_case_master_ids()` instead of `fir_id`.
+  - Added `_normalize_bit_fields` to `db/connection.py` to transparently convert MySQL `BIT` fields (used for booleans/active flags) into Python booleans.
+- **Frontend (`frontend/src/`):** Adapted `ChatWindow.jsx` and `MessageBubble.jsx` to pass and extract `CaseMasterID` (PascalCase!) and `caseMasterId` (camelCase) instead of `fir_id` to/from the table results for opening network graphs.
+- **Test Suite:** Fixed and verified all 128 tests passing successfully.

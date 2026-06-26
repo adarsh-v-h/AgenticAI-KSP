@@ -12,13 +12,19 @@ def _run_async(coro):
         loop.close()
 
 
-def test_build_graph_for_fir_returns_empty():
+def test_build_graph_for_fir_returns_empty(monkeypatch):
     """Verify build_graph_for_fir returns empty structure and does not raise."""
+    async def fake_execute(sql, params=()):
+        return []
+    monkeypatch.setattr(nb, "execute_query", fake_execute)
     graph = _run_async(nb.build_graph_for_fir(123))
     assert graph == {"nodes": [], "edges": []}
 
 
-def test_build_graph_for_accused_returns_empty():
+def test_build_graph_for_accused_returns_empty(monkeypatch):
     """Verify build_graph_for_accused returns empty structure and does not raise."""
+    async def fake_execute(sql, params=()):
+        return []
+    monkeypatch.setattr(nb, "execute_query", fake_execute)
     graph = _run_async(nb.build_graph_for_accused(456))
     assert graph == {"nodes": [], "edges": []}
