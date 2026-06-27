@@ -1,5 +1,5 @@
-"""
-Media resolver — for any result rows that carry a fir_id, look up attached
+﻿"""
+Media resolver â€” for any result rows that carry a case_master_id, look up attached
 evidence_media records and emit placeholder signed URLs.
 
 Step 5 will swap the placeholder URL for a real Catalyst Stratus signed URL.
@@ -10,8 +10,8 @@ import hashlib
 from db.connection import execute_query
 
 
-def collect_fir_ids(results: list[dict]) -> list[int]:
-    """Pull unique, valid integer fir_ids from query results.
+def collect_case_master_ids(results: list[dict]) -> list[int]:
+    """Pull unique, valid integer CaseMasterIDs from query results.
 
     Shared by both the media resolver and the query pipeline's graph-availability
     probe so the extraction logic lives in exactly one place.
@@ -21,7 +21,7 @@ def collect_fir_ids(results: list[dict]) -> list[int]:
     for row in results:
         if not isinstance(row, dict):
             continue
-        v = row.get("fir_id")
+        v = row.get("CaseMasterID") or row.get("case_master_id")
         if v is None:
             continue
         try:
@@ -71,34 +71,34 @@ def _dummy_media_url(media_type: str | None, stratus_file_id: str | None) -> str
 
 async def resolve_media(results: list[dict]) -> list[dict]:
     """
-    Find attached media for every fir_id present in `results`. Returns a list of:
+    Find attached media for every CaseMasterID present in `results`. Returns a list of:
         {
           "media_type": str,
           "url": str,
           "description": str,
-          "fir_id": int,
+          "case_master_id": int,
         }
 
-    Returns [] when nothing applies (empty results, no fir_id column,
+    Returns [] when nothing applies (empty results, no CaseMasterID column,
     no matching media rows).
     Runs exactly one DB query.
     """
     if not results:
         return []
 
-    fir_ids = collect_fir_ids(results)
-    if not fir_ids:
+    case_master_ids = collect_case_master_ids(results)
+    if not case_master_ids:
         return []
 
-    # Build a parameterized IN clause — never interpolate ids into SQL.
-    placeholders = ",".join(["%s"] * len(fir_ids))
+    # Build a parameterized IN clause â€” never interpolate ids into SQL.
+    placeholders = ",".join(["%s"] * len(case_master_ids))
     sql = (
-        "SELECT media_id, fir_id, media_type, file_name, "
+        "SELECT media_id, case_master_id, media_type, file_name, "
         "stratus_folder_id, stratus_file_id, description "
         "FROM evidence_media "
-        f"WHERE fir_id IN ({placeholders})"
+        f"WHERE case_master_id IN ({placeholders})"
     )
-    rows = await execute_query(sql, tuple(fir_ids))
+    rows = await execute_query(sql, tuple(case_master_ids))
 
     out: list[dict] = []
     for r in rows:
@@ -111,7 +111,9 @@ async def resolve_media(results: list[dict]) -> list[dict]:
                 "media_type": r.get("media_type"),
                 "url": url,
                 "description": r.get("description") or r.get("file_name") or "",
-                "fir_id": r.get("fir_id"),
+                "case_master_id": r.get("case_master_id"),
             }
         )
     return out
+
+

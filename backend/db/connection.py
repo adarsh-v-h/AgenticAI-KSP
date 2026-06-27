@@ -42,6 +42,12 @@ async def get_pool() -> aiomysql.Pool:
         raise RuntimeError("Database connection pool has not been created yet.")
     return _pool
 
+def _normalize_bit_fields(row: dict) -> dict:
+    return {
+        k: (v == b'\x01' if isinstance(v, bytes) and len(v) == 1 else v)
+        for k, v in row.items()
+    }
+
 async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
     """
     Execute a SELECT-only query using the global pool.
@@ -67,7 +73,8 @@ async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
                     await cur.execute(stripped_sql, params)
                 else:
                     await cur.execute(stripped_sql)
-                return await cur.fetchall()
+                rows = await cur.fetchall()
+                return [_normalize_bit_fields(row) for row in rows]
                 
     try:
         return await asyncio.wait_for(_run(), timeout=5.0)
