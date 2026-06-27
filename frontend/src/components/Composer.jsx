@@ -3,6 +3,8 @@ import { IconArrowUp, IconPaperclip } from './Icons.jsx'
 import VoiceInput from './VoiceInput.jsx'
 import { useLang } from '../context/LangContext.jsx'
 
+const COMPOSER_MAX_HEIGHT = 160
+
 /**
  * Composer � the message input box, always at the bottom of the screen.
  *
@@ -64,7 +66,7 @@ export default function Composer({
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`
   }, [value])
 
   function handleKeyDown(e) {

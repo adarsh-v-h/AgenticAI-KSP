@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from './hooks/useAuth.js'
 import LandingPage from './components/LandingPage.jsx'
 import LoginPage from './components/LoginPage.jsx'

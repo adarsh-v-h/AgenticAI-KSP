@@ -14,6 +14,7 @@ def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
+# ponytail: single serializer helper, ceiling: one chat payload shape, upgrade: replace with a shared JSON encoder if more stores adopt it.
 def _serialize(obj):
     if isinstance(obj, (date, datetime)):
         return obj.isoformat()

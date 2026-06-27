@@ -102,20 +102,17 @@ export function startChatStream(question, sessionId, callbacks = {}) {
 }
 
 function handleFrame(frame, callbacks) {
-  // A frame can contain multiple `data:` lines — concat them per the SSE spec.
-  const lines = frame.split('\n')
-  let payload = ''
-  for (const line of lines) {
-    if (line.startsWith('data:')) {
-      payload += line.slice(5).trimStart()
-    }
-  }
+  const payload = frame
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('')
   if (!payload) return
 
   let event
   try {
     event = JSON.parse(payload)
-  } catch (err) {
+  } catch {
     return
   }
 

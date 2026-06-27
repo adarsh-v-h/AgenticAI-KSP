@@ -60,6 +60,7 @@ export default function NetworkGraph({ firId, accusedId, onClose }) {
           return
         }
 
+        // ponytail: single-pass node normalization, ceiling: <300 nodes, upgrade: use a dedicated mapper if graph schema grows.
         const nodes = data.nodes.map((n) => {
           const type = n.group || n.type
           const colorKey = type === 'case' ? 'fir' : type
