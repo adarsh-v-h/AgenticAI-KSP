@@ -1,6 +1,7 @@
 const MAX_ROWS = 50
 const TRUNCATE_AT = 100
 
+// ponytail: one-off table formatting, ceiling: <50 rows, upgrade: extract a shared formatter if more table views appear.
 function formatCell(value) {
   if (value === null || value === undefined) return { text: '—', full: '' }
   if (typeof value === 'boolean') return { text: value ? 'Yes' : 'No', full: '' }

@@ -26,6 +26,7 @@ export default function OfficerRow({ officer, onSignOut }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
+  // ponytail: two-word initials only, ceiling: <100 names, upgrade: share a formatter once more avatar cases appear.
   const initials =
     officer?.full_name
       ?.split(' ')

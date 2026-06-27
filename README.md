@@ -2,6 +2,8 @@
 
 A natural language crime intelligence platform for Karnataka State Police. Officers type a question in plain English, the system converts it to a MySQL query using an LLM, runs it against the crime database, and streams back a formatted answer with tabular results.
 
+For local development, the relational database is typically a local MySQL instance configured through `.env`; the repo also includes migration helpers for applying the latest schema to an existing database.
+
 > See [Support Documents/Docs.md](Support%20Documents/Docs.md) for full technical documentation — every file, function, and data flow.
 
 ---
@@ -27,12 +29,12 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 |-------|-----------|
 | Backend | Python 3.11, FastAPI, uvicorn |
 | Frontend | React 18, Vite 5 |
-| Database | Zoho Catalyst Data Store (MySQL-compatible) |
+| Relational DB | MySQL-compatible database (local dev via `.env`, or Catalyst Data Store) |
 | LLM | Zoho Catalyst QuickML (Qwen 2.5-7B Coder + Qwen 2.5-14B Instruct) |
 | Conversation History | Zoho Catalyst NoSQL |
 | Auth | JWT (dev) / Catalyst Authentication (production) |
 
-Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external services.
+The app is designed to work with **Zoho Catalyst services** for LLM and NoSQL, while still supporting a **local MySQL** database for day-to-day development.
 
 ---
 
@@ -41,6 +43,9 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
 ```
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variable template
+├── .env                         # Local runtime config (not committed)
+├── migrate.py                   # Adds the newer chat-table column to an existing DB
+├── backfill.py                  # Backfills table_data_json for older assistant messages
 ├── LICENSE                      # AGPL v3 license
 │
 ├── Support Documents/
@@ -55,31 +60,30 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
 │   │   └── settings.py          # Env var loading and validation
 │   ├── db/
 │   │   ├── connection.py        # MySQL connection pool (aiomysql)
-│   │   ├── schema.sql           # DDL for all 13 tables
+│   │   ├── schema.sql           # DDL for the relational schema
 │   │   ├── schema_catalog.py    # Table metadata, schema builder, few-shot examples
-│   │   └── seed.py              # Synthetic data generator (220 FIRs)
+│   │   ├── seed.py              # Synthetic data generator
+│   │   └── chat_store.py        # Chat session/message persistence helpers
 │   ├── llm/
 │   │   ├── client.py            # HTTP client for Catalyst QuickML
 │   │   ├── sql_generator.py     # SQL generation with self-correction loop
 │   │   ├── answer_formatter.py  # Result-to-text formatting
 │   │   └── prompts.py           # System prompts and prompt builders
 │   ├── pipeline/
-│   │   ├── __init__.py
 │   │   ├── query_pipeline.py    # Main orchestrator (NL → SQL → answer)
 │   │   ├── sql_validator.py     # SQL safety validation
 │   │   ├── media_resolver.py    # Evidence media lookup
 │   │   └── schema_linker.py     # Keyword-based table selector
 │   ├── auth/
-│   │   ├── __init__.py
 │   │   └── simple_auth.py       # JWT auth for local dev
 │   ├── conversation/
-│   │   ├── __init__.py
-│   │   ├── history.py           # Conversation history (NoSQL + in-memory fallback)
-│   │   └── session_store.py     # Session metadata + title generation (NoSQL + fallback)
+│   │   ├── history.py           # Conversation history (NoSQL + fallback)
+│   │   └── session_store.py     # Session metadata + title generation
 │   └── routers/
-│       ├── __init__.py
-│       ├── chat.py              # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
-│       └── auth.py              # POST /api/auth/login + /api/auth/logout
+│       ├── chat.py              # /api/chat, /api/chat/stream, session endpoints
+│       ├── auth.py              # Login/logout endpoints
+│       ├── export.py            # Session export routes
+│       └── voice.py             # Voice-related routes
 │
 └── frontend/
     ├── package.json
@@ -87,24 +91,32 @@ Everything runs on **Zoho Catalyst** — no AWS, GCP, Azure, or external service
     ├── index.html
     └── src/
         ├── main.jsx             # React entry point
-        ├── App.jsx              # Root: auth gate → LoginPage or ChatWindow
+        ├── App.jsx              # Root app shell and auth flow
         ├── api/
         │   ├── auth.js          # Token management + login/logout
-        │   └── chat.js          # SSE stream consumer via fetch + ReadableStream
+        │   ├── chat.js          # SSE stream consumer via fetch + ReadableStream
+        │   └── voice.js         # Voice API helpers
         ├── components/
-        │   ├── LoginPage.jsx    # Badge number + password form
         │   ├── ChatWindow.jsx   # Main chat interface + session orchestration
-        │   ├── ChatHistorySidebar.jsx # Collapsible session-history sidebar
-        │   ├── SessionList.jsx  # Scrollable list of an officer's sessions
-        │   ├── SessionItem.jsx  # Single session row (title, time, count)
-        │   ├── NewChatButton.jsx # "New chat" action button
-        │   ├── OfficerInfo.jsx  # Officer identity footer in the sidebar
-        │   ├── MessageBubble.jsx # Single message renderer
-        │   └── TableRenderer.jsx # HTML table from JSON query results
+        │   ├── Composer.jsx     # Message composer input
+        │   ├── LandingPage.jsx  # Landing experience
+        │   ├── LoginPage.jsx    # Badge number + password form
+        │   ├── MediaViewer.jsx  # Media attachment renderer
+        │   ├── MessageBubble.jsx# Single message renderer
+        │   ├── NetworkGraph.jsx # Network graph modal
+        │   ├── OfficerRow.jsx   # Officer footer row and sign-out menu
+        │   ├── PortalShell.jsx  # Shared portal shell
+        │   ├── SessionItem.jsx  # Single session row
+        │   ├── SessionList.jsx  # Session-history sidebar list
+        │   ├── TableRenderer.jsx# HTML table from JSON query results
+        │   ├── VoiceInput.jsx   # Voice input UI
+        │   └── WelcomeScreen.jsx# Welcome content
+        ├── context/
+        │   └── LangContext.jsx   # Language context
         ├── hooks/
         │   └── useAuth.js       # Auth state management
         └── styles/
-            └── main.css         # Government portal styling (warm cream + coral)
+            └── main.css         # Government portal styling
 ```
 
 ---
@@ -144,15 +156,17 @@ pip install -r requirements.txt
 
 This installs: FastAPI, uvicorn, aiomysql, httpx, python-dotenv, python-jose (JWT), and pydantic.
 
-### 4. Set up your Zoho Catalyst project
+### 4. Set up your relational database and Catalyst services
 
-If you don't have a Catalyst project yet:
+For local development, point `.env` at a running MySQL instance and use the schema in [backend/db/schema.sql](backend/db/schema.sql). If you are migrating an existing database, run [migrate.py](migrate.py) and [backfill.py](backfill.py) after updating `.env`.
+
+If you also want the full Catalyst-backed experience:
 
 1. Go to [console.catalyst.zoho.in](https://console.catalyst.zoho.in) (or `.zoho.com` / `.zoho.eu` for other regions)
 2. Create a new project
 3. Enable **QuickML** from the Services section
-4. Enable **Data Store** — create a MySQL database named `ksp_crime_db`
-5. Enable **NoSQL** — create two tables: `conversation_history` (string field `history`) and `session_metadata` (for the chat-history sidebar)
+4. Enable **Data Store** — create a MySQL database named `ksp_crime_db` or point to your own database
+5. Enable **NoSQL** — create the document tables expected by the app's conversation history logic
 
 ### 5. Get your Catalyst credentials
 
@@ -201,17 +215,22 @@ Open `.env` and fill in every value. The server will crash on startup if any var
 
 > See [.env.example](.env.example) for the full list with descriptions and URL patterns.
 
-### 7. Create database tables
+### 7. Create or update database tables
 
-Run the schema SQL against your Catalyst Data Store:
+For a fresh local setup, load the schema into your MySQL database:
 
 ```bash
-# Option A: Use the MySQL client from Catalyst console
-# Copy the contents of backend/db/schema.sql and execute it
-
-# Option B: If you have direct MySQL access
 mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p <DB_NAME> < backend/db/schema.sql
 ```
+
+If you are upgrading an existing database that already has the older schema, run:
+
+```bash
+python migrate.py
+python backfill.py
+```
+
+These scripts add the newer chat-related columns and backfill older assistant messages when needed.
 
 ### 8. Seed the database with synthetic data
 

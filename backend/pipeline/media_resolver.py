@@ -11,27 +11,22 @@ from db.connection import execute_query
 
 
 def collect_case_master_ids(results: list[dict]) -> list[int]:
-    """Pull unique, valid integer CaseMasterIDs from query results.
-
-    Shared by both the media resolver and the query pipeline's graph-availability
-    probe so the extraction logic lives in exactly one place.
-    """
+    """Pull unique, valid integer CaseMasterIDs from query results."""
     seen: set[int] = set()
     out: list[int] = []
     for row in results:
         if not isinstance(row, dict):
             continue
-        v = row.get("CaseMasterID") or row.get("case_master_id")
-        if v is None:
+        value = row.get("CaseMasterID") or row.get("case_master_id")
+        if value is None:
             continue
         try:
-            ivd = int(v)
+            case_id = int(value)
         except (ValueError, TypeError):
             continue
-        if ivd in seen:
-            continue
-        seen.add(ivd)
-        out.append(ivd)
+        if case_id not in seen:
+            seen.add(case_id)
+            out.append(case_id)
     return out
 
 

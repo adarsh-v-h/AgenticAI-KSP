@@ -9,14 +9,10 @@ import { useLang } from '../context/LangContext.jsx'
 // can open a graph centered on that case. Returns null when no CaseMasterID column
 // is present (e.g. aggregate-only results).
 function firstFirId(tableData) {
-  if (!Array.isArray(tableData)) return null
-  for (const row of tableData) {
-    if (row && row.CaseMasterID != null) {
-      const n = Number(row.CaseMasterID)
-      if (Number.isFinite(n)) return n
-    }
-  }
-  return null
+  const match =
+    Array.isArray(tableData) &&
+    tableData.find((row) => row?.CaseMasterID != null && Number.isFinite(Number(row.CaseMasterID)))
+  return match ? Number(match.CaseMasterID) : null
 }
 
 

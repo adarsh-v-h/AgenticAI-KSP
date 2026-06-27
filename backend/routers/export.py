@@ -31,12 +31,14 @@ def _merge_history_tables(messages: list, history: list) -> list:
     ]
     if not table_turns:
         return messages
+
     tables_by_content = {}
-    for t in table_turns:
-        c = t.get("content")
-        if isinstance(c, str):
-            tables_by_content.setdefault(c, []).append(t["table"])
-    assistant_tables = [t["table"] for t in table_turns]
+    for turn in table_turns:
+        content = turn.get("content")
+        if isinstance(content, str):
+            tables_by_content.setdefault(content, []).append(turn["table"])
+
+    assistant_tables = [turn["table"] for turn in table_turns]
     merged = []
     table_index = 0
     for msg in messages:
