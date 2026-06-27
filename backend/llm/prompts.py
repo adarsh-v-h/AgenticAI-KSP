@@ -5,32 +5,27 @@ Keep prompts in one place so they're easy to tune in one pass.
 
 import json
 
-SQL_SYSTEM_PROMPT = """You are an expert MySQL query writer for the Karnataka State Police crime database.
+SQL_SYSTEM_PROMPT = """You are an expert MySQL query writer for the Karnataka State Police secure crime database.
 Your ONLY job is to write a valid MySQL SELECT query based on the user's question.
 
 STRICT RULES:
 1. Only write SELECT statements. NEVER write INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, or TRUNCATE.
-2. Only use tables and columns from the schema provided in the user message.
-3. Always use proper JOINs when querying case-type tables — they must be joined with fir_master on fir_id.
+2. Only use tables and columns from the schema provided in the user message. Do NOT reference old tables like `fir_master`, `officers`, `cases_theft`, `cases_assault`, `case_relationships` etc.
+3. Always use proper, explicit JOINs when querying case-related tables — they must be joined to CaseMaster on CaseMasterID.
 4. Return ONLY the raw SQL query. No explanation. No markdown. No backticks around the whole query. No semicolon at the end.
 5. If the question cannot be answered with the available schema, return exactly: CANNOT_ANSWER
 6. Use LIMIT 50 on queries that could return many rows unless the user asks for all records or for a count/aggregate.
 7. For name searches, use LIKE '%name%' to handle partial matches.
-8. Always use table aliases for clarity in JOINs.
-9. The column `rank` in the officers table is a MySQL reserved word — always escape it as `rank` (with backticks) when selecting or filtering on it.
-10. Subqueries are allowed and encouraged when they make the query clearer or more accurate. You MAY use:
-    - `WHERE col IN (SELECT ...)` and `WHERE col NOT IN (SELECT ...)`
-    - Nested SELECTs in the FROM or WHERE clause
-    - Common Table Expressions: `WITH name AS (SELECT ...) SELECT ... FROM name`
-    - `EXISTS (SELECT ...)` predicates
-    Use these when the question asks about things like "accused who appear in more than one FIR" or other set-based comparisons.
-11. ENUM column values in this database are stored in LOWERCASE. Always use lowercase literals when filtering on ENUM columns. Examples:
-    - case_type IN ('theft','robbery','assault','murder','fraud','cybercrime','missing_person','vehicle_theft','drug_offense','domestic_violence','other')
-    - status IN ('open','under_investigation','closed','chargesheeted')
-    - arrest_status IN ('arrested','at_large','unknown')
-    - gender IN ('male','female','other','unknown')
-    Never write 'Robbery' or 'Open' — those will match zero rows.
-12. When the user's question is a FOLLOW-UP that refines a previous turn (e.g., "show only the robbery ones", "now filter to closed cases", "just the open ones"), you MUST preserve the prior turn's filter clauses (the WHERE predicates and JOINs that scoped the previous result) and add the new refinement on top. Drop a prior filter only when the user explicitly asks to broaden or replace it. The "Previous context" block in the user message includes the SQL used in the prior turn — start from that filter set.
+8. Always use table aliases for clarity in JOINs (e.g., `CaseMaster AS cm`).
+9. The table name `Rank` is a MySQL reserved word — always escape it as `Rank` (with backticks) when selecting or joining on it.
+10. Subqueries and CTEs are allowed and encouraged for set-based comparisons (e.g. `WITH ...`, `IN (SELECT ...)`).
+11. Column values and casing in this database:
+    - Table and column names must be exact PascalCase as in the schema (e.g. CaseMaster, AccusedName, etc.).
+    - CaseStatusMaster.CaseStatusName values are: 'Open', 'Under Investigation', 'Charge Sheeted', 'Closed'.
+    - Employee.role ENUM values are: 'investigator', 'analyst', 'supervisor', 'policymaker'.
+12. Use `CrimeSubHead.CrimeHeadName` to filter by crime type (e.g., 'Theft', 'Murder', 'Assault'), not a raw case_type column.
+13. Use a `LEFT JOIN ArrestSurrender` and filter `WHERE ArrestSurrender.ArrestSurrenderID IS NULL` to represent accused who are still at large (no arrest/surrender record exists).
+14. When the user's question is a FOLLOW-UP that refines a previous turn, you MUST preserve the prior turn's filter clauses (the WHERE predicates and JOINs that scoped the previous result) and add the new refinement on top.
 """
 
 ANSWER_SYSTEM_PROMPT = """You are a professional police intelligence assistant helping Karnataka State Police officers.
@@ -143,32 +138,31 @@ def _format_history_for_sql_prompt(
 
 def _format_officer_for_prompt(officer: dict | None) -> str:
     """
-    Build a short identity block describing the authenticated officer so the
+    Build a short identity block describing the authenticated employee so the
     SQL generator can resolve first-person references ("I", "me", "my cases").
 
-    Returns "" when no officer context is available (keeps the prompt clean and
-    preserves the previous behaviour for callers that don't pass an officer).
+    Returns "" when no employee context is available.
     """
     if not officer:
         return ""
-    officer_id = officer.get("officer_id")
-    if officer_id is None:
+    employee_id = officer.get("EmployeeID") or officer.get("officer_id")
+    if employee_id is None:
         return ""
-    badge = (officer.get("badge_number") or "").strip()
-    name = (officer.get("full_name") or "").strip()
-    descriptor = ", ".join(p for p in (name, f"badge {badge}" if badge else "") if p)
+    kgid = (officer.get("KGID") or officer.get("badge_number") or "").strip()
+    name = (officer.get("FirstName") or officer.get("full_name") or "").strip()
+    descriptor = ", ".join(p for p in (name, f"KGID {kgid}" if kgid else "") if p)
     who = f" ({descriptor})" if descriptor else ""
     return (
         "Current officer context:\n"
-        f"The logged-in officer is officer_id = {officer_id}{who}.\n"
-        "ONLY use this id when the question refers to the logged-in officer in "
+        f"The logged-in employee is EmployeeID = {employee_id}{who}.\n"
+        "ONLY use this id when the question refers to the logged-in officer/employee in "
         "the FIRST PERSON (\"I\", \"me\", \"my\", \"cases I am handling\", "
         "\"assigned to me\"): filter on "
-        f"fir_master.investigating_officer_id = {officer_id} and never emit a "
-        "placeholder like <current_officer_id>.\n"
+        f"CaseMaster.PolicePersonID = {employee_id} and never emit a "
+        "placeholder like <current_employee_id>.\n"
         "If the question names a DIFFERENT person (e.g. \"cases handled by "
         "Harish Kumar\"), IGNORE this id and match that person by name instead "
-        "(join officers and filter o.full_name LIKE '%name%')."
+        "(join Employee and filter e.FirstName LIKE '%name%')."
     )
 
 

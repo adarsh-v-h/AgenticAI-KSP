@@ -1,17 +1,17 @@
-"""
-Query pipeline — orchestrates the full NL2SQL chain end-to-end.
+﻿"""
+Query pipeline â€” orchestrates the full NL2SQL chain end-to-end.
 
 Order of operations:
   1. schema_linker.select_relevant_tables(question)
   2. sql_generator.generate_sql(question, tables, history)   [retry loop inside]
   3. db.connection.execute_query(sql)
-       — on MySQL execution error, call
+       â€” on MySQL execution error, call
          sql_generator.correct_sql_after_execution_error(...) and re-execute,
          provided we still have budget under the shared MAX_ATTEMPTS=2 cap.
   4. media_resolver.resolve_media(results)
-  5. graph_available probe (single COUNT against case_relationships)
+  5. graph_available probe (derived from Accused/CaseMaster — no case_relationships table)
   6. answer_formatter.format_answer(...)
-  7. Return PipelineResponse (always — even on errors).
+  7. Return PipelineResponse (always â€” even on errors).
 """
 
 import sys
@@ -27,7 +27,7 @@ from llm.sql_generator import (
     MAX_ATTEMPTS,
 )
 from db.connection import execute_query
-from pipeline.media_resolver import resolve_media, collect_fir_ids
+from pipeline.media_resolver import resolve_media, collect_case_master_ids
 from llm.answer_formatter import format_answer, route_intent, generate_direct_answer
 from llm.client import LLMError
 
@@ -53,31 +53,17 @@ class PipelineResponse:
 _GENERIC_DB_ERROR = "I couldn't run that query. Try rephrasing."
 
 
-def _has_fir_id(results: list[dict]) -> bool:
+def _has_case_master_id(results: list[dict]) -> bool:
     if not results:
         return False
     first = results[0]
-    return isinstance(first, dict) and "fir_id" in first
+    return isinstance(first, dict) and ("CaseMasterID" in first or "case_master_id" in first)
 
 
-async def _check_graph_available(fir_ids: list[int]) -> bool:
-    if not fir_ids:
-        return False
-    placeholders = ",".join(["%s"] * len(fir_ids))
-    sql = (
-        "SELECT COUNT(*) AS c FROM case_relationships "
-        f"WHERE (entity_a_type = 'fir' AND entity_a_id IN ({placeholders})) "
-        f"   OR (entity_b_type = 'fir' AND entity_b_id IN ({placeholders}))"
-    )
-    try:
-        rows = await execute_query(sql, tuple(fir_ids) + tuple(fir_ids))
-        if not rows:
-            return False
-        count = rows[0].get("c") or rows[0].get("COUNT(*)") or 0
-        return int(count) > 0
-    except Exception as e:
-        _log(f"graph availability check failed: {e}")
-        return False
+async def _check_graph_available(case_master_ids: list[int]) -> bool:
+    # Graph edges are derived live from Accused/CaseMaster (Option A, MIGRATE_STEP4).
+    # Return True whenever we have case IDs -- the builder derives edges on demand.
+    return bool(case_master_ids)
 
 
 def _most_recent_table(history: list[dict]) -> list[dict]:
@@ -98,7 +84,7 @@ async def _run_direct(
     question: str, history: list[dict], recent_table: list[dict]
 ) -> PipelineResponse:
     """
-    Answer without SQL — for follow-ups about already-retrieved data, requests
+    Answer without SQL â€” for follow-ups about already-retrieved data, requests
     for insight, and general questions. On LLM failure, returns a friendly
     error response (never raises).
     """
@@ -124,18 +110,18 @@ async def run_pipeline(
     question: str, history: list[dict] | None = None, officer: dict | None = None
 ) -> PipelineResponse:
     """
-    Run the full pipeline. This function never raises — every failure path
+    Run the full pipeline. This function never raises â€” every failure path
     fills `error` (and a user-friendly `answer_text`) on the response.
 
     `officer`, when provided, carries the authenticated officer's JWT payload
-    (officer_id, badge_number) so first-person questions ("cases I am handling")
-    resolve to the correct investigating_officer_id.
+    (EmployeeID, KGID) so first-person questions ("cases I am handling")
+    resolve to the correct PolicePersonID.
     """
     history = history or []
     start = time.monotonic()
     response = PipelineResponse()
 
-    # 0. Intent routing — decide whether this turn needs a NEW SQL query or can
+    # 0. Intent routing â€” decide whether this turn needs a NEW SQL query or can
     #    be answered directly from conversation + the most recent result set.
     #    Optimization: only route when there IS prior context to refer back to.
     #    On a brand-new chat (no history) there's nothing to answer "directly"
@@ -150,7 +136,7 @@ async def run_pipeline(
         if decision == "DIRECT":
             direct = await _run_direct(question, history, recent_table)
             elapsed = time.monotonic() - start
-            _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (no SQL)")
+            _log(f"Pipeline completed in {elapsed:.1f}s â€” DIRECT (no SQL)")
             return direct
 
     # 1. Schema linker
@@ -166,27 +152,27 @@ async def run_pipeline(
 
     # 2. SQL generation (with retry loop). attempts_used counts toward the
     #    shared MAX_ATTEMPTS budget; if the initial generation already burned
-    #    a correction call (validation failure → corrected), we won't fire a
+    #    a correction call (validation failure â†’ corrected), we won't fire a
     #    second correction on execution failure.
     try:
         sql, attempts_used = await generate_sql(
             question=question, table_names=tables, history=history, officer=officer
         )
     except CannotAnswerError:
-        # The DB can't answer this — fall back to a direct conversational
+        # The DB can't answer this â€” fall back to a direct conversational
         # answer (general question or insight about prior data) instead of a
         # canned error.
-        _log("SQL chain returned CANNOT_ANSWER — falling back to DIRECT answer")
+        _log("SQL chain returned CANNOT_ANSWER â€” falling back to DIRECT answer")
         direct = await _run_direct(question, history, recent_table)
         elapsed = time.monotonic() - start
-        _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (CANNOT_ANSWER fallback)")
+        _log(f"Pipeline completed in {elapsed:.1f}s â€” DIRECT (CANNOT_ANSWER fallback)")
         return direct
     except SQLGenerationError as e:
         _log(f"sql generation failed: {e}")
         response.error = "Could not generate a valid query for this question."
         response.answer_text = (
             "I couldn't translate that into a valid database query. "
-            "Try rephrasing — for example, ask about a specific case type, "
+            "Try rephrasing â€” for example, ask about a specific case type, "
             "a person, or a date range."
         )
         return response
@@ -205,7 +191,7 @@ async def run_pipeline(
 
     response.sql_generated = sql
 
-    # 3. Execute SQL — with one corrective retry on MySQL exceptions, but only
+    # 3. Execute SQL â€” with one corrective retry on MySQL exceptions, but only
     #    if we still have budget under the MAX_ATTEMPTS=2 cap.
     results = None
     try:
@@ -215,7 +201,7 @@ async def run_pipeline(
         _log(f"db execute_query failed (attempt 1): {exec_err!r}")
 
         if attempts_used >= MAX_ATTEMPTS:
-            # No budget left — surface a clean, scrubbed message.
+            # No budget left â€” surface a clean, scrubbed message.
             _log(
                 "Skipping execution-error correction: SQL chain budget "
                 f"exhausted (attempts_used={attempts_used})."
@@ -260,11 +246,11 @@ async def run_pipeline(
 
     response.table_data = results
 
-    # 4. Media resolver — only if results carry a fir_id column
+    # 4. Media resolver â€” only if results carry a CaseMasterID column
     media: list[dict] = []
-    fir_ids: list[int] = []
-    if results and _has_fir_id(results):
-        fir_ids = collect_fir_ids(results)
+    case_master_ids: list[int] = []
+    if results and _has_case_master_id(results):
+        case_master_ids = collect_case_master_ids(results)
         try:
             media = await resolve_media(results)
         except Exception as e:
@@ -274,10 +260,10 @@ async def run_pipeline(
     response.media_attachments = media
 
     # 5. Graph availability probe
-    if fir_ids:
-        response.graph_available = await _check_graph_available(fir_ids)
+    if case_master_ids:
+        response.graph_available = await _check_graph_available(case_master_ids)
 
-    # 6. Answer formatter — never let a formatter failure kill the pipeline
+    # 6. Answer formatter â€” never let a formatter failure kill the pipeline
     try:
         response.answer_text = await format_answer(
             question=question,
@@ -300,7 +286,9 @@ async def run_pipeline(
 
     elapsed = time.monotonic() - start
     _log(
-        f"Pipeline completed in {elapsed:.1f}s — tables: {tables}, "
+        f"Pipeline completed in {elapsed:.1f}s â€” tables: {tables}, "
         f"rows: {len(results)}"
     )
     return response
+
+

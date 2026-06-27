@@ -1,18 +1,18 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import TableRenderer from './TableRenderer.jsx'
 import MediaViewer from './MediaViewer.jsx'
 import { IconNetwork, IconSpeaker } from './Icons.jsx'
 import { speakText } from '../api/voice.js'
 import { useLang } from '../context/LangContext.jsx'
 
-// Pull the first usable fir_id out of structured table rows so "View network"
-// can open a graph centered on that case. Returns null when no fir_id column
+// Pull the first usable CaseMasterID out of structured table rows so "View network"
+// can open a graph centered on that case. Returns null when no CaseMasterID column
 // is present (e.g. aggregate-only results).
 function firstFirId(tableData) {
   if (!Array.isArray(tableData)) return null
   for (const row of tableData) {
-    if (row && row.fir_id != null) {
-      const n = Number(row.fir_id)
+    if (row && row.CaseMasterID != null) {
+      const n = Number(row.CaseMasterID)
       if (Number.isFinite(n)) return n
     }
   }
@@ -127,7 +127,7 @@ export default function MessageBubble({
       <div className="message__meta">Assistant</div>
       <div className={`message__body ${error ? 'message__body--error' : ''}`}>
         {renderedContent}
-        {isStreaming ? <span className="message__caret">▍</span> : null}
+        {isStreaming ? <span className="message__caret">â–</span> : null}
       </div>
 
       {hasTable ? <TableRenderer data={tableData} /> : null}
@@ -150,7 +150,7 @@ export default function MessageBubble({
           <button
             type="button"
             className="view-network-btn"
-            onClick={() => onOpenGraph?.({ firId: firstFirId(tableData) })}
+            onClick={() => onOpenGraph?.({ caseMasterId: firstFirId(tableData) })}
           >
             <IconNetwork size={14} />
             <span>View network</span>
@@ -162,3 +162,5 @@ export default function MessageBubble({
     </div>
   )
 }
+
+

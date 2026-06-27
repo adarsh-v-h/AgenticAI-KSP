@@ -1,8 +1,8 @@
-"""
+﻿"""
 Simple JWT auth for local development.
 REPLACE with Catalyst Authentication before production deployment.
 
-The `get_current_officer` dependency is the only thing routes touch — swapping
+The `get_current_officer` dependency is the only thing routes touch â€” swapping
 the implementation here requires zero route changes.
 """
 
@@ -25,7 +25,7 @@ _security = HTTPBearer(auto_error=False)
 
 def create_access_token(officer_id: int, badge_number: str) -> str:
     """
-    Sign a JWT carrying officer_id, badge_number, and a 24-hour expiry.
+    Sign a JWT carrying EmployeeID (as officer_id), KGID (as badge_number), and a 24-hour expiry.
     """
     expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
     payload = {
@@ -92,9 +92,9 @@ async def get_current_officer_sse(
 
 async def login(badge_number: str, password: str) -> dict:
     """
-    Authenticate an officer.
-    Lookup is by `badge_number` against the `officers` table.
-    Password rule (Step 3): password must equal `badge_number + "123"`.
+    Authenticate an employee.
+    Lookup is by `KGID` against the `Employee` table.
+    Password rule (Step 3): password must equal `KGID + "123"`.
     Returns: {"access_token": str, "officer": {...}} on success.
     Raises HTTP 401 on bad credentials.
     """
@@ -104,25 +104,28 @@ async def login(badge_number: str, password: str) -> dict:
         raise _unauthorized("Invalid badge number or password.")
 
     rows = await execute_query(
-        "SELECT officer_id, badge_number, full_name, `rank` "
-        "FROM officers WHERE badge_number = %s AND is_active = TRUE",
+        "SELECT e.EmployeeID, e.KGID, e.FirstName, r.RankName AS `rank` "
+        "FROM Employee AS e "
+        "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID "
+        "WHERE e.KGID = %s AND e.is_active = TRUE",
         (badge_number,),
     )
     if not rows:
         raise _unauthorized("Invalid badge number or password.")
 
-    officer = rows[0]
+    employee = rows[0]
     expected = badge_number + "123"
     if password != expected:
         raise _unauthorized("Invalid badge number or password.")
 
-    token = create_access_token(officer["officer_id"], officer["badge_number"])
+    token = create_access_token(employee["EmployeeID"], employee["KGID"])
     return {
         "access_token": token,
         "officer": {
-            "officer_id": officer["officer_id"],
-            "badge_number": officer["badge_number"],
-            "full_name": officer["full_name"],
-            "rank": officer["rank"],
+            "officer_id": employee["EmployeeID"],
+            "badge_number": employee["KGID"],
+            "full_name": employee["FirstName"],
+            "rank": employee["rank"] or "",
         },
     }
+

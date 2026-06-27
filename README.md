@@ -346,25 +346,28 @@ The seeder creates these officers (password is always `<badge_number>123`):
 
 ## Database
 
-13 tables in a MySQL-compatible Catalyst Data Store:
+27 tables in a MySQL-compatible Catalyst Data Store:
 
 | Table | Purpose |
 |-------|---------|
-| `officers` | Station officers with ranks and badge numbers |
-| `fir_master` | Central FIR registry — parent record for all cases |
-| `accused` | Accused persons linked to FIRs |
-| `victims` | Victims linked to FIRs |
-| `cases_theft` | Theft-specific details (stolen items, value, recovery) |
-| `cases_assault` | Assault details (weapon, severity, motive) |
-| `cases_vehicle_theft` | Vehicle theft (make, model, registration) |
-| `cases_fraud` | Fraud details (type, amount, method) |
-| `cases_cybercrime` | Cybercrime (platform, digital evidence) |
-| `cases_missing_person` | Missing person (last seen, found status) |
-| `cases_drug_offense` | Drug offenses (type, quantity, value) |
-| `case_relationships` | Links between entities (for network graph) |
-| `evidence_media` | Media files attached to FIRs |
+| `Employee` | Station employees / officers (replaces `officers`) |
+| `CaseMaster` | Central case/FIR registry (replaces `fir_master`) |
+| `ComplainantDetails` | Complainants who filed cases |
+| `Victim` | Victims linked to cases (replaces `victims`) |
+| `Accused` | Accused persons linked to cases (replaces `accused`) |
+| `ActSectionAssociation` | Links cases to acts and sections charged |
+| `ArrestSurrender` | Arrest or surrender details of accused |
+| `evidence_media` | Media files attached to cases |
+| `chat_sessions` | One row per conversation |
+| `chat_messages` | One row per turn — user OR assistant |
+| `State` / `District` / `Unit` / `UnitType` | Organizational hierarchy lookups |
+| `Rank` / `Designation` | Employee ranks and designations |
+| `CrimeHead` / `CrimeSubHead` | Crime groups and crime categories |
+| `CaseCategory` / `GravityOffence` / `CaseStatusMaster` | Case lookups |
+| `Act` / `Section` | Reference laws and sections |
+| `CasteMaster` / `ReligionMaster` / `OccupationMaster` | Demographic lookups |
 
-> Note: 4 case types (`robbery`, `murder`, `domestic_violence`, `other`) exist in `fir_master` but have no dedicated child tables. See [Support Documents/Docs.md §3.4](Support%20Documents/Docs.md#34-backendschemasql) for details.
+> Note: Replaced the old child-tables pattern (`cases_theft`, `cases_assault`, etc.) with a single unified `CaseMaster` table representing all cases. See [Support Documents/Docs.md §3.4](Support%20Documents/Docs.md#34-backendschemasql) for details.
 
 ---
 

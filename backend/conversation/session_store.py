@@ -5,7 +5,7 @@ Collection: session_metadata
 Key:        session_id (stored as the document `id`)
 Document:   {
                 "id":            session_id,   # primary key
-                "officer_id":    int,          # FK to officers table
+                "officer_id":    int,          # FK to Employee table
                 "title":         str,          # human-readable session title
                 "created_at":    str,          # ISO 8601 UTC
                 "updated_at":    str,          # ISO 8601 UTC
