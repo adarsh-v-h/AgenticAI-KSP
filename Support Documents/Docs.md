@@ -204,8 +204,13 @@ backend/
 | `evidence_media` | Media files attached to cases | `media_id` (PK), `case_master_id` (FK→CaseMaster), `media_type` (ENUM), `stratus_folder_id`, `stratus_file_id`, `description` |
 | `chat_sessions` | One row per conversation | `session_id` (PK, VARCHAR 36), `officer_id` (FK→Employee), `title`, `created_at`, `updated_at`, `message_count`, `is_active` |
 | `chat_messages` | One row per turn — user OR assistant | `message_id` (PK, AUTO_INCREMENT), `session_id` (FK→chat_sessions), `role` (ENUM `user`/`assistant`), `content`, `sql_generated`, `has_table`, `has_media`, `graph_available`, `table_data_json` (MEDIUMTEXT, nullable), `created_at` |
+| `offender_risk_scores` | Risk scores for accused persons | `AccusedMasterID` (PK, FK→Accused), `risk_score` (DECIMAL), `risk_tier` (ENUM: low/medium/high/critical), `contributing_factors` (TEXT), `computed_at` (TIMESTAMP) |
+| `chat_evidence_trail` | SQL query audit trail from chat | `trail_id` (PK, AUTO_INCREMENT), `message_id` (FK→chat_messages), `sql_executed` (TEXT), `tables_queried` (VARCHAR 300), `row_count` (INT), `case_ids_referenced` (VARCHAR 500), `created_at` (TIMESTAMP) |
+| `audit_log` | Governance audit log | `log_id` (PK, AUTO_INCREMENT), `officer_id` (FK→Employee), `action` (VARCHAR 50), `resource_type` (VARCHAR 50), `resource_id` (VARCHAR 50), `details` (TEXT), `ip_address` (VARCHAR 45), `created_at` (TIMESTAMP) |
 
 **Rich data storage migration:** The `table_data_json` column (MEDIUMTEXT) was added to `chat_messages` to co-locate tabular query results with the message they belong to. Previously, this data lived in a separate NoSQL document (`message_rich_data`). The new approach eliminates a round-trip, simplifies recovery logic, and keeps all message data in one indexed query. The `_serialize()` helper in `chat_store.py` handles `date`/`datetime`/`timedelta` objects during JSON serialization.
+
+**BLUEPRINT2 tables:** The three tables (`offender_risk_scores`, `chat_evidence_trail`, `audit_log`) were added in Step 1 to support role-based access control, audit logging, risk scoring, and evidence tracking features.
 
 **Design rationale:** A unified `CaseMaster` table holds all cases, and details like `ComplainantDetails`, `Victim`, `Accused`, `ActSectionAssociation`, and `ArrestSurrender` are separated into distinct tables. This maps directly to the official Karnataka State Police database layout and permits structured, set-based queries (such as checking who is still at large by checking if an accused has no matching `ArrestSurrender` entry).
 
