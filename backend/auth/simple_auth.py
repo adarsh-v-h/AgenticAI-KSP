@@ -23,14 +23,17 @@ ALGORITHM = "HS256"
 _security = HTTPBearer(auto_error=False)
 
 
-def create_access_token(officer_id: int, badge_number: str) -> str:
+def create_access_token(officer_id: int, badge_number: str, role: str) -> str:
     """
-    Sign a JWT carrying EmployeeID (as officer_id), KGID (as badge_number), and a 24-hour expiry.
+    Sign a JWT carrying EmployeeID (as officer_id), KGID (as badge_number), role, and a 24-hour expiry.
+    badge_number param name kept for compatibility with existing call sites -
+    it now holds the value from Employee.KGID, not officers.badge_number.
     """
     expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
     payload = {
         "officer_id": officer_id,
         "badge_number": badge_number,
+        "role": role,
         "exp": expire,
     }
     return jwt.encode(payload, get("APP_SECRET_KEY"), algorithm=ALGORITHM)
@@ -104,7 +107,7 @@ async def login(badge_number: str, password: str) -> dict:
         raise _unauthorized("Invalid badge number or password.")
 
     rows = await execute_query(
-        "SELECT e.EmployeeID, e.KGID, e.FirstName, r.RankName AS `rank` "
+        "SELECT e.EmployeeID, e.KGID, e.FirstName, e.role, r.RankName AS `rank` "
         "FROM Employee AS e "
         "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID "
         "WHERE e.KGID = %s AND e.is_active = TRUE",
@@ -118,7 +121,7 @@ async def login(badge_number: str, password: str) -> dict:
     if password != expected:
         raise _unauthorized("Invalid badge number or password.")
 
-    token = create_access_token(employee["EmployeeID"], employee["KGID"])
+    token = create_access_token(employee["EmployeeID"], employee["KGID"], employee["role"])
     return {
         "access_token": token,
         "officer": {

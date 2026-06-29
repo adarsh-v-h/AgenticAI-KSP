@@ -1949,3 +1949,34 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
   - Added `_normalize_bit_fields` to `db/connection.py` to transparently convert MySQL `BIT` fields (used for booleans/active flags) into Python booleans.
 - **Frontend (`frontend/src/`):** Adapted `ChatWindow.jsx` and `MessageBubble.jsx` to pass and extract `CaseMasterID` (PascalCase!) and `caseMasterId` (camelCase) instead of `fir_id` to/from the table results for opening network graphs.
 - **Test Suite:** Fixed and verified all 128 tests passing successfully.
+
+---
+
+### 10.10 BLUEPRINT2 Step 1 — Roles, Audit Log, and Governance Foundation
+
+**Date:** June 29, 2026  
+**What:** Implemented role-based access control, audit logging, and supervisor-only governance endpoints. This is Step 1 of the BLUEPRINT2 feature set, establishing the foundation for analytics, risk scoring, and decision support features in subsequent steps.
+
+**Database Schema (`backend/db/blueprint2_schema.sql`):**
+- **`offender_risk_scores`:** Risk scoring table with FK to `Accused(AccusedMasterID)`. Columns: `risk_score` (DECIMAL), `risk_tier` (ENUM: low/medium/high/critical), `contributing_factors` (TEXT), `computed_at` (TIMESTAMP).
+- **`chat_evidence_trail`:** Tracks SQL queries and case references from chat interactions. Columns: `message_id` (FK→chat_messages), `sql_executed` (TEXT), `tables_queried` (VARCHAR 300), `row_count` (INT), `case_ids_referenced` (VARCHAR 500 — comma-separated CaseMasterID values), `created_at` (TIMESTAMP). Indexed on `message_id`.
+- **`audit_log`:** Records all sensitive actions. Columns: `officer_id` (FK→Employee), `action` (VARCHAR 50), `resource_type` (VARCHAR 50), `resource_id` (VARCHAR 50), `details` (TEXT), `ip_address` (VARCHAR 45), `created_at` (TIMESTAMP). Indexed on `(officer_id, created_at)` and `(resource_type, resource_id)`.
+
+**Authentication Changes (`backend/auth/simple_auth.py`):**
+- `create_access_token()` now accepts a `role` parameter and includes it in the JWT payload alongside `officer_id`, `badge_number`, and `exp`.
+- `login()` now selects `role` from the `Employee` table and passes it to `create_access_token()`. The JWT payload now contains: `{"officer_id": int, "badge_number": str, "role": str, "exp": timestamp}`.
+
+**New Files:**
+- **`backend/auth/role_guard.py`:** Role-based access control module. `require_role(*allowed_roles)` — FastAPI dependency factory that checks the officer's role from the JWT payload against allowed roles, raising HTTP 403 if not permitted. `log_action()` — non-fatal audit logging helper that inserts rows into `audit_log`; failures are logged to stderr but never break the request.
+- **`backend/routers/governance.py`:** Supervisor-only governance endpoints. `GET /api/audit-log?limit=50` — returns recent audit log entries joined with `Employee` for officer name display. Gated by `require_role("supervisor")`.
+
+**Router Registration (`backend/main.py`):**
+- Registered `governance_router` alongside existing routers (`auth`, `chat`, `export`, `reports`, `voice`).
+
+**Verification Status:**
+- All 5 verification tests from BLUEPRINT2 Step 1 passed:
+  1. JWT payload includes `role` field correctly (tested with investigator-role token).
+  2. Existing `/api/chat` endpoint works without regression (returned valid response with no breaking changes).
+  3. `require_role()` correctly blocks investigator-role from supervisor-only endpoint (HTTP 403 with proper error message).
+  4. `require_role()` allows supervisor-role to access `/api/audit-log` (HTTP 200 with entries array).
+  5. `log_action()` writes audit log entries without raising exceptions (entry visible in subsequent query).
