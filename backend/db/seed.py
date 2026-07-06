@@ -356,7 +356,8 @@ async def seed_cases(conn, lookups, employee_ids):
             emp_id = emp["id"]
             unit_id = emp["unit_id"]
             district_id = emp["district_id"]
-            court_id = district_id
+            district_idx = lookups["district_ids"].index(district_id)
+            court_id = lookups["court_ids"][district_idx]
             
             reg_date = random_date(start_date_val, end_date_val)
             year = reg_date.year
