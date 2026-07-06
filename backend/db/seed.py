@@ -255,16 +255,16 @@ async def seed_lookups(conn):
 
 async def seed_employees(conn, lookups):
     officers_data = [
-        {"name": "Manjunath Patil", "rank": "Inspector", "badge": "KSP-2010-0101", "role": "supervisor", "desg": "SHO"},
-        {"name": "Venkatesh Gowda", "rank": "PI", "badge": "KSP-2012-0202", "role": "supervisor", "desg": "Circle Inspector"},
-        {"name": "Ramesh Naik", "rank": "SI", "badge": "KSP-2014-0303", "role": "investigator", "desg": "Investigating Officer"},
-        {"name": "Sandeep Hegde", "rank": "SI", "badge": "KSP-2015-0404", "role": "investigator", "desg": "Investigating Officer"},
-        {"name": "Harish Kumar", "rank": "ASI", "badge": "KSP-2016-0505", "role": "investigator", "desg": "Investigating Officer"},
-        {"name": "Vijay Raghavendra", "rank": "ASI", "badge": "KSP-2017-0606", "role": "investigator", "desg": "Investigating Officer"},
-        {"name": "Lokesh Murthy", "rank": "Head Constable", "badge": "KSP-2018-0707", "role": "investigator", "desg": "Beat Officer"},
-        {"name": "Shivakumar Swamy", "rank": "Head Constable", "badge": "KSP-2019-0808", "role": "investigator", "desg": "Beat Officer"},
-        {"name": "Srinivas Raju", "rank": "Constable", "badge": "KSP-2020-0909", "role": "analyst", "desg": "Beat Officer"},
-        {"name": "Naveen Raj", "rank": "Constable", "badge": "KSP-2021-1010", "role": "investigator", "desg": "Beat Officer"}
+        {"name": "Manjunath Patil", "rank": "Inspector", "badge": "3254123", "role": "supervisor", "desg": "SHO"},
+        {"name": "Venkatesh Gowda", "rank": "PI", "badge": "4167892", "role": "supervisor", "desg": "Circle Inspector"},
+        {"name": "Ramesh Naik", "rank": "SI", "badge": "5823641", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Sandeep Hegde", "rank": "SI", "badge": "6741028", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Harish Kumar", "rank": "ASI", "badge": "7295834", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Vijay Raghavendra", "rank": "ASI", "badge": "8412567", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Lokesh Murthy", "rank": "Head Constable", "badge": "9128473", "role": "investigator", "desg": "Beat Officer"},
+        {"name": "Shivakumar Swamy", "rank": "Head Constable", "badge": "1036852", "role": "investigator", "desg": "Beat Officer"},
+        {"name": "Srinivas Raju", "rank": "Constable", "badge": "2847156", "role": "analyst", "desg": "Beat Officer"},
+        {"name": "Naveen Raj", "rank": "Constable", "badge": "3962485", "role": "investigator", "desg": "Beat Officer"}
     ]
 
     employee_ids = []

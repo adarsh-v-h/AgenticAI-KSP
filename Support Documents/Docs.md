@@ -1262,7 +1262,7 @@ because `EventSource` can't set custom headers (needed for JWT auth).
 **UI elements:**
 - Brand mark (✱) + "Karnataka State Police"
 - Title: "Crime Intelligence Platform" (serif font)
-- Badge number input (placeholder: `KSP-2019-0042`)
+- Badge number input (placeholder: `e.g. 3254123`)
 - Password input (type=password)
 - Sign in button (shows "Authenticating…" when loading)
 - Error message below button

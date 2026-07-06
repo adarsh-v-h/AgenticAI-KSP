@@ -26,7 +26,7 @@ export default function LoginPage({ onLogin, isLoading, error }) {
             <input
               className="form-input"
               type="text"
-              placeholder="KSP-YYYY-NNNN"
+              placeholder="e.g. 3254123"
               value={badgeNumber}
               onChange={(e) => setBadgeNumber(e.target.value)}
               disabled={isLoading}
