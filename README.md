@@ -298,8 +298,8 @@ The frontend starts at `http://localhost:5173`. Vite proxies all `/api/*` reques
 ### 11. Log in and test
 
 1. Open `http://localhost:5173` in your browser
-2. Enter a badge number from the seeded database (e.g., `KSP-2019-0042`)
-3. Enter the password: `<badge_number>123` (e.g., `KSP-2019-0042123`)
+2. Enter a KGID number from the seeded database (e.g., `3254123`)
+3. Enter the password: `<KGID>123` (e.g., `3254123123`)
 4. You'll see the chat interface with sample questions
 5. Click a sample question or type your own
 
@@ -346,20 +346,20 @@ The system uses a **two-LLM pipeline**:
 
 ## Login Credentials
 
-The seeder creates these officers (password is always `<badge_number>123`):
+The seeder creates these officers (password is always `<KGID>123`):
 
-| Badge Number | Name | Rank |
+| KGID | Name | Rank |
 |-------------|------|------|
-| `KSP-2010-0101` | Manjunath Patil | Inspector |
-| `KSP-2012-0202` | Venkatesh Gowda | PI |
-| `KSP-2014-0303` | Ramesh Naik | SI |
-| `KSP-2015-0404` | Sandeep Hegde | SI |
-| `KSP-2016-0505` | Harish Kumar | ASI |
-| `KSP-2017-0606` | Vijay Raghavendra | ASI |
-| `KSP-2018-0707` | Lokesh Murthy | Head Constable |
-| `KSP-2019-0808` | Shivakumar Swamy | Head Constable |
-| `KSP-2020-0909` | Srinivas Raju | Constable |
-| `KSP-2021-1010` | Naveen Raj | Constable |
+| `3254123` | Manjunath Patil | Inspector |
+| `4167892` | Venkatesh Gowda | PI |
+| `5823641` | Ramesh Naik | SI |
+| `6741028` | Sandeep Hegde | SI |
+| `7295834` | Harish Kumar | ASI |
+| `8412567` | Vijay Raghavendra | ASI |
+| `9128473` | Lokesh Murthy | Head Constable |
+| `1036852` | Shivakumar Swamy | Head Constable |
+| `2847156` | Srinivas Raju | Constable |
+| `3962485` | Naveen Raj | Constable |
 
 ---
 

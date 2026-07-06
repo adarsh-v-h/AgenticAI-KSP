@@ -289,7 +289,7 @@ cd /home/venzz/Work/Dataathon
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"badge_number": "KSP-2016-0505", "password": "KSP-2016-0505123"}' \
+  -d '{"badge_number": "7295834", "password": "7295834123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 echo $TOKEN | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool
