@@ -251,6 +251,32 @@ The seeder is deterministic (`random.seed(42)`) and skips execution if data alre
 
 > Note: If you are migrating an existing database and need to populate the new `table_data_json` field for older assistant messages, run `python backfill.py` after setting up `.env`. This is not required for a fresh install.
 
+### 8a. Set up the RAG Pipeline and Knowledge Base (Optional)
+
+If you want the chatbot to answer analytical/entity-based questions using case reports, set up the RAG Knowledge Base.
+
+Zoho Catalyst's RAG Knowledge Base has an undocumented limit of **12 documents**. To bypass this limit, our pipeline automatically merges individual case files into larger, crime-category consolidated documents.
+
+#### 1. Export and Consolidate Cases
+Run the following script to export case reports from MySQL and automatically consolidate them:
+```bash
+python backend/export_cases_for_rag.py
+```
+This queries the database and generates exactly **8 category-grouped files** (e.g., `Theft.txt`, `Assault.txt`, etc.) in `backend/rag_consolidated/`.
+
+#### 2. Upload to Zoho Catalyst
+1. Go to your Zoho Catalyst Console.
+2. Select **QuickML** from the sidebar, then go to the **Knowledge Base** tab.
+3. Upload the **8 consolidated text files** from your local `backend/rag_consolidated/` directory.
+
+#### 3. Automatically Discover Document IDs
+Run the sync script to automatically fetch the uploaded document IDs from Zoho and update your local `.env`:
+```bash
+python backend/kb_sync.py --refresh-token
+```
+This will refresh your OAuth access token, discover the new document IDs from Zoho, and update `KB_DOCUMENT_IDS` in `.env` automatically. The backend automatically reloads these IDs without requiring a restart!
+
+
 ### 9. Start the backend
 
 ```bash

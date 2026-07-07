@@ -18,6 +18,7 @@ import { getToken } from './auth.js'
  *   onMedia?:  (refs: object[]) => void,
  *   onSql?:    (sql: string) => void,
  *   onGraphAvailable?: () => void,
+ *   onFollowUps?: (items: string[]) => void,
  *   onError?:  (msg: string) => void,
  *   onAuthExpired?: () => void,
  *   onDone?:   () => void,
@@ -136,6 +137,9 @@ function handleFrame(frame, callbacks) {
       break
     case 'graph_available':
       callbacks.onGraphAvailable?.()
+      break
+    case 'suggested_follow_ups':
+      callbacks.onFollowUps?.(Array.isArray(event.items) ? event.items : [])
       break
     case 'error':
       callbacks.onError?.(event.message || 'An error occurred.')

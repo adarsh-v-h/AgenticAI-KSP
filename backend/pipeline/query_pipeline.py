@@ -1,24 +1,26 @@
-﻿"""
-Query pipeline â€” orchestrates the full NL2SQL chain end-to-end.
+"""
+Query pipeline — orchestrates the full NL2SQL chain end-to-end.
 
 Order of operations:
   1. schema_linker.select_relevant_tables(question)
   2. sql_generator.generate_sql(question, tables, history)   [retry loop inside]
   3. db.connection.execute_query(sql)
-       â€” on MySQL execution error, call
+       — on MySQL execution error, call
          sql_generator.correct_sql_after_execution_error(...) and re-execute,
          provided we still have budget under the shared MAX_ATTEMPTS=2 cap.
   4. media_resolver.resolve_media(results)
-  5. graph_available probe (derived from Accused/CaseMaster — no case_relationships table)
+  5. graph_available probe (derived from Accused/CaseMaster â€” no case_relationships table)
   6. answer_formatter.format_answer(...)
-  7. Return PipelineResponse (always â€” even on errors).
+  7. Return PipelineResponse (always — even on errors).
 """
 
 import sys
+import os
 import time
 from dataclasses import dataclass, field
 
 from pipeline.schema_linker import select_relevant_tables
+from llm.rag_session import RagSession
 from llm.sql_generator import (
     generate_sql,
     correct_sql_after_execution_error,
@@ -29,7 +31,44 @@ from llm.sql_generator import (
 from db.connection import execute_query
 from pipeline.media_resolver import resolve_media, collect_case_master_ids
 from llm.answer_formatter import format_answer, route_intent, generate_direct_answer
-from llm.client import LLMError
+from llm.client import LLMError, call_llm
+
+
+
+_kb_doc_ids_cache: list[str] | None = None
+_kb_env_mtime: float = 0.0
+
+
+def _get_kb_document_ids() -> list[str]:
+    """
+    Dynamically load KB_DOCUMENT_IDS from .env. Re-reads the file if its
+    mtime has changed, so kb_sync.py updates are picked up without a
+    server restart.
+    """
+    global _kb_doc_ids_cache, _kb_env_mtime
+
+    env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        ".env",
+    )
+    try:
+        current_mtime = os.path.getmtime(env_path)
+    except OSError:
+        current_mtime = 0.0
+
+    if _kb_doc_ids_cache is not None and current_mtime == _kb_env_mtime:
+        return _kb_doc_ids_cache
+
+    # Re-read from .env
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=env_path, override=True)
+    _kb_doc_ids_cache = [
+        d.strip() for d in os.getenv("KB_DOCUMENT_IDS", "").split(",") if d.strip()
+    ]
+    _kb_env_mtime = current_mtime
+    _log(f"Loaded {len(_kb_doc_ids_cache)} KB document IDs")
+    return _kb_doc_ids_cache
+
 
 
 def _log(msg: str) -> None:
@@ -44,6 +83,7 @@ class PipelineResponse:
     sql_generated: str = ""
     graph_available: bool = False
     error: str | None = None
+    suggested_follow_ups: list[str] = field(default_factory=list)
 
 
 # Generic "we couldn't run the query" message shown in place of any raw
@@ -84,7 +124,7 @@ async def _run_direct(
     question: str, history: list[dict], recent_table: list[dict]
 ) -> PipelineResponse:
     """
-    Answer without SQL â€” for follow-ups about already-retrieved data, requests
+    Answer without SQL — for follow-ups about already-retrieved data, requests
     for insight, and general questions. On LLM failure, returns a friendly
     error response (never raises).
     """
@@ -110,7 +150,7 @@ async def run_pipeline(
     question: str, history: list[dict] | None = None, officer: dict | None = None
 ) -> PipelineResponse:
     """
-    Run the full pipeline. This function never raises â€” every failure path
+    Run the full pipeline. This function never raises — every failure path
     fills `error` (and a user-friendly `answer_text`) on the response.
 
     `officer`, when provided, carries the authenticated officer's JWT payload
@@ -121,7 +161,7 @@ async def run_pipeline(
     start = time.monotonic()
     response = PipelineResponse()
 
-    # 0. Intent routing â€” decide whether this turn needs a NEW SQL query or can
+    # 0. Intent routing — decide whether this turn needs a NEW SQL query or can
     #    be answered directly from conversation + the most recent result set.
     #    Optimization: only route when there IS prior context to refer back to.
     #    On a brand-new chat (no history) there's nothing to answer "directly"
@@ -136,7 +176,7 @@ async def run_pipeline(
         if decision == "DIRECT":
             direct = await _run_direct(question, history, recent_table)
             elapsed = time.monotonic() - start
-            _log(f"Pipeline completed in {elapsed:.1f}s â€” DIRECT (no SQL)")
+            _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (no SQL)")
             return direct
 
     # 1. Schema linker
@@ -152,32 +192,59 @@ async def run_pipeline(
 
     # 2. SQL generation (with retry loop). attempts_used counts toward the
     #    shared MAX_ATTEMPTS budget; if the initial generation already burned
-    #    a correction call (validation failure â†’ corrected), we won't fire a
+    #    a correction call (validation failure → corrected), we won't fire a
     #    second correction on execution failure.
     try:
         sql, attempts_used = await generate_sql(
             question=question, table_names=tables, history=history, officer=officer
         )
     except CannotAnswerError:
-        # The DB can't answer this â€” fall back to a direct conversational
-        # answer (general question or insight about prior data) instead of a
-        # canned error.
-        _log("SQL chain returned CANNOT_ANSWER â€” falling back to DIRECT answer")
+        # The DB can't answer this - try RAG grounding first (analytical /
+        # entity questions), fall back to DIRECT only if RAG is also ungrounded.
+        _log("SQL chain returned CANNOT_ANSWER -- trying RAG before DIRECT fallback")
+        try:
+            rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+        except Exception as e:
+            _log(f"RAG fallback attempt failed: {e}")
+            rag_result = {"grounded": False}
+
+        if rag_result.get("grounded"):
+            elapsed = time.monotonic() - start
+            _log(f"Pipeline completed in {elapsed:.1f}s -- RAG (CANNOT_ANSWER fallback)")
+            response.answer_text = rag_result["response"]
+            response.suggested_follow_ups = rag_result.get("suggested_follow_ups", [])
+            return response
+
+        _log("RAG also ungrounded -- falling back to DIRECT answer")
         direct = await _run_direct(question, history, recent_table)
         elapsed = time.monotonic() - start
-        _log(f"Pipeline completed in {elapsed:.1f}s â€” DIRECT (CANNOT_ANSWER fallback)")
+        _log(f"Pipeline completed in {elapsed:.1f}s —  DIRECT (CANNOT_ANSWER fallback)")
         return direct
     except SQLGenerationError as e:
         _log(f"sql generation failed: {e}")
         response.error = "Could not generate a valid query for this question."
         response.answer_text = (
             "I couldn't translate that into a valid database query. "
-            "Try rephrasing â€” for example, ask about a specific case type, "
+            "Try rephrasing —  for example, ask about a specific case type, "
             "a person, or a date range."
         )
         return response
     except LLMError as e:
-        _log(f"sql generation LLM error: {e}")
+        _log(f"sql generation LLM error: {e} -- trying RAG before hard failure")
+        try:
+            rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+        except Exception as rag_e:
+            _log(f"RAG fallback attempt failed: {rag_e}")
+            rag_result = {"grounded": False}
+
+        if rag_result.get("grounded"):
+            elapsed = time.monotonic() - start
+            _log(f"Pipeline completed in {elapsed:.1f}s -- RAG (LLMError fallback)")
+            response.answer_text = rag_result["response"]
+            response.suggested_follow_ups = rag_result.get("suggested_follow_ups", [])
+            return response
+
+        _log(f"sql generation LLM error, RAG also ungrounded: {e}")
         response.error = "The SQL generation service is unavailable."
         response.answer_text = (
             "The SQL generation service is unavailable right now. Please try again."
@@ -191,7 +258,7 @@ async def run_pipeline(
 
     response.sql_generated = sql
 
-    # 3. Execute SQL â€” with one corrective retry on MySQL exceptions, but only
+    # 3. Execute SQL — with one corrective retry on MySQL exceptions, but only
     #    if we still have budget under the MAX_ATTEMPTS=2 cap.
     results = None
     try:
@@ -201,7 +268,7 @@ async def run_pipeline(
         _log(f"db execute_query failed (attempt 1): {exec_err!r}")
 
         if attempts_used >= MAX_ATTEMPTS:
-            # No budget left â€” surface a clean, scrubbed message.
+            # No budget left — surface a clean, scrubbed message.
             _log(
                 "Skipping execution-error correction: SQL chain budget "
                 f"exhausted (attempts_used={attempts_used})."
@@ -246,7 +313,7 @@ async def run_pipeline(
 
     response.table_data = results
 
-    # 4. Media resolver â€” only if results carry a CaseMasterID column
+    # 4. Media resolver — only if results carry a CaseMasterID column
     media: list[dict] = []
     case_master_ids: list[int] = []
     if results and _has_case_master_id(results):
@@ -263,7 +330,7 @@ async def run_pipeline(
     if case_master_ids:
         response.graph_available = await _check_graph_available(case_master_ids)
 
-    # 6. Answer formatter â€” never let a formatter failure kill the pipeline
+    # 6. Answer formatter — never let a formatter failure kill the pipeline
     try:
         response.answer_text = await format_answer(
             question=question,
@@ -284,9 +351,42 @@ async def run_pipeline(
             f"{'s' if len(results) != 1 else ''}."
         )
 
+    # 7. Suggested follow-ups -- best-effort; never fails the pipeline.
+    try:
+        recent_turns = history[-5:] if history else []
+        history_block = ""
+        if recent_turns:
+            history_lines = "\n".join(
+                f"{t.get('role', '?')}: {t.get('content', '')}" for t in recent_turns
+            )
+            history_block = f"Conversation so far:\n{history_lines}\n\n"
+
+        follow_up_prompt = (
+            f"{history_block}"
+            f"Question: {question}\n"
+            f"Answer: {response.answer_text}\n\n"
+            f"Suggest exactly 3 short follow-up questions an investigator "
+            f"might ask next to deepen this line of inquiry. "
+            f"Return only the 3 questions, one per line, no extra text."
+        )
+        follow_up_raw = await call_llm(
+            model_key="MODEL_ANSWER",
+            prompt=follow_up_prompt,
+            system_prompt="You are an investigative assistant helping a police officer analyse case data.",
+            max_tokens=1024,
+        )
+        response.suggested_follow_ups = [
+            line.strip("- ").strip()
+            for line in follow_up_raw.split("\n")
+            if line.strip()
+        ][:3]
+    except Exception as e:
+        _log(f"follow-up generation failed (non-fatal): {e}")
+        response.suggested_follow_ups = []
+
     elapsed = time.monotonic() - start
     _log(
-        f"Pipeline completed in {elapsed:.1f}s â€” tables: {tables}, "
+        f"Pipeline completed in {elapsed:.1f}s — tables: {tables}, "
         f"rows: {len(results)}"
     )
     return response

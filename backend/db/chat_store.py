@@ -107,11 +107,16 @@ async def save_message_pair(
     graph_available: bool,
     table_data: list[dict],
     media_attachments: list[dict],
+    assistant_follow_ups: list | None = None,
 ) -> int | None:
     try:
         table_json = None
         if has_table and table_data:
             table_json = json.dumps(table_data, default=_serialize)
+
+        follow_ups_json = None
+        if assistant_follow_ups:
+            follow_ups_json = json.dumps(assistant_follow_ups, default=_serialize)
 
         await execute_write(
             """INSERT INTO chat_messages
@@ -123,11 +128,11 @@ async def save_message_pair(
         assistant_id = await execute_write(
             """INSERT INTO chat_messages
                (session_id, role, content, sql_generated,
-                has_table, has_media, graph_available, table_data_json)
-               VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s)""",
+                has_table, has_media, graph_available, table_data_json, follow_ups_json)
+               VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s, %s)""",
             (
                 session_id, answer_text, sql_generated or "",
-                has_table, has_media, graph_available, table_json
+                has_table, has_media, graph_available, table_json, follow_ups_json
             )
         )
 
@@ -143,7 +148,7 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
         rows = await execute_query(
             """SELECT message_id, role, content, sql_generated,
                       has_table, has_media, graph_available,
-                      table_data_json, created_at
+                      table_data_json, follow_ups_json, created_at
                FROM chat_messages
                WHERE session_id = %s
                ORDER BY created_at ASC
@@ -160,6 +165,13 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
                 except Exception:
                     table_data = []
 
+            suggested_follow_ups = []
+            if row.get("follow_ups_json"):
+                try:
+                    suggested_follow_ups = json.loads(row["follow_ups_json"])
+                except Exception:
+                    suggested_follow_ups = []
+
             msg = {
                 "message_id": row["message_id"],
                 "role": row["role"],
@@ -170,6 +182,7 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
                 "graph_available": bool(row["graph_available"]),
                 "table_data": table_data,
                 "media_attachments": [],
+                "suggested_follow_ups": suggested_follow_ups,
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             }
             messages.append(msg)

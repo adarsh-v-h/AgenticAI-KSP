@@ -2275,3 +2275,33 @@ textarea {
   opacity: 0.6;
   cursor: default;
 }
+
+
+/* ---------- Suggested follow-up questions (RAG recommendations) ---------- */
+.message__follow-ups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.follow-up-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--primary-active);
+  background: var(--surface-hover);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.follow-up-chip:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}

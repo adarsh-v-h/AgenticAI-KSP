@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AuthError,
   fetchMessages,
@@ -254,6 +254,7 @@ export default function ChatWindow({ officer, onLogout }) {
         tableData: null,
         mediaAttachments: null,
         graphAvailable: false,
+        suggestedFollowUps: null,
         isStreaming: true,
         error: false,
       }
@@ -272,6 +273,7 @@ export default function ChatWindow({ officer, onLogout }) {
         onTable: (rows) => updateLastAssistant(() => ({ tableData: rows })),
         onMedia: (refs) => updateLastAssistant(() => ({ mediaAttachments: refs })),
         onGraphAvailable: () => updateLastAssistant(() => ({ graphAvailable: true })),
+        onFollowUps: (items) => updateLastAssistant(() => ({ suggestedFollowUps: items })),
         onError: (msg) =>
           updateLastAssistant((m) => ({
             content: (m.content && m.content.length > 0 ? m.content + '\n\n' : '') + msg,
@@ -323,6 +325,7 @@ export default function ChatWindow({ officer, onLogout }) {
                 ? m.media_attachments
                 : null,
             graphAvailable: Boolean(m.graph_available),
+            suggestedFollowUps: Array.isArray(m.suggested_follow_ups) && m.suggested_follow_ups.length > 0 ? m.suggested_follow_ups : null,
             isStreaming: false,
             error: false,
           }))
@@ -561,6 +564,8 @@ export default function ChatWindow({ officer, onLogout }) {
                     mediaAttachments={m.mediaAttachments}
                     graphAvailable={m.graphAvailable}
                     onOpenGraph={setGraphTarget}
+                    suggestedFollowUps={m.suggestedFollowUps}
+                    onFollowUpClick={handleSend}
                     isStreaming={m.isStreaming}
                     error={m.error}
                   />
