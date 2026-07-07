@@ -2063,3 +2063,45 @@ genuinely exists in the RAG-indexed case narratives.
 
 Both fixes are additive and fail open — any exception inside the RAG attempt is
 caught and logged, and the pipeline falls back to its original behavior.
+
+### 3.X backend/pipeline/risk_scoring.py + backend/routers/profiling.py
+
+**Purpose:** Rule-based, explainable offender risk scoring. Computes a 0-100
+score for an accused person from live case data (not a black-box model), with
+a breakdown of exactly which factors contributed and how many points each
+contributed -- an officer can see why someone scored "critical" vs "low".
+
+**Identity matching caveat:** `prior_case_count` and `at_large_status` are not
+stored columns -- both are derived live by matching `AccusedName` across the
+`Accused` table. There is no person-level ID beyond name matching in the KSP
+schema, so this can undercount or overcount if the same person's name is
+recorded inconsistently across cases. The same caveat applies to
+`similar_cases.py`.
+
+**Scoring factors (max 100 points):**
+
+| Factor | Max points | How it's computed |
+|---|---|---|
+| Prior case count | 30 | `min(total_cases * 6, 30)` |
+| Violent crime ratio | 25 | `(violent case count / total cases) * 25`, where violent = Assault, Murder, Domestic Violence, Robbery |
+| At-large status | 15 | Full 15 if no `ArrestSurrender` row exists for this accused across their cases, else 0 |
+| Geographic spread | 15 | `min(distinct police stations involved * 5, 15)` |
+| Recency | 15 | Full 15 if most recent case < 90 days old; 55% (8.25) if < 365 days; 15% (2.25) otherwise |
+
+**Risk tiers:** `low` (<25), `medium` (25-49), `high` (50-74), `critical` (75+).
+
+**Functions (`pipeline/risk_scoring.py`):**
+- `compute_risk_for_accused(accused_id)` -- runs the full scoring pipeline above; returns a dict with `risk_score`, `risk_tier`, and `contributing_factors` (sorted highest-point-contribution first). Returns a zeroed `low` score on any exception -- **this is indistinguishable from a legitimately low score**, which is why `profiling.py` does a separate existence check.
+- `save_risk_score(result)` -- upserts into `offender_risk_scores` via `ON DUPLICATE KEY UPDATE`.
+- `get_cached_risk_score(accused_id)` -- reads the stored score without recomputing.
+- `recompute_all_risk_scores()` -- iterates every distinct `AccusedMasterID` and recomputes/saves; used by the bulk recompute endpoint.
+
+**Endpoints (`routers/profiling.py`):**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/profiling/risk/{accused_id}` | Returns the cached score, or computes fresh if none cached. `?force_recompute=true` always recomputes. Raises 404 only if the accused ID doesn't exist at all (distinguishing "not found" from "scored zero"). |
+| `GET` | `/api/profiling/top-risk?limit=10` | Ranked list of highest-scoring **distinct identities** (grouped by `AccusedName`, since one person can have multiple `AccusedMasterID` rows). Excludes placeholder/generic names (`Suspect`, `Unknown`, `Unidentified`, `Not Known`, `NA`, `N/A`) to avoid falsely aggregating many unidentified people into one high-risk entity. |
+| `POST` | `/api/profiling/recompute-all` | Recomputes and saves scores for every accused person in the DB. Returns the count recomputed. No batching/pagination -- runs synchronously for all rows. |
+
+All three endpoints require officer authentication via `get_current_officer`.

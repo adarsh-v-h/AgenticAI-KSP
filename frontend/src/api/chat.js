@@ -339,7 +339,7 @@ export async function fetchMessages(sessionId) {
 }
 
 /**
- * Export a chat session as a downloadable PDF (or HTML fallback).
+ * Export a chat session as a downloadable HTML file.
  *
  * POST /api/chat/sessions/{sessionId}/export
  *
@@ -385,7 +385,7 @@ export async function exportSession(sessionId) {
 
   const contentDisposition = response.headers.get('Content-Disposition')
   const filename =
-    contentDisposition?.match(/filename="(.+)"/)?.[1] ?? 'KSP-Export.pdf'
+    contentDisposition?.match(/filename="(.+)"/)?.[1] ?? 'KSP-Export.html'
 
   // Trigger a browser download.
   const url = URL.createObjectURL(blob)

@@ -64,13 +64,13 @@ def deserialize_item(item_data: dict) -> dict:
         res[k] = deserialize_from_catalyst(v)
     return res
 
-async def get_document(table_name: str, document_id: str, timeout: float = 5.0) -> dict | None:
+async def get_document(table_name: str, document_id: str, timeout: float = 5.0, key_name: str = "id") -> dict | None:
     """
     Fetch a single item from the NoSQL table.
     """
     url = f"{_get_base_project_url()}/nosqltable/{table_name}/item/fetch"
     payload = {
-        "keys": [{"id": {"S": document_id}}],
+        "keys": [{key_name: {"S": document_id}}],
         "required_attributes": []
     }
     async with httpx.AsyncClient() as client:
@@ -97,13 +97,13 @@ async def get_document(table_name: str, document_id: str, timeout: float = 5.0) 
         else:
             raise NoSQLError(f"Fetch item {document_id} failed with status {response.status_code}: {response.text}")
 
-async def insert_document(table_name: str, document_id: str, document_data: dict, timeout: float = 5.0) -> bool:
+async def insert_document(table_name: str, document_id: str, document_data: dict, timeout: float = 5.0, key_name: str = "id") -> bool:
     """
     Insert a document into NoSQL.
     """
     url = f"{_get_base_project_url()}/nosqltable/{table_name}/item"
     doc_copy = dict(document_data)
-    doc_copy["id"] = document_id
+    doc_copy[key_name] = document_id
     serialized = {k: serialize_to_catalyst(v) for k, v in doc_copy.items()}
     payload = [{"item": serialized}]
     async with httpx.AsyncClient() as client:
@@ -117,14 +117,14 @@ async def insert_document(table_name: str, document_id: str, document_data: dict
             return True
         raise NoSQLError(f"Insert item {document_id} failed with status {response.status_code}: {response.text}")
 
-async def update_document(table_name: str, document_id: str, updates: dict, timeout: float = 5.0) -> bool:
+async def update_document(table_name: str, document_id: str, updates: dict, timeout: float = 5.0, key_name: str = "id") -> bool:
     """
     Update attributes of a document in NoSQL.
     """
     url = f"{_get_base_project_url()}/nosqltable/{table_name}/item"
     update_attrs = []
     for k, v in updates.items():
-        if k == "id":
+        if k == key_name:
             continue
         update_attrs.append({
             "operation_type": "PUT",
@@ -132,7 +132,7 @@ async def update_document(table_name: str, document_id: str, updates: dict, time
             "update_value": serialize_to_catalyst(v)
         })
     payload = [{
-        "keys": {"id": {"S": document_id}},
+        "keys": {key_name: {"S": document_id}},
         "update_attributes": update_attrs
     }]
     async with httpx.AsyncClient() as client:
@@ -146,13 +146,13 @@ async def update_document(table_name: str, document_id: str, updates: dict, time
             return True
         raise NoSQLError(f"Update item {document_id} failed with status {response.status_code}: {response.text}")
 
-async def delete_document(table_name: str, document_id: str, timeout: float = 5.0) -> bool:
+async def delete_document(table_name: str, document_id: str, timeout: float = 5.0, key_name: str = "id") -> bool:
     """
     Delete a document in NoSQL.
     """
     url = f"{_get_base_project_url()}/nosqltable/{table_name}/item"
     payload = [{
-        "keys": {"id": {"S": document_id}}
+        "keys": {key_name: {"S": document_id}}
     }]
     async with httpx.AsyncClient() as client:
         response = await client.request(

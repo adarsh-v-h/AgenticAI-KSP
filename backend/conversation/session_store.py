@@ -86,7 +86,7 @@ async def create_session(document: dict) -> dict:
     await _local_set(session_id, document)
 
     try:
-        await insert_document("session_metadata", session_id, document, timeout=_NOSQL_TIMEOUT)
+        await insert_document("session_metadata", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
     except Exception as e:
         _log(f"ERROR: session_metadata POST failed for {session_id}: {e}")
 
@@ -103,7 +103,7 @@ async def get_session(session_id: str) -> dict | None:
         return None
 
     try:
-        doc = await get_document("session_metadata", session_id, timeout=_NOSQL_TIMEOUT)
+        doc = await get_document("session_metadata", session_id, timeout=_NOSQL_TIMEOUT, key_name="session_id")
         if doc is not None:
             return doc
         return await _local_get(session_id)
@@ -135,10 +135,10 @@ async def update_session(session_id: str, updates: dict) -> dict | None:
 
     try:
         try:
-            await update_document("session_metadata", session_id, merged, timeout=_NOSQL_TIMEOUT)
+            await update_document("session_metadata", session_id, merged, timeout=_NOSQL_TIMEOUT, key_name="session_id")
         except NoSQLError as ne:
             if "404" in str(ne):
-                await insert_document("session_metadata", session_id, merged, timeout=_NOSQL_TIMEOUT)
+                await insert_document("session_metadata", session_id, merged, timeout=_NOSQL_TIMEOUT, key_name="session_id")
             else:
                 raise
     except Exception as e:
