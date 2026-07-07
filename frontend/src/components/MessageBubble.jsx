@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import TableRenderer from './TableRenderer.jsx'
 import MediaViewer from './MediaViewer.jsx'
 import { IconNetwork, IconSpeaker } from './Icons.jsx'
@@ -80,6 +80,8 @@ export default function MessageBubble({
   mediaAttachments,
   graphAvailable,
   onOpenGraph,
+  suggestedFollowUps,
+  onFollowUpClick,
   isStreaming,
   error,
 }) {
@@ -153,6 +155,21 @@ export default function MessageBubble({
           </button>
         ) : null}
       </div>
+
+      {!isStreaming && !error && Array.isArray(suggestedFollowUps) && suggestedFollowUps.length > 0 ? (
+        <div className="message__follow-ups">
+          {suggestedFollowUps.map((q, idx) => (
+            <button
+              key={idx}
+              type="button"
+              className="follow-up-chip"
+              onClick={() => onFollowUpClick?.(q)}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <MediaViewer attachments={mediaAttachments} />
     </div>

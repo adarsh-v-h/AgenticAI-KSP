@@ -1,8 +1,8 @@
 """
 Chat routes.
 
-POST /api/chat        — non-streaming JSON response (kept for testing/fallback)
-GET  /api/chat/stream — SSE: status events + token-by-token answer streaming
+POST /api/chat        — non-streaming JSON response (kept for testing/fallback)
+GET  /api/chat/stream — SSE: status events + token-by-token answer streaming
 
 Both are protected. The SSE endpoint accepts the JWT either via the standard
 Authorization header or as a `?token=...` query parameter so EventSource clients
@@ -49,6 +49,7 @@ class ChatResponse(BaseModel):
     sql_generated: str
     graph_available: bool
     error: str | None = None
+    suggested_follow_ups: list[str] = []
 
 
 class SessionMetadata(BaseModel):
@@ -73,6 +74,7 @@ class Message(BaseModel):
     graph_available: bool = False
     table_data: list[dict] = Field(default_factory=list)
     media_attachments: list[dict] = Field(default_factory=list)
+    suggested_follow_ups: list[str] = Field(default_factory=list)
     created_at: str | None = None
 
 
@@ -100,7 +102,7 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result, s
     `session_exists` is the ownership/existence result already computed by the
     caller's authorization gate, so we avoid a duplicate existence query.
 
-    Never raises — persistence failures are logged and non-fatal so the chat
+    Never raises — persistence failures are logged and non-fatal so the chat
     keeps working even when the Data Store is unavailable.
     """
     try:
@@ -119,6 +121,7 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result, s
             graph_available=result.graph_available,
             table_data=result.table_data,
             media_attachments=result.media_attachments,
+            assistant_follow_ups=result.suggested_follow_ups,
         )
         await update_session_timestamp(session_id)
     except Exception as e:
@@ -136,7 +139,7 @@ async def _authorize_session_write(session_id: str, officer_id: int) -> bool:
     without a second existence query.
 
     Raises HTTP 404 (not 403) when the session exists but belongs to another
-    officer — we never reveal that a foreign session exists. A not-yet-existing
+    officer — we never reveal that a foreign session exists. A not-yet-existing
     session is allowed (create-or-append: the officer owns it on creation).
 
     Returns True when the session already exists (and is owned by this officer),
@@ -159,11 +162,11 @@ async def graph_by_fir(
     """
     Return a vis.js-compatible network graph centered on a FIR.
 
-    No ownership check: FIR/accused data is station-scoped, not officer-scoped —
+    No ownership check: FIR/accused data is station-scoped, not officer-scoped —
     any authenticated officer may view any case's network (unlike chat sessions,
     which are officer-owned). The `get_current_officer` auth gate is sufficient.
 
-    Always HTTP 200 with `{"nodes": [...], "edges": [...]}` — the builder returns
+    Always HTTP 200 with `{"nodes": [...], "edges": [...]}` — the builder returns
     an empty graph on error rather than raising, so this never 500s.
     """
     return await build_graph_for_fir(fir_id)
@@ -191,7 +194,7 @@ async def list_chat_sessions(
 
     Step 4: now reads from MySQL (chat_sessions) instead of NoSQL. Authentication
     (401) is enforced by `get_current_officer`. `get_sessions_for_officer` never
-    raises — it returns [] on any DB error — so this endpoint always returns
+    raises — it returns [] on any DB error — so this endpoint always returns
     HTTP 200 with whatever sessions are available.
     """
     officer_id = officer["officer_id"]
@@ -226,7 +229,7 @@ async def create_chat_session(
 
     Authentication (401) is enforced by `get_current_officer`. The new session
     is persisted via `create_session`, which writes the in-memory fallback
-    first and then attempts the NoSQL POST — it never raises, so this endpoint
+    first and then attempts the NoSQL POST — it never raises, so this endpoint
     always succeeds once the officer is authenticated.
 
     The stored document uses `id` as the session_id key; we map it to
@@ -294,6 +297,7 @@ async def get_session_messages(
             graph_available=row.get("graph_available", False),
             table_data=row.get("table_data", []),
             media_attachments=row.get("media_attachments", []),
+            suggested_follow_ups=row.get("suggested_follow_ups", []),
             created_at=row.get("created_at"),
         )
         for row in rows
@@ -309,7 +313,7 @@ async def chat(
 ) -> ChatResponse:
     """
     Run the user's question through the full NL2SQL pipeline.
-    Always returns HTTP 200 — pipeline failures are surfaced via the `error`
+    Always returns HTTP 200 — pipeline failures are surfaced via the `error`
     field on the response.
     """
     question = request.question.strip()
@@ -320,6 +324,7 @@ async def chat(
             media_attachments=[],
             sql_generated="",
             graph_available=False,
+            suggested_follow_ups=[],
             error="Empty question.",
         )
 
@@ -344,6 +349,7 @@ async def chat(
             media_attachments=[],
             sql_generated="",
             graph_available=False,
+            suggested_follow_ups=[],
             error=str(e),
         )
 
@@ -368,6 +374,7 @@ async def chat(
         media_attachments=result.media_attachments,
         sql_generated=result.sql_generated,
         graph_available=result.graph_available,
+        suggested_follow_ups=result.suggested_follow_ups,
         error=result.error,
     )
 
@@ -384,7 +391,7 @@ async def chat_stream(
     Catalyst QuickML doesn't support true LLM streaming (one POST returns the
     full response), so we simulate streaming by:
       1. Emitting `status` events while the pipeline runs
-      2. Running the pipeline (DB + 2 LLM calls — typically 60-120 seconds)
+      2. Running the pipeline (DB + 2 LLM calls — typically 60-120 seconds)
       3. Splitting the answer into whitespace-delimited tokens and yielding
          each one as a `token` event with a small inter-token delay
 
@@ -394,6 +401,7 @@ async def chat_stream(
       {"type":"table","data":[...]}
       {"type":"media","attachments":[...]}
       {"type":"graph_available"}
+      {"type":"suggested_follow_ups","items":[...]}
       {"type":"sql","content":"..."}
       {"type":"error","message":"..."}
       {"type":"done"}
@@ -443,10 +451,6 @@ async def chat_stream(
                 yield _sse({"type": "error", "message": result.error})
                 # Still emit the answer_text (which is the user-friendly explainer),
                 # but skip it if it duplicates the error message verbatim.
-                if result.answer_text and result.answer_text != result.error:
-                    for token in _tokenize(result.answer_text):
-                        yield _sse({"type": "token", "content": token})
-                        await asyncio.sleep(0.02)
                 yield _sse({"type": "done"})
                 return
 
@@ -468,6 +472,9 @@ async def chat_stream(
             if result.graph_available:
                 yield _sse({"type": "graph_available"})
 
+            if result.suggested_follow_ups:
+                yield _sse({"type": "suggested_follow_ups", "items": result.suggested_follow_ups})
+
             try:
                 await save_turn(
                     session_id,
@@ -485,7 +492,7 @@ async def chat_stream(
             yield _sse({"type": "done"})
 
         except asyncio.CancelledError:
-            # Client disconnected — exit cleanly.
+            # Client disconnected — exit cleanly.
             raise
         except Exception as e:
             _log(f"SSE stream unexpected error: {e}")

@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import os
 import asyncio
 from contextlib import asynccontextmanager
@@ -19,19 +19,22 @@ from routers.export import router as export_router
 from routers.reports import router as reports_router
 from routers.voice import router as voice_router
 from routers.governance import router as governance_router
+from routers.analytics import router as analytics_router
+from routers.decision_support import router as decision_support_router
+from routers.profiling import router as profiling_router
 from conversation.history import init_nosql_table
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── STARTUP ──
-    # 1. Validate all env vars — crash loudly if anything missing
+    # â”€â”€ STARTUP â”€â”€
+    # 1. Validate all env vars â€” crash loudly if anything missing
     validate_settings()
 
     # 2. Create DB connection pool
     await create_pool()
 
     # 3. Confirm DB is reachable (run a trivial query)
-    # If this fails, print a warning but don't crash — DB might not be provisioned yet locally
+    # If this fails, print a warning but don't crash â€” DB might not be provisioned yet locally
     # (this lets you still start the server and see the health check)
     try:
         from db.connection import execute_query
@@ -42,7 +45,7 @@ async def lifespan(app: FastAPI):
         app.state.db_ok = False
 
     # 4. Probe Catalyst NoSQL so we surface auth/path issues at startup.
-    # Failure is non-fatal — history.py falls back to in-memory storage.
+    # Failure is non-fatal â€” history.py falls back to in-memory storage.
     try:
         await init_nosql_table()
     except Exception as e:
@@ -50,7 +53,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # ── SHUTDOWN ──
+    # â”€â”€ SHUTDOWN â”€â”€
     await close_pool()
 
 
@@ -62,7 +65,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS — only allow origin from env, never wildcard
+# CORS â€” only allow origin from env, never wildcard
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[get("ALLOWED_ORIGINS")],
@@ -77,6 +80,9 @@ app.include_router(export_router)
 app.include_router(reports_router)
 app.include_router(voice_router)
 app.include_router(governance_router)
+app.include_router(analytics_router)
+app.include_router(decision_support_router)
+app.include_router(profiling_router)
 
 
 @app.get("/health")
@@ -86,7 +92,7 @@ async def health_check():
     1. DB connectivity (use app.state.db_ok set during startup)
     2. LLM MODEL_SQL reachable (ping_model)
     3. LLM MODEL_ANSWER reachable (ping_model)
-    
+
     Returns:
     {
         "status": "ok" | "degraded",
@@ -95,33 +101,33 @@ async def health_check():
         "llm_answer": "ok" | "error",
         "env": "development" | "production"
     }
-    
-    HTTP 200 always — even if degraded.
+
+    HTTP 200 always â€” even if degraded.
     Never return 500 from health check.
     Run LLM pings in parallel using asyncio.gather.
     """
     # 1. Check DB connectivity
     db_ok = getattr(app.state, "db_ok", False)
-    
+
     # 2. Run LLM pings in parallel
     coder_ok, answer_ok = await asyncio.gather(
         ping_model("MODEL_SQL"),
         ping_model("MODEL_ANSWER")
     )
-    
+
     db_status = "connected" if db_ok else "error"
     coder_status = "ok" if coder_ok else "error"
     answer_status = "ok" if answer_ok else "error"
-    
+
     # Status is ok only if all checks passed
     all_ok = db_ok and coder_ok and answer_ok
     status = "ok" if all_ok else "degraded"
-    
+
     try:
         env = get("APP_ENV")
     except Exception:
         env = "development"
-        
+
     return {
         "status": status,
         "db": db_status,
@@ -129,3 +135,4 @@ async def health_check():
         "llm_answer": answer_status,
         "env": env
     }
+

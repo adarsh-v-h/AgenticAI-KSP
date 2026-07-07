@@ -1985,3 +1985,21 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
   3. `require_role()` correctly blocks investigator-role from supervisor-only endpoint (HTTP 403 with proper error message).
   4. `require_role()` allows supervisor-role to access `/api/audit-log` (HTTP 200 with entries array).
   5. `log_action()` writes audit log entries without raising exceptions (entry visible in subsequent query).
+
+---
+
+### 10.11 RAG Pipeline Optimization — Bypassing Zoho Catalyst 12-Doc Limit
+
+**Date:** July 7, 2026  
+**Issue:** The Zoho Catalyst QuickML Knowledge Base (in Early Access) has an undocumented soft limit of ~12 documents per KB. If you attempt to upload more individual files or query with more than 12 document IDs, the endpoint throws a `400 Bad Request` or upload error. Converting 220 MySQL cases to individual text files exceeded this limit, rendering the RAG pipeline non-functional for the full dataset.
+
+**Fix:**
+- **Consolidation (`backend/consolidate_cases.py`):** Added a script that parses the `SECTIONS` field from all 220+ case files and groups them by primary crime type (e.g., `Theft`, `Assault`, `Drug Offences`). These are merged into exactly **8 larger text files** inside `backend/rag_consolidated/` with clear section headers and case separators (`========================================`). This keeps the file count under the 12-doc limit while maintaining semantic coherence for RAG chunking.
+- **Integrated Export (`backend/export_cases_for_rag.py`):** Modified the case export script to automatically invoke the consolidation function. Running a single command exports cases from MySQL and regenerates the 8 consolidated category files.
+- **Dynamic ID Discovery (`backend/kb_sync.py`):** Created a script that calls the Catalyst QuickML RAG APIs to discover uploaded documents. It automatically extracts document IDs, refreshes the Zoho OAuth access token if expired, and updates `KB_DOCUMENT_IDS` in `.env` automatically.
+- **Dynamic Config Reload (`backend/pipeline/query_pipeline.py`):** Modified the query pipeline to dynamically reload `KB_DOCUMENT_IDS` from `.env` by checking the file's modification time. This allows the backend to pick up newly synced document IDs without needing a FastAPI server restart.
+
+**Tests:**
+- `backend/test_full_kb.py`, `backend/test_rag_session.py`, `backend/test_rag_scale.py` were run and verified as fully passing.
+- `backend/test_rag_client.py` was used to confirm that sending more than 12 document IDs throws an HTTP 400 Bad Request, verifying that consolidation is required for both uploading and querying.
+

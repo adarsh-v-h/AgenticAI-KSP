@@ -123,6 +123,7 @@ async def call_llm(
         raise LLMError(f"LLM response was not valid JSON: {e}") from e
 
     text = data.get("response")
+    print("DEBUG call_llm text:", repr(text))
     if not text or not isinstance(text, str) or not text.strip():
         raise LLMError(f"LLM returned empty or missing 'response' field: {data}")
 
