@@ -8,7 +8,9 @@ OUTPUT_DIR = "rag_export"
 async def main():
     await create_pool()
     try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_path = os.path.join(script_dir, OUTPUT_DIR)
+        os.makedirs(output_path, exist_ok=True)
 
         cases = await execute_query("""
             SELECT
@@ -36,7 +38,7 @@ async def main():
 
         for case in cases:
             filename = f"case_{case['CrimeNo'].replace('/', '_')}.txt"
-            filepath = os.path.join(OUTPUT_DIR, filename)
+            filepath = os.path.join(output_path, filename)
 
             content = f"""CASE REPORT
 Station: {case['StationName'] or 'Unknown'}
