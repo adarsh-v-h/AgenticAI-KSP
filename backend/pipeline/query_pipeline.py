@@ -204,6 +204,7 @@ async def run_pipeline(
         _log("SQL chain returned CANNOT_ANSWER -- trying RAG before DIRECT fallback")
         try:
             rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+            rag_result = await rag_session.ask(question)
         except Exception as e:
             _log(f"RAG fallback attempt failed: {e}")
             rag_result = {"grounded": False}
@@ -233,6 +234,7 @@ async def run_pipeline(
         _log(f"sql generation LLM error: {e} -- trying RAG before hard failure")
         try:
             rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+            rag_result = await rag_session.ask(question)
         except Exception as rag_e:
             _log(f"RAG fallback attempt failed: {rag_e}")
             rag_result = {"grounded": False}
