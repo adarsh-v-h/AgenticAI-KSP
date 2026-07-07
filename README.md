@@ -74,6 +74,8 @@ The app is designed to work with **Zoho Catalyst services** for LLM and NoSQL, w
 │   │   ├── sql_validator.py     # SQL safety validation
 │   │   ├── media_resolver.py    # Evidence media lookup
 │   │   └── schema_linker.py     # Keyword-based table selector
+│   │   └── risk_scoring.py     # Offender risk scoring (explainable, rule-based)
+│   │   └── risk_scoring.py     # Offender risk scoring (explainable, rule-based)
 │   ├── auth/
 │   │   └── simple_auth.py       # JWT auth for local dev
 │   ├── conversation/
@@ -84,6 +86,7 @@ The app is designed to work with **Zoho Catalyst services** for LLM and NoSQL, w
 │       ├── auth.py              # Login/logout endpoints
 │       ├── export.py            # Session export routes
 │       └── voice.py             # Voice-related routes
+│       └── profiling.py           # /api/profiling/* - offender risk score endpoints
 │
 └── frontend/
     ├── package.json
@@ -364,6 +367,9 @@ The system uses a **two-LLM pipeline**:
 | `GET` | `/api/chat/sessions` | Yes | List the officer's chat sessions (newest first) |
 | `POST` | `/api/chat/sessions` | Yes | Create a new chat session |
 | `GET` | `/api/chat/sessions/{id}/messages` | Yes | Paginated message history for a session |
+| `GET` | `/api/profiling/risk/{accused_id}` | Yes | Cached or freshly-computed risk score with factor breakdown |
+| `GET` | `/api/profiling/top-risk` | Yes | Ranked list of highest-risk distinct offenders |
+| `POST` | `/api/profiling/recompute-all` | Yes | Recompute risk scores for all accused persons |
 | `GET` | `/health` | No | Service health check |
 
 > See [Support Documents/Docs.md §3.18](Support%20Documents/Docs.md#318-backendrouterschatpy) and [Support Documents/Docs.md §3.19](Support%20Documents/Docs.md#319-backendroutersauthpy) for request/response details.
@@ -403,6 +409,7 @@ The seeder creates these officers (password is always `<KGID>123`):
 | `ActSectionAssociation` | Links cases to acts and sections charged |
 | `ArrestSurrender` | Arrest or surrender details of accused |
 | `evidence_media` | Media files attached to cases |
+| `offender_risk_scores` | Explainable risk scores for accused persons (risk_score, risk_tier, contributing_factors) |
 | `chat_sessions` | One row per conversation |
 | `chat_messages` | One row per turn — user OR assistant |
 | `State` / `District` / `Unit` / `UnitType` | Organizational hierarchy lookups |

@@ -123,7 +123,7 @@ async def get_history(session_id: str) -> list[dict]:
         return []
 
     try:
-        doc = await get_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT)
+        doc = await get_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT, key_name="session_id")
         if doc is not None:
             raw = doc.get("history")
             if raw is None:
@@ -275,11 +275,11 @@ async def save_turn(
 
     try:
         try:
-            await update_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT)
+            await update_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
         except NoSQLError as ne:
             # If document doesn't exist, we get a 404 error
             if "404" in str(ne):
-                await insert_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT)
+                await insert_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
             else:
                 raise
     except Exception as e:
@@ -292,7 +292,7 @@ async def clear_history(session_id: str) -> None:
         return
     await _local_clear(session_id)
     try:
-        await delete_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT)
+        await delete_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT, key_name="session_id")
     except Exception as e:
         _log(f"ERROR: history DELETE failed for {session_id}: {e}")
 
@@ -306,6 +306,6 @@ async def init_nosql_table() -> None:
     try:
         # A probe — fetching a non-existent doc is enough to confirm auth + path work.
         # 404 is handled inside get_document and returns None safely.
-        await get_document("conversation_history", "__probe__", timeout=_NOSQL_TIMEOUT)
+        await get_document("conversation_history", "__probe__", timeout=_NOSQL_TIMEOUT, key_name="session_id")
     except Exception as e:
         _log(f"ERROR: NoSQL probe failed: {e}; history will use in-memory store.")

@@ -185,6 +185,7 @@ def test_chat_allows_owner(monkeypatch):
             sql_generated = "SELECT 1"
             graph_available = False
             error = None
+            suggested_follow_ups = []
 
         async def fake_execute(sql, params=()):
             return _rows_for(OWNER_ID)
