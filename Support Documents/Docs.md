@@ -748,6 +748,41 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 
 ---
 
+### 3.22 `backend/llm/rag_client.py`
+
+**Purpose:** Connects the application to Zoho Catalyst's `/quickml/v1/project/{PROJECT_ID}/rag/answer` endpoint for document-grounded question answering. Implements phrase-based verification to reduce false-positive source attributions.
+
+**Key Helpers:**
+- `_significant_phrases(text)`: Extracts multi-word capitalized phrases (names, locations) and long numbers (crime registration numbers) to serve as a high-fidelity fingerprint of the text.
+- `_node_supports_response(node_content, response_phrases)`: Grounding Rule 2. Checks if a retrieved document chunk shares at least one significant phrase or case number with the LLM's generated response. If it does not, it is filtered out as a false positive.
+- `_is_negative_claim(response_text)`: Grounding Rule 3. Identifies negative/absence statements (e.g. "no record found", "none listed").
+- `normalize_query(query)`: Cleans up conversational filler (e.g. "could you please tell me", "just wondering") to produce a denser search query.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `query_rag(query, document_ids)` | Submits a query along with document IDs to the Catalyst RAG API. Returns a `RagResult` containing the natural language response, the verified source document list, and a grounding flag. Retries once with filler words stripped if the first attempt returns ungrounded. |
+
+---
+
+### 3.23 `backend/llm/rag_session.py`
+
+**Purpose:** Wraps stateless RAG queries in a stateful conversational session. Translates pronoun references (e.g. "him", "the accused", "that suspect") using the last mentioned entity and handles follow-up query suggestion generation.
+
+**Key Helpers:**
+- `_resolve_references(query)`: Substitutes general pronoun references in follow-up queries with the primary entity (e.g., suspect name) from the previous turn.
+- `_build_contextual_query(resolved_query)`: Appends the last 2 turns of conversation history to the RAG query to provide connection context.
+- `_generate_follow_ups(case_context)`: **Generates suggested follow-ups.** Automatically reads the **last 5 turns of conversation history** (`self.history[-5:]`) and the current case context, prompting `MODEL_ANSWER` to generate 3 relevant follow-up questions that guide the investigator's next steps.
+
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `ask(query)` | Entry point for a conversational turn. Resolves pronouns, embeds history context, queries the RAG client, updates history, and returns the response alongside 3 relevant follow-ups. |
+
+---
+
 ## 4. End-to-End Feature Flows
 
 ### 4.1 User Login
