@@ -496,3 +496,39 @@ This project is licensed under the **GNU Affero General Public License v3.0** �
 ### For Karnataka State Police:
 
 This license ensures the software remains open and transparent for law enforcement use, while preventing any party from making it proprietary. If the KSP incorporates this into production, all future modifications must remain open source under the same license.
+
+### 8b. Refreshing the RAG Knowledge Base After New Case Data
+
+Whenever new cases are added to MySQL, the Knowledge Base does not update automatically — run this sequence to regenerate and re-sync it:
+
+```bash
+# 1. Export all cases with narrative text from MySQL into individual .txt files,
+#    then automatically consolidate them into 8 category files
+#    (backend/rag_export/ -> backend/rag_consolidated/)
+python backend/export_cases_for_rag.py
+
+# 2. Upload the 8 consolidated files (NOT the individual per-case files) to
+#    Zoho Catalyst QuickML -> Knowledge Base. Delete any old/stale documents
+#    first so the total stays under Catalyst's 12-document limit.
+
+# 3. Sync the newly uploaded document IDs into .env automatically
+python backend/kb_sync.py --refresh-token
+```
+
+**Note:** A case only gets correctly categorized (e.g. into `Theft.txt`) if it has a
+linked row in `actsectionassociation` referencing an IPC/Act section (e.g. `379/IPC`
+for Theft). Cases with `BriefFacts` but no linked section fall into `Uncategorised.txt`
+regardless of what the narrative text describes — categorization is driven by legal
+section codes, not free-text keyword matching.
+
+**Known limitation (fixed 2026-07-07):** The query pipeline previously only
+fell back to RAG when SQL generation itself failed (`CannotAnswerError`/`LLMError`).
+Since the SQL generator can almost always produce *some* valid query, narrative/
+summarization questions (e.g. "What do the case reports say about how thefts
+typically occur?") were incorrectly answered via SQL, often returning empty
+results instead of using the Knowledge Base. Two fixes were added to
+`backend/pipeline/query_pipeline.py`:
+- A narrative-keyword pre-router that sends summarization-style questions to RAG
+  before SQL is attempted.
+- An empty-results fallback that retries via RAG whenever SQL executes
+  successfully but returns 0 rows.

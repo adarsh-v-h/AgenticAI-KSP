@@ -161,6 +161,30 @@ async def run_pipeline(
     start = time.monotonic()
     response = PipelineResponse()
 
+    # --- FIX 1: narrative-intent keyword pre-router ---
+    # SQL generation can almost always produce SOME valid query, so
+    # CannotAnswerError rarely fires for narrative/summarization questions.
+    # Catch these by keyword before SQL is even attempted.
+    NARRATIVE_KEYWORDS = (
+        "summarize", "summarise", "narrative", "describe how",
+        "what do the case reports say", "typically occur",
+        "in their own words",
+    )
+    if any(kw in question.lower() for kw in NARRATIVE_KEYWORDS):
+        _log("Narrative keyword detected -- routing directly to RAG")
+        try:
+            rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+            rag_result = await rag_session.ask(question)
+        except Exception as e:
+            _log(f"Narrative-keyword RAG attempt failed: {e}")
+            rag_result = {"grounded": False}
+        if rag_result.get("grounded"):
+            response.answer_text = rag_result["response"]
+            response.suggested_follow_ups = rag_result.get("suggested_follow_ups", [])
+            return response
+        _log("Narrative-keyword RAG ungrounded -- continuing to normal SQL flow")
+    # --- END FIX 1 ---
+
     # 0. Intent routing — decide whether this turn needs a NEW SQL query or can
     #    be answered directly from conversation + the most recent result set.
     #    Optimization: only route when there IS prior context to refer back to.
@@ -314,6 +338,29 @@ async def run_pipeline(
             return response
 
     response.table_data = results
+
+    # --- FIX 2: empty-results RAG fallback ---
+    # SQL can execute successfully but return 0 rows for a question that
+    # DOES have an answer in the narrative case reports (e.g. "stolen
+    # vehicles" -- no such column, so SQL returns nothing even though the
+    # RAG knowledge base has matching narratives). Try RAG before accepting
+    # an empty result as final.
+    if not results:
+        _log("SQL returned 0 rows -- trying RAG before accepting empty result")
+        try:
+            rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+            rag_result = await rag_session.ask(question)
+        except Exception as e:
+            import traceback
+            _log(f"Empty-results RAG attempt failed: {type(e).__name__}: {e!r}")
+            _log(traceback.format_exc())
+            rag_result = {"grounded": False}
+        if rag_result.get("grounded"):
+            response.answer_text = rag_result["response"]
+            response.suggested_follow_ups = rag_result.get("suggested_follow_ups", [])
+            return response
+        _log("Empty-results RAG also ungrounded -- proceeding with empty SQL result")
+    # --- END FIX 2 ---
 
     # 4. Media resolver — only if results carry a CaseMasterID column
     media: list[dict] = []

@@ -2038,3 +2038,28 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 - `backend/test_full_kb.py`, `backend/test_rag_session.py`, `backend/test_rag_scale.py` were run and verified as fully passing.
 - `backend/test_rag_client.py` was used to confirm that sending more than 12 document IDs throws an HTTP 400 Bad Request, verifying that consolidation is required for both uploading and querying.
 
+
+## RAG Pipeline Routing Fix (2026-07-07)
+
+**Problem:** `run_pipeline()` in `backend/pipeline/query_pipeline.py` only invoked
+`RagSession` as a fallback inside the `CannotAnswerError` and `LLMError` exception
+handlers around `generate_sql()`. In practice the SQL generator almost never raises
+these — it produces a syntactically valid query even for questions that should be
+answered from free-text case narratives, so RAG was effectively unreachable for most
+narrative/analytical questions. Confirmed via reproduction: "List all cases involving
+stolen vehicles" and "What do the case reports say about how thefts typically occur?"
+both returned 0-row SQL results instead of being answered from the Knowledge Base.
+
+**Fix 1 (narrative-keyword pre-router):** Added a keyword check at the very start of
+`run_pipeline()`, before schema linking / SQL generation. Questions containing phrases
+like "summarize", "narrative", "typically occur", etc. are routed directly to
+`RagSession.ask()`. Falls through to normal SQL flow if RAG comes back ungrounded.
+
+**Fix 2 (empty-results RAG fallback):** After `execute_query(sql)` succeeds but
+`results` is empty, the pipeline now retries via `RagSession.ask()` before proceeding
+to `format_answer()`. This catches cases where SQL is syntactically valid but
+semantically wrong for the question (no matching column/value), while the answer
+genuinely exists in the RAG-indexed case narratives.
+
+Both fixes are additive and fail open — any exception inside the RAG attempt is
+caught and logged, and the pipeline falls back to its original behavior.
