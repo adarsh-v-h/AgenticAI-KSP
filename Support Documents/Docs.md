@@ -627,12 +627,12 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 
 | Function | Description |
 |----------|-------------|
-| `create_access_token(officer_id, badge_number) -> str` | Creates a JWT with `officer_id`, `badge_number`, and `exp` (24h from now). Signed with `APP_SECRET_KEY`. |
+| `create_access_token(officer_id, badge_number, role) -> str` | Creates a JWT with `officer_id` (EmployeeID), `badge_number` (KGID), `role`, and `exp` (24h from now). Signed with `APP_SECRET_KEY`. |
 | `_unauthorized(detail)` | Helper that returns an `HTTPException(401)` with the given detail message. |
 | `verify_token(token) -> dict` | Decodes and verifies JWT. Returns payload dict. Raises HTTP 401 on any failure (expired, invalid signature, missing). |
 | `get_current_officer(credentials) -> dict` | **FastAPI dependency for header-based auth.** Extracts Bearer token from `Authorization` header. Returns decoded payload. Raises 401 if missing. |
 | `get_current_officer_sse(request, credentials, token) -> dict` | **FastAPI dependency for SSE auth.** Accepts token from: (1) `Authorization: Bearer` header, OR (2) `?token=` query parameter. Needed because browser `EventSource` can't set custom headers. |
-| `login(badge_number, password) -> dict` | Queries `officers` table by `badge_number`. Validates password = `badge_number + "123"`. Returns `{access_token, officer: {officer_id, badge_number, full_name, rank}}`. Raises HTTP 401 on failure. |
+| `login(badge_number, password) -> dict` | Queries `Employee` table by `KGID` (badge number), joining `Rank` for the rank name. Validates password = `KGID + "123"`. Returns `{access_token, officer: {officer_id, badge_number, full_name, rank}}`. The `role` field is embedded in the JWT payload (used by `role_guard.py`). Raises HTTP 401 on failure. |
 
 ---
 
@@ -827,7 +827,7 @@ Frontend ChatWindow.jsx: handleSend()
           Step 1: Schema Linker
             → pipeline/schema_linker.py: select_relevant_tables(question)
               → SCHEMA_CATALOG keyword matching
-              → returns ["fir_master", "cases_theft", ...]
+              → returns ["CaseMaster", "Accused", ...]
           
           Step 2: SQL Generation
             → llm/sql_generator.py: generate_sql(question, tables, history)
@@ -1605,7 +1605,7 @@ Body:
   }
 Response:
   {
-    "response": "SELECT COUNT(*) AS open_cases FROM fir_master WHERE status = 'open'"
+    "response": "SELECT COUNT(*) AS open_cases FROM CaseMaster cm JOIN CaseStatusMaster cs ON cm.CaseStatusID = cs.CaseStatusID WHERE cs.CaseStatusName = 'Open'"
   }
 ```
 

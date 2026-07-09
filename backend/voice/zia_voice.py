@@ -198,7 +198,7 @@ def _normalize_for_speech(text: str) -> str:
     r'\bECE\b': 'Electronic City',
     r'\bHEB\b': 'Hebbal',
     r'\bSHI\b': 'Shivajinagar',
-}
+}   
     import re
     for pattern, replacement in replacements.items():
         text = re.sub(pattern, replacement, text)
