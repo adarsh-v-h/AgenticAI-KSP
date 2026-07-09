@@ -50,8 +50,10 @@ async def lifespan(app: FastAPI):
         await init_nosql_table()
     except Exception as e:
         print(f"WARNING: NoSQL init failed (history will use in-memory store): {e}", file=sys.stderr)
-
+    # This is the dividing line between startup and shutdown.
+    # Everything before yield runs when the app starts.
     yield
+    # Everything after yield runs when the app stops.
 
     # â”€â”€ SHUTDOWN â”€â”€
     await close_pool()
