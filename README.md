@@ -503,7 +503,7 @@ Update `ALLOWED_ORIGINS` in your production `.env` to your Catalyst Slate URL in
 
 ## Troubleshooting
 
-> **Note:** For a log of recently fixed bugs (schema drift, token refresh, payload limits, session metadata), see `Support Documents/Docs.md` §10.12.
+> **Note:** For a log of recently fixed bugs (schema drift, token refresh, payload limits, NoSQL session sync, session ID column width), see `Support Documents/Docs.md` §10.12 and §10.13.
 
 **Server crashes on startup with missing env vars:**
 - Check your `.env` file has all the REQUIRED variables (see `.env.example` — variables marked OPTIONAL won't block startup)
