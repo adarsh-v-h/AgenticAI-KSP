@@ -272,7 +272,7 @@ CREATE TABLE evidence_media (
 );
 
 CREATE TABLE chat_sessions (
-    session_id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(50) PRIMARY KEY,
     officer_id INT NOT NULL,
     title VARCHAR(200) NOT NULL DEFAULT 'Untitled Chat',
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
@@ -285,7 +285,7 @@ CREATE TABLE chat_sessions (
 
 CREATE TABLE chat_messages (
     message_id INT AUTO_INCREMENT PRIMARY KEY,
-    session_id VARCHAR(36) NOT NULL,
+    session_id VARCHAR(50) NOT NULL,
     role ENUM('user', 'assistant') NOT NULL,
     content TEXT NOT NULL,
     sql_generated TEXT,

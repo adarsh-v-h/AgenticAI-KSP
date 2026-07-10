@@ -1,11 +1,12 @@
 """
 Persistent chat storage.
-Sessions and message metadata ? Catalyst Data Store (MySQL).
-Rich message data (table_data) ? MySQL table_data_json column.
+Sessions and message metadata -> Catalyst Data Store (MySQL).
+Rich message data (table_data) -> MySQL table_data_json column.
 """
 import json
 import sys
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from db.connection import execute_query, execute_write
 
@@ -23,6 +24,8 @@ def _serialize(obj):
         h, rem = divmod(total, 3600)
         m, s = divmod(rem, 60)
         return f"{h:02}:{m:02}:{s:02}"
+    if isinstance(obj, Decimal):
+        return float(obj)
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
