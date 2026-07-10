@@ -2084,6 +2084,27 @@ Four issues found and fixed in one debugging session, all confirmed via direct f
 `### 8b. Refreshing the RAG Knowledge Base After New Case Data` was misplaced after `## License` (effectively at the end of the file) instead of between `8a` and `9. Start the backend`. Moved to the correct position; no content changes.
 
 
+## 10.13 NoSQL Root Cause Fix + Session ID Column Width -- 2026-07-10 (continued)
+
+Following up on 10.12, deeper investigation found the actual root cause of `session_metadata PUT skipped` -- the earlier NoSQL key-name theory (`session_id` vs `id` across Catalyst projects) was a real but separate issue; this was the primary bug affecting all projects.
+
+**1. `nosql_client.py` `get_document()` was structurally broken**
+Two compounding bugs meant `get_document()` returned `None` for every existing document, regardless of key correctness:
+- The fetch payload sent `"required_attributes": []`. Per Catalyst's Custom JSON API, `required_attributes` is a filter list used to narrow the response to specific attributes -- an empty list was being interpreted as "return no attributes," not "return everything." Confirmed directly: a raw fetch against a known-good document (`size: 64`, proving the record existed) returned `"item": {}` -- empty despite the record being present.
+- The response-shape parsing only checked for `data` as a list of items or a dict with a direct `"item"` key. The real Catalyst response shape is `{"data": {"size": N, "get": [{"item": {...}}]}}` -- never matched by the existing code.
+Fixed: removed `required_attributes` from the payload entirely, and added parsing for the correct `data["get"][0]["item"]` shape. Verified via direct API calls: insert then read of a test document round-tripped correctly after the fix, confirmed independently in the Catalyst console.
+
+Practical effect: `update_session()` calls `get_session()` -> `get_document()` first to check if a session exists before updating it. Because this always returned `None`, every session update after creation was silently treated as "session not found" and skipped -- logged as `session_metadata PUT skipped`. This affected every session, every time, on every project, independent of the key-name question.
+
+**2. `chat_sessions.session_id` / `chat_messages.session_id` too narrow for real session IDs**
+Both columns were `VARCHAR(36)` -- sized for a bare UUID. The actual session ID generator in `routers/chat.py` builds IDs as `f"sess-{uuid4()}"`, which is 41 characters, overflowing the column. This caused `(1406, "Data too long for column session_id")` and silently failed to save the message pair for every session created through the real `/api/chat/sessions` endpoint. Fixed: widened both columns to `VARCHAR(50)`.
+
+**3. `migrate.py`'s `information_schema.COLUMNS` queries were unscoped to the current database**
+None of the guarded-migration checks included a `TABLE_SCHEMA` filter, so on a machine with multiple similarly-named databases, `fetchone()` could return a row from the wrong database. Confirmed: an unscoped query for `session_id` returned 8 rows across multiple databases before the fix. Fixed: every query now includes `AND TABLE_SCHEMA = DATABASE()`.
+
+All three fixes verified end-to-end via the real `/api/chat/sessions` + `/api/chat/stream` flow.
+
+
 ### 3.X backend/pipeline/risk_scoring.py + backend/routers/profiling.py
 
 **Purpose:** Rule-based, explainable offender risk scoring. Computes a 0-100
