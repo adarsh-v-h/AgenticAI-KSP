@@ -294,6 +294,7 @@ CREATE TABLE chat_messages (
     graph_available TINYINT(1) DEFAULT 0,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     table_data_json MEDIUMTEXT,
+    follow_ups_json TEXT,
     KEY idx_messages_session (session_id, created_at),
     FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
 );

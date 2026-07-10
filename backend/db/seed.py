@@ -13,12 +13,7 @@ backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_path not in sys.path:
     sys.path.append(backend_path)
 
-# Set DB_NAME to DB_NAME_v2 dynamically at runtime
 load_dotenv()
-db_name = os.getenv("DB_NAME", "ksp_crime_db")
-if not db_name.endswith("_v2"):
-    db_name = f"{db_name}_v2"
-os.environ["DB_NAME"] = db_name
 
 from db.connection import create_pool, close_pool
 

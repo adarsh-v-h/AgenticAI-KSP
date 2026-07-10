@@ -233,11 +233,13 @@ def build_answer_prompt(
     results: list[dict],
     media_refs: list[dict],
     history: list[dict] | None,
+    max_rows: int = 50,
+    max_field_chars: int = 200,
 ) -> tuple[str, str]:
     """
     Build (system_prompt, prompt) for the answer-formatting LLM call.
     """
-    truncated = _truncate_for_answer(results)
+    truncated = _truncate_for_answer(results, max_rows=max_rows, max_field_chars=max_field_chars)
     n_total = len(results)
 
     # Use default=str so dates/decimals serialize cleanly.

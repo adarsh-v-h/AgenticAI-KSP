@@ -12,6 +12,9 @@ from llm.prompts import (
     build_direct_answer_prompt,
 )
 
+_RETRY_ROWS = 15
+_RETRY_FIELD_CHARS = 80
+
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
@@ -39,7 +42,8 @@ async def format_answer(
         history=history,
     )
 
-    return await call_llm(
+    try:
+        return await call_llm(
         model_key="MODEL_ANSWER",
         prompt=user_prompt,
         system_prompt=system_prompt,
@@ -49,6 +53,24 @@ async def format_answer(
         # prompt PLUS the generated summary. 8000 comfortably covers both.
         max_tokens=8000,
     )
+    except Exception as e:
+        if "MORE_THAN_MAX_LENGTH" not in str(e):
+            raise
+        _log(f"answer formatter payload too large, retrying with smaller truncation: {e}")
+        system_prompt, user_prompt = build_answer_prompt(
+            question=question,
+            results=results,
+            media_refs=media_attachments,
+            history=history,
+            max_rows=_RETRY_ROWS,
+            max_field_chars=_RETRY_FIELD_CHARS,
+        )
+        return await call_llm(
+            model_key="MODEL_ANSWER",
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_tokens=8000,
+        )
 
 
 async def route_intent(

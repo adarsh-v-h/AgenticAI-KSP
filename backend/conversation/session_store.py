@@ -85,10 +85,16 @@ async def create_session(document: dict) -> dict:
     # In-memory fallback is the source of truth when NoSQL is misbehaving.
     await _local_set(session_id, document)
 
-    try:
-        await insert_document("session_metadata", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
-    except Exception as e:
-        _log(f"ERROR: session_metadata POST failed for {session_id}: {e}")
+    for attempt in range(2):
+        try:
+            await insert_document("session_metadata", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
+            break
+        except Exception as e:
+            if attempt == 0:
+                _log(f"WARNING: session_metadata POST attempt 1 failed for {session_id}, retrying: {e}")
+                await asyncio.sleep(0.5)
+            else:
+                _log(f"ERROR: session_metadata POST failed after retry for {session_id} - session will remain in-memory-only until next successful sync: {e}")
 
     return document
 
