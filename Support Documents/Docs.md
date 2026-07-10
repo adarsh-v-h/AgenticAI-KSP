@@ -140,7 +140,7 @@ backend/
 
 **Error response:** Always return **404** (not 403) when a session exists but belongs to another officer, so we never reveal that the foreign session exists. This is the industry-standard pattern for BOLA/IDOR mitigation.
 
-**Tests:** `backend/tests/test_session_authz.py` covers all three write endpoints: intruder rejection (404, asserting the pipeline/LLM never runs), owner acceptance, and brand-new-session acceptance.
+**Tests:** `backend/tests/test_pipeline_and_sessions.py` (TestSessionAuthz) covers all three write endpoints: intruder rejection (404, asserting the pipeline/LLM never runs), owner acceptance, and brand-new-session acceptance.
 
 ---
 
@@ -1830,7 +1830,7 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Performance:** Single indexed PK lookup (session_id is the PK) — effectively free. Zero added round-trips.
 
-**Tests:** `backend/tests/test_session_authz.py` (6 tests) covers intruder rejection (404, asserting pipeline/LLM/decode never runs), owner acceptance, and brand-new-session acceptance across all three write endpoints.
+**Tests:** `backend/tests/test_pipeline_and_sessions.py` (TestSessionAuthz, 4 tests) covers intruder rejection (404, asserting pipeline/LLM/decode never runs), owner acceptance, and brand-new-session acceptance across all three write endpoints.
 
 **Documentation:** Added [§3.1a Security — Authorization & BOLA/IDOR Mitigation](#31a-security--authorization--bolaidor-mitigation) section explaining the two patterns and why we return 404 instead of 403.
 
@@ -1849,7 +1849,7 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Rationale:** Aligns with the "least compute, enough results" principle. DOCX extraction is a trivial unzip + XML read, and text/markdown/HTML are just decode + optional tag-strip. The PDF brute-forcer was the only compute-heavy, fragile part.
 
-**Tests:** `backend/tests/test_report_extraction.py` (7 tests) covers DOCX by extension + by MIME, plain text, Markdown, HTML tag-stripping + entity unescaping, PDF rejection with helpful message, and unknown-binary rejection.
+**Tests:** `backend/tests/test_unit.py` (TestReportExtraction) covers DOCX, plain text, HTML tag-stripping, and PDF rejection.
 
 **Documentation:** Updated [§3.21 `backend/routers/reports.py`](#321-backendreporterspy) key helpers list and function table to reflect the new extraction behavior and the `UnsupportedReportFormat` exception.
 
@@ -1940,7 +1940,7 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Dependency:** `vis-network` + `vis-data` (MIT, actively maintained). `npm audit` confirmed zero vulnerabilities in these packages (pre-existing dev-only esbuild/vite advisories are unrelated).
 
-**Tests:** `backend/tests/test_network_graph.py` — basic async tests verification for CaseMaster and Accused graph builders.
+**Tests:** `backend/tests/test_unit.py` (TestNetworkGraph) — basic async tests for CaseMaster and Accused graph builders.
 
 ---
 
@@ -1964,9 +1964,9 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 **Contract caveat:** The exact Zia REST request/response field names are not in the publicly fetchable docs (behind the console), so request bodies and response extraction are best-guesses based on Catalyst conventions. `_extract_transcript` / `_extract_translation` try several likely field names and log the raw response shape on a miss. When tested against live Catalyst, only those field mappings may need adjustment — not the routes or frontend.
 
-**Tests:** `backend/tests/test_voice.py` (19 tests) — envelope/extraction helpers, the three network functions with a fake httpx client, and both routes with `zia_voice` monkeypatched (Kannada translation path, English no-translation path, 502 on failure, empty-audio 400, audio streaming).
+**Tests:** `backend/tests/test_unit.py` (TestVoiceHelpers, TestVoiceTranscribe) — envelope/extraction helpers and transcribe/translate functions with fake httpx client.
 
-**Tests:** `backend/tests/test_media_resolver.py` — `collect_case_master_ids()` extraction and `resolve_media()` behavior for empty results, no CaseMaster IDs, unavailable preview URL generation, and multiple media files across cases.
+**Tests:** `backend/tests/test_unit.py` (TestMediaResolver) — `collect_case_master_ids()` extraction and `resolve_media()` behavior for empty results, no CaseMaster IDs, unavailable preview URL generation, and document fallback.
 
 ---
 
