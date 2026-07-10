@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 
 env = {}
 with open('.env') as f:
@@ -20,9 +20,18 @@ async def run():
         if row[0] == 0:
             await cur.execute('ALTER TABLE chat_messages ADD COLUMN table_data_json MEDIUMTEXT DEFAULT NULL')
             await conn.commit()
-            print('Done - column added')
+            print('Done - table_data_json column added')
         else:
-            print('Column already exists - skipping')
+            print('table_data_json already exists - skipping')
+
+        await cur.execute("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME='chat_messages' AND COLUMN_NAME='follow_ups_json'")
+        row = await cur.fetchone()
+        if row[0] == 0:
+            await cur.execute('ALTER TABLE chat_messages ADD COLUMN follow_ups_json TEXT DEFAULT NULL')
+            await conn.commit()
+            print('Done - follow_ups_json column added')
+        else:
+            print('follow_ups_json already exists - skipping')
     conn.close()
 
 asyncio.run(run())

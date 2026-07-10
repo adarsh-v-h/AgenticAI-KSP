@@ -2064,6 +2064,26 @@ genuinely exists in the RAG-indexed case narratives.
 Both fixes are additive and fail open — any exception inside the RAG attempt is
 caught and logged, and the pipeline falls back to its original behavior.
 
+## 10.12 Session Fixes — 2026-07-10
+
+Four issues found and fixed in one debugging session, all confirmed via direct file/DB checks rather than assumed from memory.
+
+**1. Missing `follow_ups_json` column (schema drift)**
+`backend/db/chat_store.py` read/wrote a `follow_ups_json` column on `chat_messages` that was never added to `backend/db/schema.sql`, and `migrate.py` had no guarded step for it (only `table_data_json` was guarded). The live `ksp_crime_db_v2` DB already had the column from a prior manual `ALTER TABLE`, masking the gap locally. Fresh clones would hit `(1054, "Unknown column 'follow_ups_json'")` on every session reload. Fixed: added `follow_ups_json TEXT` to `schema.sql` (matching the live DB's type) and added a second guarded `information_schema.COLUMNS` check + `ALTER TABLE` step to `migrate.py`, mirroring the existing `table_data_json` pattern.
+
+**2. `kb_sync.py` --refresh-token broken for all standard `.env` setups**
+`backend/kb_sync.py`'s token-refresh function read `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN`, while every other function in the same file (and every `.env`/`.env.example` in the repo) uses `CATALYST_CLIENT_ID` / `CATALYST_CLIENT_SECRET` / `CATALYST_REFRESH_TOKEN`. This made `python backend/kb_sync.py --refresh-token` fail with `ZOHO_CLIENT_ID not set in .env` for anyone following the documented setup. Fixed by renaming the three `_get_env()` calls to the `CATALYST_*` names, matching the rest of the file. Verified: token refresh + KB document discovery (9 documents) succeeded after the fix.
+
+**3. Answer formatter payload overflow on large result sets**
+`backend/llm/answer_formatter.py`'s `format_answer()` could hit Zoho QuickML's `MORE_THAN_MAX_LENGTH` error (`Error in processing zoho-inputstream parameter`) even within the existing 50-row / 200-char-per-field cap in `_truncate_for_answer()`, because that cap alone wasn't small enough for some wide result sets. Previously this silently fell back to a fixed generic response. Fixed: `build_answer_prompt()` (in `prompts.py`) now accepts `max_rows`/`max_field_chars` overrides. `format_answer()` wraps its `call_llm` in a try/except; on `MORE_THAN_MAX_LENGTH` specifically, it retries once with a much smaller payload (`max_rows=15`, `max_field_chars=80`) before giving up. Other exceptions are re-raised unchanged.
+
+**4. `session_metadata` silently and permanently lost on transient NoSQL failure**
+`session_store.py`'s `create_session()` attempted a single `insert_document()` call; any failure (timeout, transient NoSQL error) was logged and swallowed, leaving that session's metadata doc permanently missing. Every later `update_session()` call for that session would then log `session_metadata PUT skipped — <id> not found` and silently no-op for the rest of the session's lifetime (title never generated, message_count never synced to NoSQL — the MySQL-backed message history itself is unaffected). Fixed: `create_session()` now retries the `insert_document()` call once after a 0.5s backoff before giving up, so a single transient NoSQL blip no longer strands a session permanently. Sessions created before this fix (e.g. NoSQL doc never written) remain unrecoverable without a separate backfill — this fix only prevents new occurrences.
+
+**5. README section ordering**
+`### 8b. Refreshing the RAG Knowledge Base After New Case Data` was misplaced after `## License` (effectively at the end of the file) instead of between `8a` and `9. Start the backend`. Moved to the correct position; no content changes.
+
+
 ### 3.X backend/pipeline/risk_scoring.py + backend/routers/profiling.py
 
 **Purpose:** Rule-based, explainable offender risk scoring. Computes a 0-100

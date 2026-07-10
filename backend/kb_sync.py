@@ -33,9 +33,9 @@ def refresh_token(env_path: Path) -> str:
     Refresh the Catalyst OAuth access token using the refresh token.
     Updates the .env file with the new token and returns it.
     """
-    client_id = _get_env("ZOHO_CLIENT_ID")
-    client_secret = _get_env("ZOHO_CLIENT_SECRET")
-    refresh_tok = _get_env("ZOHO_REFRESH_TOKEN")
+    client_id = _get_env("CATALYST_CLIENT_ID")
+    client_secret = _get_env("CATALYST_CLIENT_SECRET")
+    refresh_tok = _get_env("CATALYST_REFRESH_TOKEN")
 
     print("Refreshing OAuth token...")
     resp = httpx.post(
