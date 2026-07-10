@@ -70,8 +70,7 @@ async def get_document(table_name: str, document_id: str, timeout: float = 5.0, 
     """
     url = f"{_get_base_project_url()}/nosqltable/{table_name}/item/fetch"
     payload = {
-        "keys": [{key_name: {"S": document_id}}],
-        "required_attributes": []
+        "keys": [{key_name: {"S": document_id}}]
     }
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -83,11 +82,15 @@ async def get_document(table_name: str, document_id: str, timeout: float = 5.0, 
         if response.status_code == 200:
             res_json = response.json()
             data = res_json.get("data")
-            if isinstance(data, list) and len(data) > 0:
+            if isinstance(data, dict) and isinstance(data.get("get"), list) and len(data["get"]) > 0:
+                item_data = data["get"][0].get("item")
+                if item_data:
+                    return deserialize_item(item_data)
+            elif isinstance(data, list) and len(data) > 0:
                 item_data = data[0].get("item")
                 if item_data:
                     return deserialize_item(item_data)
-            elif isinstance(data, dict):
+            elif isinstance(data, dict) and "item" in data:
                 item_data = data.get("item")
                 if item_data:
                     return deserialize_item(item_data)
