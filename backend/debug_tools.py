@@ -9,6 +9,7 @@ Combines the functionality of the former standalone scripts:
 
 Usage:
   python debug_tools.py env          # Check .env loading and key vars
+  python debug_tools.py db           # Ping DB, measure latency
   python debug_tools.py schema       # Dump all DB columns with narrative flags
   python debug_tools.py tables       # Verify critical tables exist
   python debug_tools.py rag          # Fire a test RAG query and dump raw response
@@ -70,6 +71,66 @@ def check_env():
         print(f"\n  ⚠ {len(missing)} variable(s) missing — server will crash on startup.")
     else:
         print(f"\n  ✓ All {len(required)} required variables are set.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DB PING — verify DB connectivity and measure latency
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def check_db():
+    _sep("Database Connectivity Ping")
+    import time
+    from db.connection import create_pool, close_pool, execute_query
+
+    host = os.getenv("DB_HOST", "?")
+    port = os.getenv("DB_PORT", "?")
+    db = os.getenv("DB_NAME", "?")
+    print(f"  Target: {host}:{port}/{db}")
+
+    try:
+        t0 = time.perf_counter()
+        await create_pool()
+        pool_time = (time.perf_counter() - t0) * 1000
+
+        # Ping 1: simple SELECT 1
+        t1 = time.perf_counter()
+        await execute_query("SELECT 1")
+        ping1 = (time.perf_counter() - t1) * 1000
+
+        # Ping 2: count a table
+        t2 = time.perf_counter()
+        rows = await execute_query("SELECT COUNT(*) AS n FROM CaseMaster")
+        ping2 = (time.perf_counter() - t2) * 1000
+        count = rows[0]["n"] if rows else "?"
+
+        # Ping 3: a JOIN query (realistic workload)
+        t3 = time.perf_counter()
+        await execute_query("""
+            SELECT cm.CaseMasterID, a.AccusedName
+            FROM CaseMaster cm
+            JOIN Accused a ON a.CaseMasterID = cm.CaseMasterID
+            LIMIT 5
+        """)
+        ping3 = (time.perf_counter() - t3) * 1000
+
+        print(f"  Pool connect:   {pool_time:.0f}ms")
+        print(f"  SELECT 1:       {ping1:.0f}ms")
+        print(f"  COUNT(*):       {ping2:.0f}ms ({count} rows in CaseMaster)")
+        print(f"  JOIN query:     {ping3:.0f}ms")
+        avg = (ping1 + ping2 + ping3) / 3
+        print(f"  Avg latency:    {avg:.0f}ms")
+
+        if avg < 50:
+            print(f"\n  ✓ Excellent — DB is fast ({avg:.0f}ms avg)")
+        elif avg < 150:
+            print(f"\n  ✓ Good — acceptable latency ({avg:.0f}ms avg)")
+        else:
+            print(f"\n  ⚠ Slow — consider a closer region ({avg:.0f}ms avg)")
+
+        await close_pool()
+    except Exception as e:
+        print(f"  ✗ Connection failed: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -211,6 +272,7 @@ async def check_rag():
 
 async def run_all():
     check_env()
+    await check_db()
     await check_schema()
     await check_tables()
     await check_rag()
@@ -219,6 +281,7 @@ async def run_all():
 def main():
     commands = {
         "env": lambda: asyncio.run(asyncio.coroutine(lambda: check_env())()) if False else check_env(),
+        "db": lambda: asyncio.run(check_db()),
         "schema": lambda: asyncio.run(check_schema()),
         "tables": lambda: asyncio.run(check_tables()),
         "rag": lambda: asyncio.run(check_rag()),
@@ -237,6 +300,7 @@ def main():
     elif cmd == "all":
         # env is sync, rest are async
         check_env()
+        asyncio.run(check_db())
         asyncio.run(check_schema())
         asyncio.run(check_tables())
         asyncio.run(check_rag())

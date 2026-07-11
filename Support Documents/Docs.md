@@ -22,11 +22,12 @@
 
 The application is a **natural-language-to-SQL chatbot** for Karnataka State Police. An officer types a question in plain English; the system first **routes** the message — deciding whether it needs a fresh database query or can be answered directly from the recent conversation — then either converts it to a MySQL SELECT query via an LLM, executes it against a crime database, and formats the raw results into a human-readable answer via a second LLM, OR answers it directly from context. The response streams back token-by-token over SSE.
 
-**Two LLMs are used:**
-1. **Qwen 2.5-7B Coder** (`MODEL_SQL`) — generates SQL from natural language
-2. **Qwen 2.5-14B Instruct** (`MODEL_ANSWER`) — three jobs: (a) **intent routing** (SQL vs DIRECT), (b) formatting raw DB results into a natural-language answer, and (c) **direct conversational answers** for follow-ups/insights/general questions that need no SQL
+**Single LLM — GLM-4.7-Flash** (`crm-di-glm47b_30b_it`):  
+A 30B Mixture-of-Experts model (GLM-4.7 family) handling all three roles:
+1. `MODEL_SQL` — generates SQL from natural language
+2. `MODEL_ANSWER` — (a) **intent routing** (SQL vs DIRECT), (b) formatting raw DB results into a natural-language answer, (c) **direct conversational answers** for follow-ups/insights, and (d) **follow-up question suggestions**
 
-Both are called via the Catalyst QuickML HTTP API. No external LLM providers (OpenAI, Anthropic, etc.) are used.
+Called via the Catalyst QuickML GLM endpoint (`/quickml/v1/project/.../glm/chat`) using OpenAI-compatible `messages` format. No external LLM providers (OpenAI, Anthropic, etc.) are used.
 
 **Two answer paths (see [Section 4.6](#46-intent-routing--direct-answers)):**
 - **SQL path** — fresh data requests run the full NL→SQL→execute→format chain.
@@ -36,7 +37,7 @@ Both are called via the Catalyst QuickML HTTP API. No external LLM providers (Op
 - Every SQL query must be a SELECT — validated before execution
 - Maximum 2 SQL generation attempts (self-correction loop)
 - Conversation history limited to 10 turns per session
-- Sessions and messages are persisted to MySQL (Catalyst Data Store); rich result data goes to NoSQL — see [Section 4.7](#47-persistent-chat-storage)
+- Sessions and messages are persisted to MySQL (AWS RDS); conversation context for LLM goes to Catalyst NoSQL — see [Section 4.7](#47-persistent-chat-storage)
 - All secrets loaded from `.env`, never hardcoded
 
 ---
@@ -47,6 +48,8 @@ Both are called via the Catalyst QuickML HTTP API. No external LLM providers (Op
 backend/
 ├── main.py                    # FastAPI app, lifespan, CORS, health check
 ├── Dockerfile                 # Container for Catalyst AppSail
+├── debug_tools.py             # Unified CLI debug utility (env/db/schema/tables/rag)
+├── setup_db.py                # Create tables + seed from .env (any MySQL target)
 ├── config/
 │   └── settings.py            # Environment variable loading and validation
 ├── db/
@@ -57,7 +60,7 @@ backend/
 │   ├── nosql_client.py        # Centralized Catalyst NoSQL client wrapper
 │   └── schema_catalog.py      # Table metadata, schema builder, few-shot bank
 ├── llm/
-│   ├── client.py              # HTTP client for Catalyst QuickML
+│   ├── client.py              # HTTP client for Catalyst QuickML (GLM-4.7-Flash)
 │   ├── sql_generator.py       # SQL generation with retry loop
 │   ├── answer_formatter.py    # Result-to-text formatting + intent router + direct answers
 │   └── prompts.py             # All prompts and prompt builders
@@ -65,18 +68,35 @@ backend/
 │   ├── query_pipeline.py      # Main orchestrator (route → NL → SQL → answer, or DIRECT)
 │   ├── sql_validator.py       # SQL safety validation
 │   ├── media_resolver.py      # Evidence media lookup
-│   └── schema_linker.py       # Keyword-based table selector
+│   ├── schema_linker.py       # Keyword-based table selector
+│   ├── risk_scoring.py        # Offender risk scoring (rule-based, explainable)
+│   ├── trend_analytics.py     # Crime pattern analytics (pure SQL aggregation)
+│   └── similar_cases.py       # Similar case finder
 ├── conversation/
 │   ├── history.py             # Conversation history + recent-table snapshot (NoSQL + in-memory fallback)
 │   └── session_store.py       # Session metadata + title generation (NoSQL + fallback)
 ├── auth/
-│   └── simple_auth.py         # JWT auth (dev) with Catalyst Auth swap path
-└── routers/
-    ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
-    ├── export.py              # POST /api/chat/sessions/{id}/export (HTML conversation export)
-    ├── reports.py             # POST /api/reports/analyze (Report analysis & upload)
-    ├── voice.py               # POST /api/voice/transcribe, /api/voice/speak (Zia STT/TTS)
-    └── auth.py                # POST /api/auth/login + /api/auth/logout
+│   ├── simple_auth.py         # JWT auth (dev) with Catalyst Auth swap path
+│   └── role_guard.py          # RBAC + audit logging
+├── graph/
+│   └── network_builder.py     # Criminal network graph (vis.js format)
+├── voice/
+│   └── zia_voice.py           # Zia STT/TTS/translate wrapper
+├── routers/
+│   ├── chat.py                # /api/chat, /api/chat/stream (SSE), /api/chat/sessions*
+│   ├── export.py              # POST /api/chat/sessions/{id}/export (HTML conversation export)
+│   ├── reports.py             # POST /api/reports/analyze (Report analysis & upload)
+│   ├── voice.py               # POST /api/voice/transcribe, /api/voice/speak
+│   ├── governance.py          # GET /api/audit-log (supervisor-only)
+│   ├── analytics.py           # GET /api/analytics/* (trend/pattern endpoints)
+│   ├── decision_support.py    # Decision support endpoints
+│   ├── profiling.py           # GET /api/profiling/risk/* (offender risk scores)
+│   └── auth.py                # POST /api/auth/login + /api/auth/logout
+└── tests/
+    ├── conftest.py            # pytest config (sys.path setup)
+    ├── test_unit.py           # 57 pure unit tests
+    ├── test_pipeline_and_sessions.py  # 15 pipeline + session tests
+    └── test_integration.py    # Live integration tests (needs real tokens)
 ```
 
 ---
@@ -1906,19 +1926,12 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 ---
 
-### 10.7 Backfill Migration Script
+### 10.7 Backfill Migration Script (OBSOLETE — see §10.17)
 
 **Date:** June 20, 2026  
-**What changed:** Added `backfill.py` to populate the new `table_data_json` field for existing chat messages that were previously `has_table=1` but still had `table_data_json=NULL`.
+**Status:** Obsolete. File still exists at project root but serves no purpose on the fresh AWS RDS deployment. Safe to delete.
 
-**How it works:**
-- Reads `.env` for DB credentials
-- Queries `chat_messages` for rows with `has_table=1` and `table_data_json IS NULL`
-- Re-executes each row's original `sql_generated` query against the same database
-- Serializes results with `json.dumps(..., default=serialize)` where dates/datetimes use ISO format and timedeltas become `HH:MM:SS`
-- Updates `chat_messages.table_data_json` for each backfilled message
-
-**Usage note:** This is a migration helper only; it should be run after the new schema is deployed and only when existing data needs to be backfilled. See `README.md` for the install/setup note.
+**What it did:** Populated the `table_data_json` field for existing chat messages that had `has_table=1` but `table_data_json=NULL`, by re-executing each row's stored SQL query.
 
 
 ---
@@ -2146,3 +2159,97 @@ recorded inconsistently across cases. The same caveat applies to
 | `POST` | `/api/profiling/recompute-all` | Recomputes and saves scores for every accused person in the DB. Returns the count recomputed. No batching/pagination -- runs synchronously for all rows. |
 
 All three endpoints require officer authentication via `get_current_officer`.
+
+---
+
+## 10.14 LLM Migration — Qwen → GLM-4.7-Flash
+
+**Date:** July 11, 2026  
+**Issue:** The two Qwen models previously used (`crm-di-qwen_coder_7b-it` for SQL, `crm-di-qwen_text_14b-fp8-it` for answers) were deprecated by Zoho Catalyst. Replaced by a single GLM-4.7-Flash model (`crm-di-glm47b_30b_it`) — a Mixture-of-Experts 30B model optimized for coding, reasoning, and agent workflows.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `backend/llm/client.py` | Complete rewrite. Old format used flat `prompt`/`system_prompt` fields against `/quickml/v2/.../llm/chat`. New format uses OpenAI-style `messages` array against `/quickml/v1/.../glm/chat`. Response parsing handles both `{"response": "..."}` (observed in production) and `{"choices": [...]}` (per Zoho sample docs). Added `"chat_template_kwargs": {"enable_thinking": false}` to suppress chain-of-thought leaking into output. |
+| `.env` | `QUICKML_LLM_URL` changed from `.../v2/.../llm/chat` to `.../v1/.../glm/chat`. Both `MODEL_SQL` and `MODEL_ANSWER` set to `crm-di-glm47b_30b_it`. |
+| `.env.example` | Updated URL pattern and model names. |
+
+**What did NOT change:** `prompts.py`, `sql_generator.py`, `answer_formatter.py`, `query_pipeline.py`, all routers — the `call_llm(model_key, prompt, system_prompt, max_tokens)` interface is identical; only the internal HTTP payload shape and response extraction changed.
+
+**Performance note:** Both SQL generation and answer formatting now use the same model. The pipeline makes 3 LLM calls per query (SQL gen + answer format + follow-up suggestions). GLM-4.7-Flash responds in ~2-4s per call, giving ~10s total pipeline latency.
+
+---
+
+## 10.15 Database Migration — Local MySQL → AWS RDS (ap-south-1)
+
+**Date:** July 11, 2026  
+**Issue:** The codebase previously ran against a local MySQL instance (`localhost`). For the hackathon, the backend will deploy on Zoho Catalyst AppSail — which cannot host a MySQL server. Catalyst Data Store was evaluated but rejected: tables can only be created via the console UI (no DDL via code), ZCQL lacks subqueries, GROUP_CONCAT, and MySQL date functions, and the 5000-row/table dev limit is restrictive.
+
+**Solution:** AWS RDS MySQL 8.0 in `ap-south-1` (Mumbai) — same region as Zoho Catalyst India. The backend on AppSail connects to RDS over the public internet via standard `aiomysql`.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `.env` | `DB_HOST` → `ksp-crime-db-instance.cng002wykxbp.ap-south-1.rds.amazonaws.com`, `DB_NAME` → `ksp_crime_db` (removed `_v2` suffix), `DB_USER` → `admin` |
+| `.env.example` | Updated DB section header and placeholders to reflect AWS RDS |
+
+**No code changes.** `db/connection.py` reads credentials from `.env` — it doesn't care whether the host is localhost or a remote RDS endpoint.
+
+**Latency (measured):** 36ms average query latency from local dev to Mumbai RDS (includes internet hop). When running on Catalyst AppSail (also India), expected to drop to 5-15ms server-to-server.
+
+**Deployment architecture:**
+```
+Zoho Catalyst (India)          AWS (ap-south-1 Mumbai)
+├── AppSail (FastAPI)  ──TCP──→  RDS MySQL 8.0
+├── NoSQL (history)              (all 25+ tables, 220 cases)
+├── QuickML (GLM LLM)
+└── Web Client (React)
+```
+
+---
+
+## 10.16 Codebase Cleanup — Consolidated Debug Scripts & Tests
+
+**Date:** July 11, 2026  
+**What:** Removed redundant standalone scripts and merged scattered test files into a clean structure.
+
+**Deleted files (debug/utility):**
+- `backend/create_risk_table.py` — redundant, table already defined in `schema.sql`
+- `backend/check_table.py` — merged into `debug_tools.py`
+- `backend/debug_env.py` — merged; also had hardcoded Windows path that didn't work
+- `backend/dump_raw_response.py` — merged into `debug_tools.py`
+- `backend/inspect_schema.py` — merged into `debug_tools.py`
+
+**Deleted files (orphaned tests from root of backend/):**
+- `backend/test_direct_followup.py`, `test_e2e_rag_pipeline.py`, `test_empty_docs.py`, `test_full_kb.py`, `test_ping_sql.py`, `test_pipeline_rag.py`, `test_rag_client.py`, `test_rag_repeat.py`, `test_rag_scale.py`, `test_rag_session.py`, `test_sql_gen.py`
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `backend/debug_tools.py` | Unified CLI debug utility with subcommands: `env` (check .env vars), `db` (ping DB + measure latency), `schema` (dump all columns), `tables` (verify critical tables exist + row counts), `rag` (fire test RAG query). Usage: `python backend/debug_tools.py db` |
+| `backend/setup_db.py` | Creates all tables from `schema.sql` on whatever DB `.env` points to, optionally seeds data and runs migrations. Usage: `python backend/setup_db.py --seed` |
+
+**Test consolidation (11 files → 3):**
+
+| Old files | New file | Contents |
+|-----------|----------|----------|
+| `test_generate_title.py`, `test_backward_compat.py`, `test_nosql_client.py`, `test_media_resolver.py`, `test_network_graph.py`, `test_export.py`, `test_report_extraction.py`, `test_voice.py` | `backend/tests/test_unit.py` | 57 pure unit tests — title generation, history migration, NoSQL serialization, media resolver, network graph, export HTML, report extraction, voice helpers |
+| `test_intent_routing.py`, `test_session_authz.py`, `test_session_lifecycle.py` | `backend/tests/test_pipeline_and_sessions.py` | 15 tests — intent routing, BOLA/IDOR authorization, session lifecycle |
+| `backend/integration_tests.py` (moved) | `backend/tests/test_integration.py` | Live integration tests (LLM, RAG, pipeline, E2E) — require real tokens/DB |
+
+**Total:** 72 tests pass in ~5s. Test coverage unchanged.
+
+---
+
+## 10.17 Files Safe to Delete (Migration Artifacts)
+
+The following files at the project root are one-time local MySQL migration artifacts that serve no purpose going forward:
+
+| File | Was | Status |
+|------|-----|--------|
+| `migrate.py` | ALTER TABLE script to add `table_data_json`, `follow_ups_json` columns and widen `session_id` | Obsolete — `schema.sql` already has these; `setup_db.py` creates from scratch |
+| `backfill.py` | Re-ran old SQL queries to populate `table_data_json` for pre-migration messages | Obsolete — no legacy messages exist on the fresh RDS |
+| `backup_pre_migration_20260626.sql` | MySQL dump of the old local DB before schema v2 migration | Obsolete — local backup with no relevance to the AWS RDS deployment |

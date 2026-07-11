@@ -17,6 +17,28 @@ def _llm_headers() -> dict:
     }
 
 
+def _extract_response_text(data: dict) -> str:
+    """
+    Extract the assistant's text from a GLM chat completion response.
+
+    Handles two response shapes:
+    1. Direct format: {"response": "..."}
+    2. OpenAI-compatible format: {"choices": [{"message": {"content": "..."}}]}
+    """
+    # Shape 1: direct "response" field (observed in production)
+    if "response" in data and isinstance(data["response"], str):
+        return data["response"].strip()
+
+    # Shape 2: OpenAI choices format (per Zoho docs sample)
+    choices = data.get("choices")
+    if choices and isinstance(choices, list):
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        return content.strip() if content else ""
+
+    return ""
+
+
 async def ping_model(model_key: str) -> bool:
     """
     Send a minimal test message to the given model.
@@ -29,17 +51,14 @@ async def ping_model(model_key: str) -> bool:
 
         payload = {
             "model": model_name,
-            "prompt": "Say OK.",
-            "system_prompt": "You are a helpful assistant.",
-            # NOTE: QuickML treats max_tokens as the TOTAL context budget
-            # (input + output), and rejects the request if the input alone
-            # exceeds it. The fixed prompt overhead is ~200 tokens, so this
-            # must stay comfortably above that — a tiny value (e.g. 5) makes
-            # the ping always fail with "input exceeds max context length".
-            "max_tokens": 512,
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Say OK."},
+            ],
+            "max_tokens": 32,
             "temperature": 0,
-            "top_p": 0.95,
-            "top_k": 120,
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
 
         async with httpx.AsyncClient() as client:
@@ -47,7 +66,7 @@ async def ping_model(model_key: str) -> bool:
                 url, json=payload, headers=_llm_headers(), timeout=30.0
             )
             data = response.json()
-            if response.status_code == 200 and data.get("response"):
+            if response.status_code == 200 and _extract_response_text(data):
                 return True
             print(
                 f"WARNING: LLM ping got unexpected response: {data}",
@@ -66,16 +85,13 @@ async def call_llm(
     max_tokens: int = 4000,
 ) -> str:
     """
-    Call a Catalyst QuickML LLM model.
+    Call the GLM model via Catalyst QuickML.
 
     Args:
         model_key: env var name — "MODEL_SQL" or "MODEL_ANSWER"
         prompt: the user/task prompt
         system_prompt: the system instruction
-        max_tokens: TOTAL context budget (input + output), per QuickML
-            semantics — NOT just the output length. QuickML rejects the
-            request if the input alone exceeds this value. Callers must size
-            it to fit their prompt plus the desired completion. Default 4000.
+        max_tokens: maximum tokens to generate in the response.
 
     Returns:
         The model's response text as a string.
@@ -92,12 +108,14 @@ async def call_llm(
 
     payload = {
         "model": model_name,
-        "prompt": prompt,
-        "system_prompt": system_prompt,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
         "max_tokens": max_tokens,
         "temperature": 0.1,
-        "top_p": 0.95,
-        "top_k": 40,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
     try:
@@ -111,7 +129,6 @@ async def call_llm(
         raise LLMError(f"LLM HTTP transport error: {e}") from e
 
     if response.status_code != 200:
-        # Truncate body to avoid logging huge HTML error pages
         body_preview = response.text[:500] if response.text else "<empty>"
         raise LLMError(
             f"LLM returned HTTP {response.status_code}: {body_preview}"
@@ -122,9 +139,8 @@ async def call_llm(
     except ValueError as e:
         raise LLMError(f"LLM response was not valid JSON: {e}") from e
 
-    text = data.get("response")
-    print("DEBUG call_llm text:", repr(text))
-    if not text or not isinstance(text, str) or not text.strip():
-        raise LLMError(f"LLM returned empty or missing 'response' field: {data}")
+    text = _extract_response_text(data)
+    if not text:
+        raise LLMError(f"LLM returned empty or missing content: {data}")
 
-    return text.strip()
+    return text
