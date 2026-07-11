@@ -2,8 +2,6 @@
 
 A natural language crime intelligence platform for Karnataka State Police. Officers type a question in plain English, the system converts it to a MySQL query using an LLM, runs it against the crime database, and streams back a formatted answer with tabular results.
 
-For local development, the relational database is typically a local MySQL instance configured through `.env`; the repo also includes migration helpers for applying the latest schema to an existing database.
-
 > See [Support Documents/Docs.md](Support%20Documents/Docs.md) for full technical documentation — every file, function, and data flow.
 
 ---
@@ -12,12 +10,13 @@ For local development, the relational database is typically a local MySQL instan
 
 1. Officer types a question like *"How many theft cases are open in Koramangala?"*
 2. A **schema linker** selects the relevant database tables
-3. **Qwen 2.5-7B Coder** (LLM) converts the question into a MySQL SELECT query
+3. **GLM-4.7-Flash** (LLM) converts the question into a MySQL SELECT query
 4. A **SQL validator** checks the query is safe (SELECT-only, valid tables, no injection)
-5. The query runs against the crime database
-6. **Qwen 2.5-14B Instruct** (LLM) formats the raw results into a natural-language answer
+5. The query runs against the crime database (AWS RDS MySQL)
+6. **GLM-4.7-Flash** (same LLM) formats the raw results into a natural-language answer
 7. The answer streams back token-by-token via Server-Sent Events (SSE)
 8. If the query returns tabular data, it renders as an interactive table in the UI
+9. 3 follow-up question suggestions are generated for the officer
 
 Multi-turn conversation is supported — follow-up questions use previous context without repeating information.
 
@@ -29,109 +28,122 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 |-------|-----------|
 | Backend | Python 3.11, FastAPI, uvicorn |
 | Frontend | React 18, Vite 5 |
-| Relational DB | MySQL-compatible database (local dev via `.env`, or Catalyst Data Store) |
-| LLM | Zoho Catalyst QuickML (Qwen 2.5-7B Coder + Qwen 2.5-14B Instruct) |
+| Relational DB | AWS RDS MySQL 8.0 (ap-south-1 Mumbai) |
+| LLM | Zoho Catalyst QuickML — GLM-4.7-Flash (`crm-di-glm47b_30b_it`) |
 | Conversation History | Zoho Catalyst NoSQL |
+| RAG Knowledge Base | Zoho Catalyst QuickML KB |
 | Auth | JWT (dev) / Catalyst Authentication (production) |
+| Deployment | Zoho Catalyst AppSail (backend) + Web Client Hosting (frontend) |
 
-The app is designed to work with **Zoho Catalyst services** for LLM and NoSQL, while still supporting a **local MySQL** database for day-to-day development.
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Zoho Catalyst (India)                                  │
+│  ┌─────────────┐  ┌──────────┐  ┌───────────────────┐  │
+│  │  AppSail    │  │  NoSQL   │  │  QuickML (LLM +   │  │
+│  │  (FastAPI)  │  │ (history)│  │  RAG Knowledge Base)│  │
+│  └──────┬──────┘  └──────────┘  └───────────────────┘  │
+└─────────┼───────────────────────────────────────────────┘
+          │ TCP/MySQL (aiomysql)
+┌─────────▼───────────────────────────────────────────────┐
+│  AWS RDS (ap-south-1 Mumbai)                            │
+│  MySQL 8.0 — 25+ tables, 220 seeded cases              │
+└─────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Project Structure
 
 ```
-├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variable template
-├── .env                         # Local runtime config (not committed)
-├── migrate.py                   # Adds the newer chat-table column to an existing DB
-├── backfill.py                  # Backfills table_data_json for older assistant messages
-├── LICENSE                      # AGPL v3 license
+├── .env                         # Runtime config (not committed)
+├── LICENSE                      # AGPL v3
 │
 ├── Support Documents/
-│   ├── BLUEPRINT.md             # Original project specification
-│   ├── DESIGN.md                # Frontend design spec (colors, typography, layout)
-│   └── Docs.md                  # Full technical documentation
+│   ├── Docs.md                  # Full technical documentation
+│   ├── DESIGN.md                # Frontend design spec
+│   └── BLUEPRINT2.md            # Feature roadmap
 │
 ├── backend/
 │   ├── main.py                  # FastAPI app, startup lifecycle, health check
 │   ├── Dockerfile               # Container for Catalyst AppSail
+│   ├── debug_tools.py           # CLI debug utility (env/db/schema/tables/rag)
+│   ├── setup_db.py              # Create tables + seed (any MySQL target)
 │   ├── config/
 │   │   └── settings.py          # Env var loading and validation
 │   ├── db/
 │   │   ├── connection.py        # MySQL connection pool (aiomysql)
-│   │   ├── schema.sql           # DDL for the relational schema
+│   │   ├── schema.sql           # DDL for all tables
 │   │   ├── schema_catalog.py    # Table metadata, schema builder, few-shot examples
-│   │   ├── seed.py              # Synthetic data generator
-│   │   └── chat_store.py        # Chat session/message persistence helpers
+│   │   ├── seed.py              # Synthetic data generator (220 cases)
+│   │   ├── chat_store.py        # Chat session/message persistence (MySQL)
+│   │   └── nosql_client.py      # Centralized Catalyst NoSQL client
 │   ├── llm/
-│   │   ├── client.py            # HTTP client for Catalyst QuickML
+│   │   ├── client.py            # HTTP client for QuickML GLM-4.7-Flash
 │   │   ├── sql_generator.py     # SQL generation with self-correction loop
-│   │   ├── answer_formatter.py  # Result-to-text formatting
+│   │   ├── answer_formatter.py  # Result formatting + intent router
+│   │   ├── rag_client.py        # RAG retrieval via Catalyst QuickML KB
+│   │   ├── rag_session.py       # Multi-turn RAG with follow-up generation
 │   │   └── prompts.py           # System prompts and prompt builders
 │   ├── pipeline/
-│   │   ├── query_pipeline.py    # Main orchestrator (NL → SQL → answer)
+│   │   ├── query_pipeline.py    # Main orchestrator (route → SQL → answer)
 │   │   ├── sql_validator.py     # SQL safety validation
+│   │   ├── schema_linker.py     # Keyword-based table selector
 │   │   ├── media_resolver.py    # Evidence media lookup
-│   │   └── schema_linker.py     # Keyword-based table selector
-│   │   └── risk_scoring.py     # Offender risk scoring (explainable, rule-based)
-│   │   └── risk_scoring.py     # Offender risk scoring (explainable, rule-based)
+│   │   ├── risk_scoring.py      # Offender risk scoring (explainable)
+│   │   ├── trend_analytics.py   # Crime pattern analytics (SQL aggregation)
+│   │   └── similar_cases.py     # Similar case finder
 │   ├── auth/
-│   │   └── simple_auth.py       # JWT auth for local dev
+│   │   ├── simple_auth.py       # JWT auth for local dev
+│   │   └── role_guard.py        # RBAC + audit logging
 │   ├── conversation/
 │   │   ├── history.py           # Conversation history (NoSQL + fallback)
 │   │   └── session_store.py     # Session metadata + title generation
-│   └── routers/
-│       ├── chat.py              # /api/chat, /api/chat/stream, session endpoints
-│       ├── auth.py              # Login/logout endpoints
-│       ├── export.py            # Session export routes
-│       └── voice.py             # Voice-related routes
-│       └── profiling.py           # /api/profiling/* - offender risk score endpoints
+│   ├── graph/
+│   │   └── network_builder.py   # Criminal network graph (vis.js format)
+│   ├── voice/
+│   │   └── zia_voice.py         # Zia STT/TTS/translate wrapper
+│   ├── routers/
+│   │   ├── chat.py              # /api/chat, /api/chat/stream, sessions
+│   │   ├── auth.py              # Login/logout
+│   │   ├── export.py            # Session export (HTML)
+│   │   ├── reports.py           # Report analysis
+│   │   ├── voice.py             # Voice routes
+│   │   ├── governance.py        # Audit log (supervisor-only)
+│   │   ├── analytics.py         # Crime trend endpoints
+│   │   ├── decision_support.py  # Decision support
+│   │   └── profiling.py         # Offender risk scores
+│   └── tests/
+│       ├── test_unit.py         # 57 pure unit tests
+│       ├── test_pipeline_and_sessions.py  # 15 pipeline tests
+│       └── test_integration.py  # Live integration tests
 │
 └── frontend/
     ├── package.json
-    ├── vite.config.js           # Dev proxy: /api → localhost:8000
-    ├── index.html
+    ├── vite.config.js
     └── src/
-        ├── main.jsx             # React entry point
-        ├── App.jsx              # Root app shell and auth flow
-        ├── api/
-        │   ├── auth.js          # Token management + login/logout
-        │   ├── chat.js          # SSE stream consumer via fetch + ReadableStream
-        │   └── voice.js         # Voice API helpers
-        ├── components/
-        │   ├── ChatWindow.jsx   # Main chat interface + session orchestration
-        │   ├── Composer.jsx     # Message composer input
-        │   ├── LandingPage.jsx  # Landing experience
-        │   ├── LoginPage.jsx    # Badge number + password form
-        │   ├── MediaViewer.jsx  # Media attachment renderer
-        │   ├── MessageBubble.jsx# Single message renderer
-        │   ├── NetworkGraph.jsx # Network graph modal
-        │   ├── OfficerRow.jsx   # Officer footer row and sign-out menu
-        │   ├── PortalShell.jsx  # Shared portal shell
-        │   ├── SessionItem.jsx  # Single session row
-        │   ├── SessionList.jsx  # Session-history sidebar list
-        │   ├── TableRenderer.jsx# HTML table from JSON query results
-        │   ├── VoiceInput.jsx   # Voice input UI
-        │   └── WelcomeScreen.jsx# Welcome content
-        ├── context/
-        │   └── LangContext.jsx   # Language context
-        ├── hooks/
-        │   └── useAuth.js       # Auth state management
-        └── styles/
-            └── main.css         # Government portal styling
+        ├── App.jsx, main.jsx
+        ├── api/ (auth.js, chat.js, voice.js)
+        ├── components/ (ChatWindow, Composer, LoginPage, etc.)
+        ├── context/ (LangContext.jsx)
+        ├── hooks/ (useAuth.js)
+        └── styles/ (main.css)
 ```
 
 ---
 
 ## Prerequisites
 
-1. **Python 3.11+**
+1. **Python 3.10+**
 2. **Node.js 18+** (for the React frontend)
-3. **A Zoho Catalyst project** with the following services enabled:
-   - **QuickML** — for LLM serving (Qwen models)
-   - **Data Store** — MySQL-compatible relational database
+3. **A Zoho Catalyst project** with these services enabled:
+   - **QuickML** — LLM serving (GLM-4.7-Flash) + RAG Knowledge Base
    - **NoSQL** — document store for conversation history and session metadata
+4. **An AWS account** (for the MySQL database) — or any MySQL 8.0 server
 
 ---
 
@@ -140,7 +152,7 @@ The app is designed to work with **Zoho Catalyst services** for LLM and NoSQL, w
 ### 1. Clone and enter the project
 
 ```bash
-git clone https://github.com/adarsh-v-h/AgenticAI-KSP.git 
+git clone https://github.com/adarsh-v-h/AgenticAI-KSP.git
 cd AgenticAI-KSP
 ```
 
@@ -157,19 +169,46 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-This installs: FastAPI, uvicorn, aiomysql, httpx, python-dotenv, python-jose (JWT), and pydantic.
+### 4. Provision MySQL on AWS RDS
 
-### 4. Set up your relational database and Catalyst services
+Follow these steps to set up an AWS RDS instance configured to allow external connections from Zoho Catalyst:
 
-For local development, point `.env` at a running MySQL instance and use the schema in [backend/db/schema.sql](backend/db/schema.sql). If you are migrating an existing database, run [migrate.py](migrate.py) and [backfill.py](backfill.py) after updating `.env`.
+1. **Set the Region:** In the AWS Console navbar (top-right), switch to **Asia Pacific (Mumbai) ap-south-1**. This ensures lowest latency to Zoho Catalyst India.
 
-If you also want the full Catalyst-backed experience:
+2. **Launch the RDS Wizard:** Search for "RDS" in the top search bar. On the RDS Dashboard, click **Create database**. Select **Standard create**.
 
-1. Go to [console.catalyst.zoho.in](https://console.catalyst.zoho.in) (or `.zoho.com` / `.zoho.eu` for other regions)
-2. Create a new project
-3. Enable **QuickML** from the Services section
-4. Enable **Data Store** — create a MySQL database named `ksp_crime_db` or point to your own database
-5. Enable **NoSQL** — create the document tables expected by the app's conversation history logic
+3. **Engine Selection:** Select **MySQL** under engine options. Leave the version set to the latest MySQL 8.0.x release.
+
+4. **Template Selection:** Select the **Sandbox** template. This uses lightweight `db.t4g.micro` instances — highly cost-effective.
+
+5. **Settings & Credentials:**
+   - DB instance identifier: `ksp-crime-db-instance`
+   - Credentials management: **Self-managed**
+   - Master username: `admin`
+   - Master password: choose a strong password (save it — you'll need it for `.env`)
+
+6. **Storage Configuration:** Select **General Purpose SSD (gp3)**, set allocated storage to **20 GiB**. Uncheck "Enable storage autoscaling" to maintain billing control.
+
+7. **Connectivity & Public Access:**
+   - VPC: **Default VPC**
+   - Public access: **Yes** (CRITICAL — AWS defaults to No. Catalyst AppSail connects over the internet, so this must be Yes)
+
+8. **Initial Database Name:** Scroll to the bottom, expand **Additional configuration**. Under "Database options", enter the initial database name: `ksp_crime_db`. Do NOT leave this blank — AWS will deploy an empty engine with no database otherwise.
+
+9. **Deploy:** Click **Create database**. Wait 5-10 minutes for the instance status to show green **Available**.
+
+10. **Open Inbound Port 3306 (Firewall):**
+    - Click your database identifier link to view its details
+    - Under **Connectivity & security**, find "Security group rules"
+    - Click the security group hyperlink (e.g., `default (sg-047e...)`)
+    - This jumps to the EC2 Security Groups console. Select the security group, go to the **Inbound rules** tab, click **Edit inbound rules**
+    - Click **Add rule** → Type: **MySQL/Aurora** (forces port 3306) → Source: **Anywhere-IPv4** (auto-fills `0.0.0.0/0`)
+    - Click **Save rules**
+
+After setup, your RDS endpoint will look like:
+```
+ksp-crime-db-instance.xxxxxxx.ap-south-1.rds.amazonaws.com
+```
 
 ### 5. Get your Catalyst credentials
 
@@ -177,18 +216,17 @@ You need these values from the Catalyst console:
 
 | Variable | Where to find it |
 |----------|-----------------|
-| `CATALYST_PROJECT_ID` | Project Settings → Project ID (numeric) |
-| `CATALYST_ORG_ID` | Project Settings → Organization ID (numeric) |
-| `CATALYST_API_TOKEN` | API Console → Generate OAuth Token (see below) |
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | Data Store → Connection Details |
-| `NOSQL_BASE_URL` | NoSQL → API endpoint (follows pattern in .env.example) |
+| `CATALYST_PROJECT_ID` | Project Settings → Project ID |
+| `CATALYST_ORG_ID` | Project Settings → Organization ID |
+| `CATALYST_API_TOKEN` | OAuth token (see below) |
+| `NOSQL_BASE_URL` | NoSQL → API endpoint (pattern in `.env.example`) |
 
 **Generating a Catalyst API token:**
 
-1. Go to [API Console](https://api-console.zoho.in/) (or your region's console)
-2. Create a Client ID and Client Secret for your project
-3. Generate a refresh token using OAuth 2.0
-4. Exchange the refresh token for an access token:
+1. Go to [API Console](https://api-console.zoho.in/)
+2. Create a Client ID and Client Secret
+3. Generate a refresh token via OAuth 2.0
+4. Exchange for an access token:
 
 ```bash
 curl -X POST "https://accounts.zoho.in/oauth/v2/token" \
@@ -198,7 +236,7 @@ curl -X POST "https://accounts.zoho.in/oauth/v2/token" \
   -d "refresh_token=YOUR_REFRESH_TOKEN"
 ```
 
-The `access_token` from the response becomes your `CATALYST_API_TOKEN`. **Note:** Catalyst tokens expire after ~1 hour. You'll need to refresh them periodically during development.
+The `access_token` becomes your `CATALYST_API_TOKEN`. Tokens expire after ~1 hour — refresh periodically during development.
 
 ### 6. Configure environment variables
 
@@ -206,137 +244,69 @@ The `access_token` from the response becomes your `CATALYST_API_TOKEN`. **Note:*
 cp .env.example .env
 ```
 
-Open `.env` and fill in every value. The server will crash on startup if any variable is missing.
+Open `.env` and fill in every value. The server crashes on startup if any required variable is missing.
 
 **Critical variables:**
-- `CATALYST_PROJECT_ID`, `CATALYST_ORG_ID`, `CATALYST_API_TOKEN` — your Catalyst identity
-- `QUICKML_LLM_URL` — construct from pattern: `{CATALYST_BASE_URL}/quickml/v2/project/{CATALYST_PROJECT_ID}/llm/chat`
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` — database connection
-- `APP_SECRET_KEY` — generate a random string: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-- `MODEL_SQL=crm-di-qwen_coder_7b-it` — the SQL generation model
-- `MODEL_ANSWER=crm-di-qwen_text_14b-fp8-it` — the answer formatting model
 
-> See [.env.example](.env.example) for the full list with descriptions and URL patterns.
+| Variable | Value |
+|----------|-------|
+| `CATALYST_API_TOKEN` | Your Zoho OAuth access token |
+| `CATALYST_ORG_ID` | Your Catalyst organization ID |
+| `QUICKML_LLM_URL` | `https://api.catalyst.zoho.in/quickml/v1/project/{PROJECT_ID}/glm/chat` |
+| `MODEL_SQL` | `crm-di-glm47b_30b_it` |
+| `MODEL_ANSWER` | `crm-di-glm47b_30b_it` |
+| `DB_HOST` | Your RDS endpoint (e.g., `ksp-crime-db-instance.xxx.ap-south-1.rds.amazonaws.com`) |
+| `DB_PORT` | `3306` |
+| `DB_NAME` | `ksp_crime_db` |
+| `DB_USER` | `admin` |
+| `DB_PASSWORD` | Your RDS master password |
+| `NOSQL_BASE_URL` | `https://api.catalyst.zoho.in/baas/v1/project/{PROJECT_ID}/nosqltable` |
+| `APP_SECRET_KEY` | Generate: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `ALLOWED_ORIGINS` | `http://localhost:5173` (dev) |
 
-### 7. Create or update database tables
-
-For a fresh local setup, load the schema into your MySQL database:
+### 7. Create tables and seed the database
 
 ```bash
-mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p <DB_NAME> < backend/db/schema.sql
+python backend/setup_db.py --seed
 ```
 
-If you are upgrading an existing database that already has the older schema, run:
+This:
+- Connects to your RDS instance using credentials from `.env`
+- Creates all 25+ tables from `backend/db/schema.sql`
+- Seeds 220 FIR cases, 260 accused, 10 officers, and all lookup data
 
+To verify connectivity and latency:
 ```bash
-python migrate.py
-python backfill.py
+python backend/debug_tools.py db
 ```
 
-These scripts add the newer chat-related columns and backfill older assistant messages when needed.
+### 8. Set up the RAG Knowledge Base (Optional)
 
-### 8. Seed the database with synthetic data
-
-```bash
-python backend/db/seed.py
-```
-
-This inserts:
-- 10 officers with Karnataka names and realistic ranks
-- 220 FIRs across 11 case types (2022-2025)
-- Accused persons including 5 named repeat offenders
-- Victims for each case
-- Case-type-specific details (stolen items, weapons, vehicle info, etc.)
-- 35 case relationship records (for network graph — not yet implemented)
-- 25 evidence media records (placeholder Stratus IDs)
-
-The seeder is deterministic (`random.seed(42)`) and skips execution if data already exists.
-
-> Note: If you are migrating an existing database and need to populate the new `table_data_json` field for older assistant messages, run `python backfill.py` after setting up `.env`. This is not required for a fresh install.
-
-### 8a. Set up the RAG Pipeline and Knowledge Base (Optional)
-
-If you want the chatbot to answer analytical/entity-based questions using case reports, set up the RAG Knowledge Base.
-
-Zoho Catalyst's RAG Knowledge Base has an undocumented limit of **12 documents**. To bypass this limit, our pipeline automatically merges individual case files into larger, crime-category consolidated documents.
-
-#### 1. Export and Consolidate Cases
-Run the following script to export case reports from MySQL and automatically consolidate them:
-```bash
-python backend/export_cases_for_rag.py
-```
-This queries the database and generates exactly **8 category-grouped files** (e.g., `Theft.txt`, `Assault.txt`, etc.) in `backend/rag_consolidated/`.
-
-#### 2. Upload to Zoho Catalyst
-1. Go to your Zoho Catalyst Console.
-2. Select **QuickML** from the sidebar, then go to the **Knowledge Base** tab.
-3. Upload the **8 consolidated text files** from your local `backend/rag_consolidated/` directory.
-
-#### 3. Automatically Discover Document IDs
-Run the sync script to automatically fetch the uploaded document IDs from Zoho and update your local `.env`:
-```bash
-python backend/kb_sync.py --refresh-token
-```
-This will refresh your OAuth access token, discover the new document IDs from Zoho, and update `KB_DOCUMENT_IDS` in `.env` automatically. The backend automatically reloads these IDs without requiring a restart!
-
-
-
-### 8b. Refreshing the RAG Knowledge Base After New Case Data
-
-Whenever new cases are added to MySQL, the Knowledge Base does not update automatically — run this sequence to regenerate and re-sync it:
+If you want the chatbot to answer narrative/analytical questions from case reports:
 
 ```bash
-# 1. Export all cases with narrative text from MySQL into individual .txt files,
-#    then automatically consolidate them into 8 category files
-#    (backend/rag_export/ -> backend/rag_consolidated/)
+# Export + consolidate cases into 8 category files
 python backend/export_cases_for_rag.py
 
-# 2. Upload the 8 consolidated files (NOT the individual per-case files) to
-#    Zoho Catalyst QuickML -> Knowledge Base. Delete any old/stale documents
-#    first so the total stays under Catalyst's 12-document limit.
+# Upload the 8 files from backend/rag_consolidated/ to Catalyst QuickML → Knowledge Base
 
-# 3. Sync the newly uploaded document IDs into .env automatically
+# Sync document IDs into .env
 python backend/kb_sync.py --refresh-token
 ```
-
-**Note:** A case only gets correctly categorized (e.g. into `Theft.txt`) if it has a
-linked row in `actsectionassociation` referencing an IPC/Act section (e.g. `379/IPC`
-for Theft). Cases with `BriefFacts` but no linked section fall into `Uncategorised.txt`
-regardless of what the narrative text describes — categorization is driven by legal
-section codes, not free-text keyword matching.
-
-**Known limitation (fixed 2026-07-07):** The query pipeline previously only
-fell back to RAG when SQL generation itself failed (`CannotAnswerError`/`LLMError`).
-Since the SQL generator can almost always produce *some* valid query, narrative/
-summarization questions (e.g. "What do the case reports say about how thefts
-typically occur?") were incorrectly answered via SQL, often returning empty
-results instead of using the Knowledge Base. Two fixes were added to
-`backend/pipeline/query_pipeline.py`:
-- A narrative-keyword pre-router that sends summarization-style questions to RAG
-  before SQL is attempted.
-- An empty-results fallback that retries via RAG whenever SQL executes
-  successfully but returns 0 rows.
 
 ### 9. Start the backend
 
 ```bash
-# Make sure you're in the project root with .venv activated
 uvicorn backend.main:app --reload --port 8000
 ```
 
-The server starts at `http://localhost:8000`. On startup it:
-1. Validates all environment variables (crashes if any are missing)
-2. Creates the MySQL connection pool
-3. Probes the database with `SELECT 1`
-4. Probes Catalyst NoSQL connectivity
-
-**Verify it's running:**
+**Verify:**
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-Expected response:
+Expected:
 ```json
 {
   "status": "ok",
@@ -347,11 +317,7 @@ Expected response:
 }
 ```
 
-If `status` is `"degraded"`, check which component is `"error"` and verify your Catalyst credentials.
-
 ### 10. Start the frontend
-
-In a separate terminal:
 
 ```bash
 cd frontend
@@ -359,37 +325,32 @@ npm install
 npm run dev
 ```
 
-The frontend starts at `http://localhost:5173`. Vite proxies all `/api/*` requests to the backend at port 8000, so no CORS issues in development.
+Frontend at `http://localhost:5173`. Vite proxies `/api/*` to the backend.
 
 ### 11. Log in and test
 
-1. Open `http://localhost:5173` in your browser
-2. Enter a KGID number from the seeded database (e.g., `3254123`)
-3. Enter the password: `<KGID>123` (e.g., `3254123123`)
-4. You'll see the chat interface with sample questions
-5. Click a sample question or type your own
-
-**Example questions to try:**
-- "How many theft cases are open?"
-- "Show me all cases involving Mahesh Gowda"
-- "List all vehicle theft cases with the registration number"
-- "Who are the top 5 repeat offenders?"
-- "Show me phishing cases on WhatsApp"
-- "What is the total amount defrauded in online fraud cases?"
+1. Open `http://localhost:5173`
+2. Enter KGID: `3254123`, Password: `3254123123`
+3. Try: *"How many theft cases are open?"*
 
 ---
 
-## How It Works (Brief)
+## Login Credentials
 
-The system uses a **two-LLM pipeline**:
+Password formula: `<KGID>123`
 
-1. **Schema Linker** — keyword matching selects the 1-5 most relevant database tables for the question
-2. **SQL Generation** — Qwen 2.5-7B Coder generates a MySQL SELECT query, with a self-correction loop (max 2 attempts if validation fails)
-3. **SQL Validation** — checks the query is SELECT-only, uses only known tables, contains no forbidden keywords
-4. **Query Execution** — runs against the MySQL database with a 5-second timeout
-5. **Answer Formatting** — Qwen 2.5-14B Instruct converts raw results into a professional natural-language answer
-
-> See [Support Documents/Docs.md §4.2](Support%20Documents/Docs.md#42-ask-a-question-full-pipeline) for the complete end-to-end flow.
+| KGID | Name | Rank | Role |
+|------|------|------|------|
+| `3254123` | Manjunath Patil | Inspector | supervisor |
+| `4167892` | Venkatesh Gowda | PI | supervisor |
+| `5823641` | Ramesh Naik | SI | investigator |
+| `6741028` | Sandeep Hegde | SI | investigator |
+| `7295834` | Harish Kumar | ASI | investigator |
+| `8412567` | Vijay Raghavendra | ASI | investigator |
+| `9128473` | Lokesh Murthy | Head Constable | investigator |
+| `1036852` | Shivakumar Swamy | Head Constable | investigator |
+| `2847156` | Srinivas Raju | Constable | analyst |
+| `3962485` | Naveen Raj | Constable | investigator |
 
 ---
 
@@ -399,129 +360,71 @@ The system uses a **two-LLM pipeline**:
 |--------|----------|------|-------------|
 | `POST` | `/api/auth/login` | No | Authenticate officer, returns JWT |
 | `POST` | `/api/auth/logout` | Yes | Stateless logout |
-| `POST` | `/api/chat` | Yes | Non-streaming chat (for testing) |
-| `GET` | `/api/chat/stream` | Yes | SSE streaming chat (production path) |
-| `GET` | `/api/chat/sessions` | Yes | List the officer's chat sessions (newest first) |
-| `POST` | `/api/chat/sessions` | Yes | Create a new chat session |
-| `GET` | `/api/chat/sessions/{id}/messages` | Yes | Paginated message history for a session |
-| `GET` | `/api/profiling/risk/{accused_id}` | Yes | Cached or freshly-computed risk score with factor breakdown |
-| `GET` | `/api/profiling/top-risk` | Yes | Ranked list of highest-risk distinct offenders |
-| `POST` | `/api/profiling/recompute-all` | Yes | Recompute risk scores for all accused persons |
+| `POST` | `/api/chat` | Yes | Non-streaming chat |
+| `GET` | `/api/chat/stream` | Yes | SSE streaming chat |
+| `GET` | `/api/chat/sessions` | Yes | List officer's sessions |
+| `POST` | `/api/chat/sessions` | Yes | Create a new session |
+| `GET` | `/api/chat/sessions/{id}/messages` | Yes | Message history |
+| `POST` | `/api/chat/sessions/{id}/export` | Yes | Export session as HTML |
+| `POST` | `/api/reports/analyze` | Yes | Upload + analyze a report |
+| `POST` | `/api/voice/transcribe` | Yes | STT (Zia) |
+| `POST` | `/api/voice/speak` | Yes | TTS (Zia) |
+| `GET` | `/api/analytics/trends/*` | Yes | Crime trend data |
+| `GET` | `/api/profiling/risk/{accused_id}` | Yes | Offender risk score |
+| `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders |
+| `GET` | `/api/audit-log` | Supervisor | Audit log entries |
+| `GET` | `/api/graph/fir/{id}` | Yes | Network graph for a case |
+| `GET` | `/api/graph/accused/{id}` | Yes | Network graph for an accused |
 | `GET` | `/health` | No | Service health check |
 
-> See [Support Documents/Docs.md §3.18](Support%20Documents/Docs.md#318-backendrouterschatpy) and [Support Documents/Docs.md §3.19](Support%20Documents/Docs.md#319-backendroutersauthpy) for request/response details.
-
 ---
 
-## Login Credentials
-
-The seeder creates these officers (password is always `<KGID>123`):
-
-| KGID | Name | Rank |
-|-------------|------|------|
-| `3254123` | Manjunath Patil | Inspector |
-| `4167892` | Venkatesh Gowda | PI |
-| `5823641` | Ramesh Naik | SI |
-| `6741028` | Sandeep Hegde | SI |
-| `7295834` | Harish Kumar | ASI |
-| `8412567` | Vijay Raghavendra | ASI |
-| `9128473` | Lokesh Murthy | Head Constable |
-| `1036852` | Shivakumar Swamy | Head Constable |
-| `2847156` | Srinivas Raju | Constable |
-| `3962485` | Naveen Raj | Constable |
-
----
-
-## Database
-
-27 tables in a MySQL-compatible Catalyst Data Store:
-
-| Table | Purpose |
-|-------|---------|
-| `Employee` | Station employees / officers (replaces `officers`) |
-| `CaseMaster` | Central case/FIR registry (replaces `fir_master`) |
-| `ComplainantDetails` | Complainants who filed cases |
-| `Victim` | Victims linked to cases (replaces `victims`) |
-| `Accused` | Accused persons linked to cases (replaces `accused`) |
-| `ActSectionAssociation` | Links cases to acts and sections charged |
-| `ArrestSurrender` | Arrest or surrender details of accused |
-| `evidence_media` | Media files attached to cases |
-| `offender_risk_scores` | Explainable risk scores for accused persons (risk_score, risk_tier, contributing_factors) |
-| `chat_sessions` | One row per conversation |
-| `chat_messages` | One row per turn — user OR assistant |
-| `State` / `District` / `Unit` / `UnitType` | Organizational hierarchy lookups |
-| `Rank` / `Designation` | Employee ranks and designations |
-| `CrimeHead` / `CrimeSubHead` | Crime groups and crime categories |
-| `CaseCategory` / `GravityOffence` / `CaseStatusMaster` | Case lookups |
-| `Act` / `Section` | Reference laws and sections |
-| `CasteMaster` / `ReligionMaster` / `OccupationMaster` | Demographic lookups |
-
-> Note: Replaced the old child-tables pattern (`cases_theft`, `cases_assault`, etc.) with a single unified `CaseMaster` table representing all cases. See [Support Documents/Docs.md §3.4](Support%20Documents/Docs.md#34-backendschemasql) for details.
-
----
-
-## Deployment to Zoho Catalyst
-
-### Backend (AppSail)
-
-The backend deploys as a Docker container on Catalyst AppSail:
+## Debug Tools
 
 ```bash
-# Build the image
-docker build -t ksp-backend ./backend
-
-# Deploy via Catalyst CLI or Pipelines
-# The Dockerfile uses python:3.11-slim and runs uvicorn on port 8000
+python backend/debug_tools.py env      # Check .env loading
+python backend/debug_tools.py db       # Ping DB + measure latency
+python backend/debug_tools.py schema   # Dump all DB columns
+python backend/debug_tools.py tables   # Verify tables exist + row counts
+python backend/debug_tools.py rag      # Test RAG query
+python backend/debug_tools.py all      # Run all checks
 ```
 
-The `Dockerfile` at `backend/Dockerfile`:
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
-```
+---
 
-### Frontend (Catalyst Slate)
-
-The frontend is a static SPA. Build and deploy to Catalyst Slate:
+## Running Tests
 
 ```bash
-cd frontend
-npm run build
-# Deploy the contents of frontend/dist/ to Catalyst Slate
+# Unit tests (no network/DB needed)
+python -m pytest backend/tests/test_unit.py -v
+
+# Pipeline + session tests (no network needed)
+python -m pytest backend/tests/test_pipeline_and_sessions.py -v
+
+# Integration tests (needs live tokens + DB)
+python backend/tests/test_integration.py all
 ```
-
-### Environment Variables in Production
-
-Update `ALLOWED_ORIGINS` in your production `.env` to your Catalyst Slate URL instead of `http://localhost:5173`. Generate a new `APP_SECRET_KEY` for production — never reuse the dev key.
 
 ---
 
 ## Troubleshooting
 
-> **Note:** For a log of recently fixed bugs (schema drift, token refresh, payload limits, NoSQL session sync, session ID column width), see `Support Documents/Docs.md` §10.12 and §10.13.
-
-**Server crashes on startup with missing env vars:**
-- Check your `.env` file has all the REQUIRED variables (see `.env.example` — variables marked OPTIONAL won't block startup)
-- The server lists every missing variable in the error message
+**Server crashes with missing env vars:** Check `.env` has all REQUIRED variables from `.env.example`.
 
 **Health check shows `"degraded"`:**
-- `"db": "error"` — check `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
-- `"llm_coder": "error"` or `"llm_answer": "error"` — check `QUICKML_LLM_URL`, `CATALYST_API_TOKEN`, `CATALYST_ORG_ID`
-- Token may have expired — regenerate using the OAuth refresh flow
+- `"db": "error"` — verify RDS endpoint, credentials, and that port 3306 inbound rule is set
+- `"llm_coder": "error"` — token likely expired, refresh it
 
-**Frontend can't reach the backend:**
-- Make sure the backend is running on port 8000
-- Vite proxies `/api/*` to `localhost:8000` — check `vite.config.js`
+**Token expired (`INVALID_OAUTHTOKEN`):** Refresh using your stored refresh token:
+```bash
+curl -X POST "https://accounts.zoho.in/oauth/v2/token" \
+  -d "grant_type=refresh_token" \
+  -d "client_id=YOUR_CLIENT_ID" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "refresh_token=YOUR_REFRESH_TOKEN"
+```
 
-**SQL generation fails or returns weird queries:**
-- The LLM may not have enough context — check that the schema was seeded correctly
-- Try simpler questions first ("How many cases are open?")
-- Check the backend logs for SQL validation errors
+**Frontend can't reach backend:** Ensure backend runs on port 8000. Vite proxies `/api/*` there.
 
 ---
 
@@ -529,16 +432,4 @@ Update `ALLOWED_ORIGINS` in your production `.env` to your Catalyst Slate URL in
 
 Copyright (C) 2024 adarsh.v.h <adarshvh2005@gmail.com>
 
-This project is licensed under the **GNU Affero General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
-
-### What this means:
-
-- **Free to use, modify, and distribute** — you can run, study, and adapt this software
-- **Copyleft** — any modified version must also be released under AGPL v3
-- **Network use clause** — if you run this as a service (SaaS), you must share your source code
-- **Patent protection** — contributors grant patent rights to users
-- **No warranty** — the software is provided "as is"
-
-### For Karnataka State Police:
-
-This license ensures the software remains open and transparent for law enforcement use, while preventing any party from making it proprietary. If the KSP incorporates this into production, all future modifications must remain open source under the same license.
+Licensed under the **GNU Affero General Public License v3.0** — see [LICENSE](LICENSE).
