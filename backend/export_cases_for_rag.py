@@ -23,13 +23,13 @@ async def main():
                 GROUP_CONCAT(DISTINCT a.AccusedName SEPARATOR ', ') AS AccusedNames,
                 GROUP_CONCAT(DISTINCT v.VictimName SEPARATOR ', ') AS VictimNames,
                 GROUP_CONCAT(DISTINCT s.SectionDescription SEPARATOR '; ') AS Sections
-            FROM casemaster cm
-            LEFT JOIN casestatusmaster csm ON cm.CaseStatusID = csm.CaseStatusID
-            LEFT JOIN unit u ON cm.PoliceStationID = u.UnitID
-            LEFT JOIN accused a ON a.CaseMasterID = cm.CaseMasterID
-            LEFT JOIN victim v ON v.CaseMasterID = cm.CaseMasterID
-            LEFT JOIN actsectionassociation asa ON asa.CaseMasterID = cm.CaseMasterID
-            LEFT JOIN section s ON s.SectionCode = asa.SectionID AND s.ActCode = asa.ActID
+            FROM CaseMaster cm
+            LEFT JOIN CaseStatusMaster csm ON cm.CaseStatusID = csm.CaseStatusID
+            LEFT JOIN Unit u ON cm.PoliceStationID = u.UnitID
+            LEFT JOIN Accused a ON a.CaseMasterID = cm.CaseMasterID
+            LEFT JOIN Victim v ON v.CaseMasterID = cm.CaseMasterID
+            LEFT JOIN ActSectionAssociation asa ON asa.CaseMasterID = cm.CaseMasterID
+            LEFT JOIN Section s ON s.SectionCode = asa.SectionID AND s.ActCode = asa.ActID
             WHERE cm.BriefFacts IS NOT NULL AND cm.BriefFacts != ''
             GROUP BY cm.CaseMasterID
         """)
