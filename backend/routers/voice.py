@@ -41,6 +41,10 @@ class SpeakRequest(BaseModel):
     language: str = Field(default="en", max_length=8)
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 

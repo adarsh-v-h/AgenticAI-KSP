@@ -8,6 +8,10 @@
 
 import { getToken } from './auth.js'
 
+// CONTRACT
+// takes:  question (string) — the user's chat query, sessionId (string) — unique session identifier, callbacks (object) — SSE event handler callbacks
+// returns: (() => void) — cancel function that aborts the stream
+// throws:  never (errors delivered via callbacks.onError)
 /**
  * @param {string} question
  * @param {string} sessionId
@@ -102,6 +106,10 @@ export function startChatStream(question, sessionId, callbacks = {}) {
   return () => controller.abort()
 }
 
+// CONTRACT
+// takes:  frame (string) — raw SSE frame text, callbacks (object) — event handler callbacks
+// returns: nothing
+// throws:  never
 function handleFrame(frame, callbacks) {
   const payload = frame
     .split('\n')
@@ -178,11 +186,19 @@ export class AuthError extends Error {
   }
 }
 
+// CONTRACT
+// takes:  extra (object) — additional headers to merge
+// returns: (object) — headers object with Authorization bearer token if available
+// throws:  never
 function authHeaders(extra = {}) {
   const token = getToken()
   return token ? { Authorization: `Bearer ${token}`, ...extra } : { ...extra }
 }
 
+// CONTRACT
+// takes:  ms (number) — milliseconds to wait
+// returns: (Promise<void>) — resolves after the specified delay
+// throws:  never
 /**
  * Resolve after `ms` milliseconds. Small Promise wrapper around setTimeout so
  * the backoff loop can `await` between retries.
@@ -194,6 +210,10 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// CONTRACT
+// takes:  doFetch (() => Promise<Response>) — async function that performs the fetch, options (object) — optional {retries, baseDelayMs}
+// returns: (Promise<Response>) — the final Response (5xx included once retries exhausted)
+// throws:  Error — re-throws the last network error if every attempt threw
 /**
  * Run an async fetch with exponential-backoff retry for TRANSIENT failures
  * only.
@@ -245,6 +265,10 @@ async function fetchWithRetry(doFetch, { retries = 2, baseDelayMs = 300 } = {}) 
   throw lastError ?? new Error('Request failed after retries.')
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<Array<object>>) — array of session metadata objects
+// throws:  AuthError — when backend returns 401, Error — on network failure or non-ok response
 /**
  * Fetch all chat sessions for the authenticated officer.
  *
@@ -287,6 +311,10 @@ export async function fetchSessions() {
 }
 
 
+// CONTRACT
+// takes:  sessionId (string) — the session to fetch messages for
+// returns: (Promise<{messages: Array<object>}>) — object containing messages array oldest-first
+// throws:  AuthError — when backend returns 401, Error — on 404/network failure/non-ok response
 /**
  * Fetch all messages for a session.
  *
@@ -338,6 +366,10 @@ export async function fetchMessages(sessionId) {
   }
 }
 
+// CONTRACT
+// takes:  sessionId (string) — the session to export as HTML
+// returns: (Promise<void>) — resolves after triggering a browser download of the exported HTML file
+// throws:  AuthError — when backend returns 401, Error — on network failure or non-ok response
 /**
  * Export a chat session as a downloadable HTML file.
  *

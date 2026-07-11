@@ -39,6 +39,10 @@ OPTIONAL_VARS = [
     "SMARTBROWZ_URL",
 ]
 
+# CONTRACT
+# takes:  nothing
+# returns: nothing
+# raises:  ValueError — when any REQUIRED_VARS are missing from the environment
 def validate_settings():
     missing = [var for var in REQUIRED_VARS if not os.getenv(var)]
     if missing:
@@ -47,6 +51,10 @@ def validate_settings():
             + "\n".join(f"  - {v}" for v in missing)
         )
 
+# CONTRACT
+# takes:  key (str) — name of the environment variable to retrieve
+# returns: (str) — the environment variable's value
+# raises:  ValueError — when the environment variable is not set or empty
 def get(key: str) -> str:
     val = os.getenv(key)
     if not val:

@@ -8,6 +8,10 @@ const MEDIA_TYPE_ICONS = {
   other: '📎',
 }
 
+// CONTRACT
+// takes:  url (string) — media file URL, mediaType (string|undefined) — optional MIME-based type hint
+// returns: (string) — one of 'unavailable', 'image', 'audio', 'video', or 'document'
+// throws:  never
 function getMediaType(url, mediaType) {
   if (url?.startsWith('/api/media/unavailable')) return 'unavailable'
   if (mediaType === 'image' || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(url)) return 'image'

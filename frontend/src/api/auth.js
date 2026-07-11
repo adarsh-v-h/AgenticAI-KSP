@@ -3,28 +3,52 @@
 let _token = null
 let _officer = null
 
+// CONTRACT
+// takes:  nothing
+// returns: (string|null) — the current JWT access token held in memory
+// throws:  never
 export function getToken() {
   return _token
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (object|null) — the authenticated officer's profile object
+// throws:  never
 export function getOfficer() {
   return _officer
 }
 
+// CONTRACT
+// takes:  token (string|null) — JWT access token to store, officer (object|null) — officer profile to store
+// returns: nothing
+// throws:  never
 export function setToken(token, officer) {
   _token = token || null
   _officer = officer || null
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: nothing
+// throws:  never
 export function clearToken() {
   _token = null
   _officer = null
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (boolean) — true if a token is currently held in memory
+// throws:  never
 export function isLoggedIn() {
   return _token !== null
 }
 
+// CONTRACT
+// takes:  badgeNumber (string) — officer's badge ID, password (string) — plaintext password
+// returns: (Promise<{success: boolean, message?: string, officer?: object}>) — login result
+// throws:  never
 /**
  * POST /api/auth/login
  * Returns { success: boolean, message?: string, officer?: object }.
@@ -63,6 +87,10 @@ export async function login(badgeNumber, password) {
   }
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<void>) — resolves after local state is cleared and server notified best-effort
+// throws:  never
 /**
  * POST /api/auth/logout — best effort. Always clears local state.
  */

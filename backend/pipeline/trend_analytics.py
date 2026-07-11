@@ -11,6 +11,10 @@ case wouldn't see just by looking at their own case file.
 from db.connection import execute_query
 
 
+# CONTRACT
+# takes:  months_back (int) — number of months to look back from current date
+# returns: (list[dict]) — rows with month (YYYY-MM) and count of crimes
+# raises:  Exception — when DB query fails
 async def get_trend_by_month(months_back: int = 12) -> list[dict]:
     """Crime count per month for the last `months_back` months."""
     return await execute_query(
@@ -23,6 +27,10 @@ async def get_trend_by_month(months_back: int = 12) -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (list[dict]) — rows with crime_type and count, ordered by count descending
+# raises:  Exception — when DB query fails
 async def get_trend_by_crime_type() -> list[dict]:
     """Total count per crime sub-head (the actual crime type), all time."""
     return await execute_query(
@@ -34,6 +42,10 @@ async def get_trend_by_crime_type() -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  limit (int) — maximum number of stations to return
+# returns: (list[dict]) — rows with station name and crime count, ordered by count descending
+# raises:  Exception — when DB query fails
 async def get_trend_by_location(limit: int = 10) -> list[dict]:
     """Crime count per police station."""
     return await execute_query(
@@ -47,6 +59,10 @@ async def get_trend_by_location(limit: int = 10) -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  station_unit_id (int) — UnitID of the police station to drill into
+# returns: (list[dict]) — rows with crime_type and count for that station
+# raises:  Exception — when DB query fails
 async def get_crime_type_by_location(station_unit_id: int) -> list[dict]:
     """Breakdown of crime types within a single police station — for drill-down."""
     return await execute_query(
@@ -60,6 +76,10 @@ async def get_crime_type_by_location(station_unit_id: int) -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (list[dict]) — rows with status name and count of cases
+# raises:  Exception — when DB query fails
 async def get_status_breakdown() -> list[dict]:
     """Count of cases by investigation status."""
     return await execute_query(
@@ -71,6 +91,10 @@ async def get_status_breakdown() -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  min_occurrences (int) — minimum case count threshold for a cluster to be returned
+# returns: (list[dict]) — rows with crime_type, station, and count for clusters meeting the threshold
+# raises:  Exception — when DB query fails
 async def get_modus_operandi_clusters(min_occurrences: int = 2) -> list[dict]:
     """
     Groups cases by SAME crime sub-head AND SAME police station, surfacing
@@ -92,6 +116,10 @@ async def get_modus_operandi_clusters(min_occurrences: int = 2) -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (list[dict]) — rows with month_num, month_name, and count of crimes per calendar month
+# raises:  Exception — when DB query fails
 async def get_seasonal_pattern() -> list[dict]:
     """Crime count grouped by month-of-year, irrespective of which year."""
     return await execute_query(

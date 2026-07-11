@@ -65,6 +65,10 @@ _CATEGORY_MAP = {
 }
 
 
+# CONTRACT
+# takes:  raw_sections (str) — raw SECTIONS line from a case file
+# returns: (str) — normalised primary crime category name
+# raises:  nothing
 def _normalise_category(raw_sections: str) -> str:
     """Return the normalised crime category for a raw SECTIONS line."""
     stripped = raw_sections.strip()
@@ -77,6 +81,10 @@ def _normalise_category(raw_sections: str) -> str:
     return first or "Uncategorised"
 
 
+# CONTRACT
+# takes:  filepath (Path) — path to a single case .txt file
+# returns: (tuple[str, str]) — (normalised crime category, full file content)
+# raises:  OSError — when the file cannot be read
 def _parse_case_file(filepath: Path) -> tuple[str, str]:
     """
     Read a single case .txt file.
@@ -90,18 +98,30 @@ def _parse_case_file(filepath: Path) -> tuple[str, str]:
     return category, content
 
 
+# CONTRACT
+# takes:  content (str) — full case file content
+# returns: (str) — extracted Crime No string, or "Unknown" if not found
+# raises:  nothing
 def _extract_crime_no(content: str) -> str:
     """Pull the Crime No from file content for the separator header."""
     match = re.search(r"Crime No:\s*(\S+)", content)
     return match.group(1) if match else "Unknown"
 
 
+# CONTRACT
+# takes:  crime_no (str) — case Crime No for the separator header
+# returns: (str) — formatted separator string with equals-sign bars
+# raises:  nothing
 def _build_separator(crime_no: str) -> str:
     """Visible separator between cases inside a consolidated file."""
     bar = "=" * 60
     return f"\n{bar}\nCASE REPORT — Crime No: {crime_no}\n{bar}\n"
 
 
+# CONTRACT
+# takes:  input_dir (Path) — directory containing individual case_*.txt files, output_dir (Path) — target directory for consolidated files, max_size_kb (int) — max file size before splitting
+# returns: (dict[str, list[str]]) — mapping of output filename to list of Crime Nos included
+# raises:  nothing (returns empty dict if no files found)
 def consolidate(
     input_dir: Path,
     output_dir: Path,
@@ -183,6 +203,10 @@ def consolidate(
     return manifest
 
 
+# CONTRACT
+# takes:  nothing
+# returns: nothing
+# raises:  SystemExit — via argparse on invalid arguments
 def main():
     parser = argparse.ArgumentParser(
         description="Consolidate individual case files into crime-category documents for Zoho KB."

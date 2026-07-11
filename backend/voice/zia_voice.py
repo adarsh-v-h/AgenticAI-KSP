@@ -35,10 +35,18 @@ class VoiceError(Exception):
 _TTS_MAX_CHARS = 400
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  extra (dict | None) — additional headers to merge
+# returns: (dict) — HTTP headers with Catalyst OAuth token and org ID
+# raises:  nothing
 def _zia_headers(extra: dict | None = None) -> dict:
     headers = {
         "Authorization": f"Zoho-oauthtoken {get('CATALYST_API_TOKEN')}",
@@ -49,6 +57,10 @@ def _zia_headers(extra: dict | None = None) -> dict:
     return headers
 
 
+# CONTRACT
+# takes:  data (dict) — raw Catalyst API response
+# returns: (dict) — inner data object unwrapped from the Catalyst envelope
+# raises:  nothing
 def _unwrap(data: dict) -> dict:
     """Return the inner `data` object of a Catalyst response envelope, or the
     payload itself if it isn't wrapped."""
@@ -57,6 +69,10 @@ def _unwrap(data: dict) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+# CONTRACT
+# takes:  payload (dict) — raw STT API response
+# returns: (str) — extracted transcript text, or empty string if not found
+# raises:  nothing
 def _extract_transcript(payload: dict) -> str:
     """Pull the transcript text from a STT response, tolerating a few likely
     field names so a minor contract difference doesn't break us."""
@@ -68,6 +84,10 @@ def _extract_transcript(payload: dict) -> str:
     return ""
 
 
+# CONTRACT
+# takes:  payload (dict) — raw Translation API response
+# returns: (str) — extracted translated text, or empty string if not found
+# raises:  nothing
 def _extract_translation(payload: dict) -> str:
     inner = _unwrap(payload)
     for key in ("translated_text", "translation", "text", "result"):
@@ -77,6 +97,10 @@ def _extract_translation(payload: dict) -> str:
     return ""
 
 
+# CONTRACT
+# takes:  audio_bytes (bytes) — recorded audio data, language (str) — language code of the audio
+# returns: (str) — transcription text
+# raises:  VoiceError — when STT is not configured, request fails, or transcript is empty
 async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     """
     Send recorded audio to Zia STT as multipart/form-data and return the
@@ -120,6 +144,10 @@ async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     return transcript
 
 
+# CONTRACT
+# takes:  text (str) — text to translate, source_language (str) — ISO language code of source text
+# returns: (str) — English translation, or original text on any failure
+# raises:  nothing (degrades gracefully, never raises)
 async def translate_to_english(text: str, source_language: str = "kn") -> str:
     """
     Translate `text` (default Kannada) to English via Zia Translation.
@@ -170,6 +198,10 @@ async def translate_to_english(text: str, source_language: str = "kn") -> str:
 
     return text
 
+# CONTRACT
+# takes:  text (str) — markdown-containing answer text
+# returns: (str) — text with table pipes, headers, and markdown symbols removed
+# raises:  nothing
 def _strip_markdown_for_speech(text: str) -> str:
     """Remove table pipes, headers, and markdown symbols before TTS."""
     import re
@@ -180,6 +212,10 @@ def _strip_markdown_for_speech(text: str) -> str:
     text = re.sub(r'\n{2,}', ' ', text)
     return text.strip()
 
+# CONTRACT
+# takes:  text (str) — text containing abbreviations TTS engines mispronounce
+# returns: (str) — text with abbreviations expanded to phonetic spellings
+# raises:  nothing
 def _normalize_for_speech(text: str) -> str:
     """
     Expand abbreviations TTS engines mispronounce into phonetic spellings
@@ -204,6 +240,10 @@ def _normalize_for_speech(text: str) -> str:
         text = re.sub(pattern, replacement, text)
     return text
 
+# CONTRACT
+# takes:  text (str) — text containing standalone digit sequences
+# returns: (str) — text with digits replaced by spoken English words
+# raises:  nothing
 def _numbers_to_words(text: str) -> str:
     """
     Convert standalone digits to spoken-out English words so the TTS engine
@@ -222,6 +262,10 @@ def _numbers_to_words(text: str) -> str:
 
     return re.sub(r'\b\d+\b', replace_number, text)
 
+# CONTRACT
+# takes:  text (str) — text to synthesize into speech, language (str) — language code for TTS
+# returns: (bytes) — raw audio bytes (MP3/WAV)
+# raises:  VoiceError — when TTS is not configured, text is empty, request fails, or response is empty
 async def synthesize_speech(text: str, language: str = "en") -> bytes:
     """
     Convert `text` to speech audio via Zia TTS. Returns raw audio bytes

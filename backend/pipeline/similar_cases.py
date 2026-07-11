@@ -15,6 +15,10 @@ Similarity signals:
 from db.connection import execute_query
 
 
+# CONTRACT
+# takes:  case_master_id (int) — CaseMasterID of the source case, limit (int) — max results to return
+# returns: (list[dict]) — similar cases ranked by match_score with match_reasons
+# raises:  nothing (returns empty list on missing source case)
 async def find_similar_cases(case_master_id: int, limit: int = 5) -> list[dict]:
     """
     Returns cases similar to `case_master_id`, ranked by match_score desc.

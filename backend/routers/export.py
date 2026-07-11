@@ -15,12 +15,20 @@ import html as html_lib
 router = APIRouter()
 
 
+# CONTRACT
+# takes:  value (Any) — value to HTML-escape for safe rendering
+# returns: (str) — HTML-escaped string representation
+# raises:  nothing
 def _escape(value) -> str:
     if value is None:
         return ""
     return html_lib.escape(str(value), quote=True)
 
 
+# CONTRACT
+# takes:  messages (list) — message dicts from DB, history (list) — conversation history with table snapshots
+# returns: (list) — messages with table_data hydrated from history where missing
+# raises:  nothing
 def _merge_history_tables(messages: list, history: list) -> list:
     table_turns = [
         t for t in history
@@ -61,6 +69,10 @@ def _merge_history_tables(messages: list, history: list) -> list:
     return merged
 
 
+# CONTRACT
+# takes:  officer_name (str) — officer's display name, badge_number (str) — KGID, title (str) — session title, messages (list) — message dicts with content and optional table_data
+# returns: (str) — complete HTML document string for export
+# raises:  nothing
 def _build_html(officer_name: str, badge_number: str, title: str, messages: list) -> str:
     messages_html = ""
     for msg in messages:

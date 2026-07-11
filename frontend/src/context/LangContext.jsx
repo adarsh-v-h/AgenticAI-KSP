@@ -26,6 +26,10 @@ export function LangProvider({ children }) {
   );
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (object) — {lang, setLang, t} language state, setter, and translation helper
+// throws:  Error — when used outside a LangProvider
 export function useLang() {
   const ctx = useContext(LangContext);
   if (!ctx) {

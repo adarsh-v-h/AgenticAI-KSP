@@ -48,6 +48,10 @@ class ValidationResult:
     error: str | None = None
 
 
+# CONTRACT
+# takes:  sql (str) — raw LLM output potentially with markdown fences and backticks
+# returns: (str) — cleaned SQL string ready for validation
+# raises:  nothing
 def sanitize_sql(sql: str) -> str:
     """
     Clean up the raw LLM output:
@@ -82,6 +86,10 @@ def sanitize_sql(sql: str) -> str:
     return text.strip()
 
 
+# CONTRACT
+# takes:  sql (str) — SQL string to extract CTE names from
+# returns: (list[str]) — lowercase CTE names defined in WITH clauses
+# raises:  nothing
 def _extract_cte_names(sql: str) -> list[str]:
     """
     Pull names defined in a `WITH name AS (...)` clause (including chained
@@ -100,6 +108,10 @@ def _extract_cte_names(sql: str) -> list[str]:
     return [m.strip("`\"").lower() for m in pattern.findall(sql)]
 
 
+# CONTRACT
+# takes:  sql (str) — SQL string to extract table references from
+# returns: (list[str]) — table names found after FROM/JOIN keywords
+# raises:  nothing
 def _extract_tables(sql: str) -> list[str]:
     """
     Pull out table names that appear after FROM and JOIN clauses.
@@ -121,6 +133,10 @@ def _extract_tables(sql: str) -> list[str]:
     return cleaned
 
 
+# CONTRACT
+# takes:  sql (str) — sanitized SQL to validate, allowed_tables (list[str] | None) — whitelist of permitted table names
+# returns: (ValidationResult) — validation outcome with is_valid flag and optional error message
+# raises:  nothing
 def validate_sql(sql: str, allowed_tables: list[str] | None = None) -> ValidationResult:
     """
     Validate a sanitized (or near-sanitized) SQL string. Returns a

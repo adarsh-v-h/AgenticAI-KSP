@@ -25,6 +25,10 @@ const SIDEBAR_MIN_WIDTH = 220
 const SIDEBAR_MAX_WIDTH = 480
 const SIDEBAR_DEFAULT_WIDTH = 260
 
+// CONTRACT
+// takes:  nothing
+// returns: (boolean) — true if sidebar was previously collapsed by the user
+// throws:  never
 function readSidebarCollapsed() {
   if (typeof window === 'undefined' || !window.localStorage) return false
   try {
@@ -34,6 +38,10 @@ function readSidebarCollapsed() {
   }
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (number) — persisted sidebar width in pixels, clamped to min/max bounds
+// throws:  never
 function readSidebarWidth() {
   if (typeof window === 'undefined' || !window.localStorage) return SIDEBAR_DEFAULT_WIDTH
   try {
@@ -46,11 +54,19 @@ function readSidebarWidth() {
   }
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (string) — a new unique session identifier (UUID or fallback random string)
+// throws:  never
 function newSessionId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
   return 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
+// CONTRACT
+// takes:  nothing
+// returns: (string) — a new unique message identifier
+// throws:  never
 function newMessageId() {
   return 'm-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }

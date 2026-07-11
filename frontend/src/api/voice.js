@@ -5,6 +5,10 @@
 
 import { getToken } from './auth.js'
 
+// CONTRACT
+// takes:  audioBlob (Blob) — recorded audio in webm format, language ('en'|'kn') — spoken language code
+// returns: (Promise<{transcript: string, translated: string|null}>) — transcription result
+// throws:  Error — with user-friendly message on network or transcription failure
 /**
  * Transcribe a recorded audio blob.
  *
@@ -51,6 +55,10 @@ export async function recordAndTranscribe(audioBlob, language = 'en') {
   }
 }
 
+// CONTRACT
+// takes:  text (string) — text to synthesize into speech, language ('en'|'kn') — target language
+// returns: (Promise<boolean>) — true if audio played successfully, false otherwise
+// throws:  never
 /**
  * Synthesize speech for `text` and play it. Best-effort: resolves to true when
  * audio played, false when synthesis was unavailable. Never throws — TTS is an

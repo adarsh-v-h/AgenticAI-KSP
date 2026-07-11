@@ -24,6 +24,10 @@ from routers.decision_support import router as decision_support_router
 from routers.profiling import router as profiling_router
 from conversation.history import init_nosql_table
 
+# CONTRACT
+# takes:  app (FastAPI) — the FastAPI application instance
+# returns: nothing (async context manager yields after startup, runs shutdown after)
+# raises:  nothing (DB/NoSQL failures are logged as warnings, never crash startup)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # â”€â”€ STARTUP â”€â”€

@@ -8,6 +8,10 @@ import { IconDownload } from './Icons.jsx'
 //   - This week    â†’ weekday name, e.g. "Monday"
 //   - Older        â†’ short date, e.g. "Jan 15"
 // Returns an empty string when the timestamp is missing or unparseable.
+// CONTRACT
+// takes:  iso (string|null) — ISO 8601 timestamp to format
+// returns: (string) — human-friendly relative time label (e.g. "12:30 PM", "Yesterday", "Monday", "Jan 15")
+// throws:  never
 function formatRelativeTimestamp(iso) {
   if (!iso) return ''
   const date = new Date(iso)

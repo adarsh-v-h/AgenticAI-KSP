@@ -12,6 +12,10 @@ from db.connection import execute_write
 import sys
 
 
+# CONTRACT
+# takes:  *allowed_roles (str) — one or more role names that are permitted
+# returns: (Callable) — FastAPI dependency that checks the officer's role and returns the officer dict
+# raises:  nothing (returned dependency raises HTTPException 403 on role mismatch)
 def require_role(*allowed_roles: str):
     """
     FastAPI dependency factory. Use like:
@@ -30,6 +34,10 @@ def require_role(*allowed_roles: str):
     return checker
 
 
+# CONTRACT
+# takes:  officer_id (int) — EmployeeID performing the action, action (str) — action name, resource_type (str | None) — type of resource affected, resource_id (str | None) — ID of resource affected, details (str | None) — extra context, request (Request | None) — HTTP request for IP extraction
+# returns: nothing
+# raises:  nothing (non-fatal, failures are logged to stderr)
 async def log_action(
     officer_id: int,
     action: str,

@@ -7,6 +7,10 @@ no case_relationships table. This stays faithful to what KSP actually specified.
 from db.connection import execute_query
 
 
+# CONTRACT
+# takes:  case_master_id (int) — CaseMasterID to find co-accused within
+# returns: (list[dict]) — rows with AccusedMasterID and AccusedName of other accused in the same case
+# raises:  Exception — when DB query fails
 async def _fetch_co_accused_links(case_master_id: int) -> list[dict]:
     """Other accused in the SAME case — trivially co-accused."""
     return await execute_query(
@@ -19,6 +23,10 @@ async def _fetch_co_accused_links(case_master_id: int) -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  accused_name (str) — name to search for across all cases
+# returns: (list[dict]) — rows with CaseMasterID, CrimeNo, AccusedMasterID for matching accused
+# raises:  Exception — when DB query fails
 async def _fetch_repeat_appearances(accused_name: str) -> list[dict]:
     """Other cases featuring an accused with the same name."""
     return await execute_query(
@@ -30,6 +38,10 @@ async def _fetch_repeat_appearances(accused_name: str) -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  crime_minor_head_id (int) — crime type ID, police_station_id (int) — station ID, case_master_id (int) — ID to exclude from results
+# returns: (list[dict]) — up to 10 rows with CaseMasterID and CrimeNo of pattern-similar cases
+# raises:  Exception — when DB query fails
 async def _fetch_similar_pattern_cases(crime_minor_head_id: int, police_station_id: int, case_master_id: int) -> list[dict]:
     """Cases with same crime type at same station — possible pattern link."""
     return await execute_query(
@@ -43,6 +55,10 @@ async def _fetch_similar_pattern_cases(crime_minor_head_id: int, police_station_
     )
 
 
+# CONTRACT
+# takes:  fir_id (int) — CaseMasterID to build the graph around
+# returns: (dict) — vis.js-compatible graph with "nodes" and "edges" lists
+# raises:  nothing (returns empty graph on missing case)
 async def build_graph_for_fir(fir_id: int) -> dict:
     """
     Build a network graph centered on a case (CaseMasterID).
@@ -113,6 +129,10 @@ async def build_graph_for_fir(fir_id: int) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
+# CONTRACT
+# takes:  accused_id (int) — AccusedMasterID to build the graph around
+# returns: (dict) — vis.js-compatible graph with "nodes" and "edges" lists
+# raises:  nothing (returns empty graph on missing accused)
 async def build_graph_for_accused(accused_id: int) -> dict:
     """
     Build a network graph centered on an accused person (AccusedMasterID).

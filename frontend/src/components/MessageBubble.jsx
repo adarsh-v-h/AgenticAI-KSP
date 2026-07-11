@@ -8,6 +8,10 @@ import { useLang } from '../context/LangContext.jsx'
 // Pull the first usable CaseMasterID out of structured table rows so "View network"
 // can open a graph centered on that case. Returns null when no CaseMasterID column
 // is present (e.g. aggregate-only results).
+// CONTRACT
+// takes:  tableData (Array<object>|any) — structured table rows from the chat response
+// returns: (number|null) — the first valid CaseMasterID as a number, or null if none found
+// throws:  never
 function firstFirId(tableData) {
   const match =
     Array.isArray(tableData) &&
@@ -31,6 +35,10 @@ function firstFirId(tableData) {
 // We drop runs of >=2 consecutive table lines (a real table needs at least
 // header + body OR header + divider + body). Lone pipe-bearing sentences
 // like `He said "she said | maybe"` survive untouched.
+// CONTRACT
+// takes:  text (string|null) — markdown prose that may contain embedded markdown tables
+// returns: (string|null) — text with markdown table blocks stripped out
+// throws:  never
 function stripMarkdownTable(text) {
   if (!text || typeof text !== 'string') return text
   if (!text.includes('|')) return text

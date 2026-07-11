@@ -7,12 +7,20 @@ class NoSQLError(Exception):
     """Raised when an operation on Catalyst NoSQL fails."""
     pass
 
+# CONTRACT
+# takes:  nothing
+# returns: (str) — base project URL with /nosql suffix stripped if present
+# raises:  ValueError — when NOSQL_BASE_URL env var is not set
 def _get_base_project_url() -> str:
     nosql_base = get("NOSQL_BASE_URL").rstrip("/")
     if nosql_base.endswith("/nosql"):
         return nosql_base[:-6]
     return nosql_base
 
+# CONTRACT
+# takes:  nothing
+# returns: (dict) — authorization and content-type headers for Catalyst NoSQL API calls
+# raises:  ValueError — when required env vars are not set
 def _nosql_headers() -> dict:
     return {
         "Authorization": f"Zoho-oauthtoken {get('CATALYST_API_TOKEN')}",
@@ -20,6 +28,10 @@ def _nosql_headers() -> dict:
         "CATALYST-ORG": get("CATALYST_ORG_ID"),
     }
 
+# CONTRACT
+# takes:  val (any) — Python value to serialize into Catalyst NoSQL typed format
+# returns: (dict) — Catalyst-typed wrapper (e.g. {"S": ...}, {"N": ...}, {"BOOL": ...})
+# raises:  nothing
 def serialize_to_catalyst(val):
     if isinstance(val, bool):
         return {"BOOL": val}
@@ -36,6 +48,10 @@ def serialize_to_catalyst(val):
     else:
         return {"S": str(val)}
 
+# CONTRACT
+# takes:  c_val (dict) — Catalyst-typed value wrapper to deserialize
+# returns: (any) — native Python value extracted from the typed wrapper
+# raises:  nothing
 def deserialize_from_catalyst(c_val):
     if not isinstance(c_val, dict) or len(c_val) != 1:
         return c_val
@@ -56,6 +72,10 @@ def deserialize_from_catalyst(c_val):
         return {k: deserialize_from_catalyst(val) for k, val in v.items()}
     return c_val
 
+# CONTRACT
+# takes:  item_data (dict) — raw Catalyst NoSQL item with typed attribute values
+# returns: (dict) — deserialized item with native Python values
+# raises:  nothing
 def deserialize_item(item_data: dict) -> dict:
     if not item_data:
         return {}
@@ -64,6 +84,13 @@ def deserialize_item(item_data: dict) -> dict:
         res[k] = deserialize_from_catalyst(v)
     return res
 
+# CONTRACT
+# takes:  table_name (str) — NoSQL table to fetch from,
+#          document_id (str) — primary key value of the document,
+#          timeout (float) — HTTP request timeout in seconds,
+#          key_name (str) — name of the primary key attribute
+# returns: (dict | None) — deserialized document, or None if not found
+# raises:  NoSQLError — when the API returns a non-success/non-404 status
 async def get_document(table_name: str, document_id: str, timeout: float = 5.0, key_name: str = "id") -> dict | None:
     """
     Fetch a single item from the NoSQL table.
@@ -100,6 +127,14 @@ async def get_document(table_name: str, document_id: str, timeout: float = 5.0, 
         else:
             raise NoSQLError(f"Fetch item {document_id} failed with status {response.status_code}: {response.text}")
 
+# CONTRACT
+# takes:  table_name (str) — NoSQL table to insert into,
+#          document_id (str) — primary key value for the new document,
+#          document_data (dict) — key-value pairs to store in the document,
+#          timeout (float) — HTTP request timeout in seconds,
+#          key_name (str) — name of the primary key attribute
+# returns: (bool) — True on successful insert
+# raises:  NoSQLError — when the API returns a non-success status
 async def insert_document(table_name: str, document_id: str, document_data: dict, timeout: float = 5.0, key_name: str = "id") -> bool:
     """
     Insert a document into NoSQL.
@@ -120,6 +155,14 @@ async def insert_document(table_name: str, document_id: str, document_data: dict
             return True
         raise NoSQLError(f"Insert item {document_id} failed with status {response.status_code}: {response.text}")
 
+# CONTRACT
+# takes:  table_name (str) — NoSQL table containing the document,
+#          document_id (str) — primary key value of the document to update,
+#          updates (dict) — key-value pairs to update on the document,
+#          timeout (float) — HTTP request timeout in seconds,
+#          key_name (str) — name of the primary key attribute
+# returns: (bool) — True on successful update
+# raises:  NoSQLError — when the API returns a non-success status
 async def update_document(table_name: str, document_id: str, updates: dict, timeout: float = 5.0, key_name: str = "id") -> bool:
     """
     Update attributes of a document in NoSQL.
@@ -149,6 +192,13 @@ async def update_document(table_name: str, document_id: str, updates: dict, time
             return True
         raise NoSQLError(f"Update item {document_id} failed with status {response.status_code}: {response.text}")
 
+# CONTRACT
+# takes:  table_name (str) — NoSQL table containing the document,
+#          document_id (str) — primary key value of the document to delete,
+#          timeout (float) — HTTP request timeout in seconds,
+#          key_name (str) — name of the primary key attribute
+# returns: (bool) — True on successful deletion
+# raises:  NoSQLError — when the API returns a non-success status
 async def delete_document(table_name: str, document_id: str, timeout: float = 5.0, key_name: str = "id") -> bool:
     """
     Delete a document in NoSQL.
@@ -169,6 +219,11 @@ async def delete_document(table_name: str, document_id: str, timeout: float = 5.
             return True
         raise NoSQLError(f"Delete item {document_id} failed with status {response.status_code}: {response.text}")
 
+# CONTRACT
+# takes:  table_name (str) — NoSQL table to list documents from,
+#          timeout (float) — HTTP request timeout in seconds
+# returns: (list[dict]) — list of deserialized documents from the table
+# raises:  NoSQLError — when the API returns a non-success/non-404 status
 async def list_documents(table_name: str, timeout: float = 5.0) -> list[dict]:
     """
     List all documents in a table using GET /item.

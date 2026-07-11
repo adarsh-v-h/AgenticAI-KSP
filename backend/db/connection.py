@@ -4,6 +4,11 @@ from config.settings import get
 
 _pool = None
 
+# CONTRACT
+# takes:  nothing
+# returns: (aiomysql.Pool) — newly created MySQL connection pool
+# raises:  ValueError — when required DB env vars are not set,
+#           aiomysql.Error — when database connection fails
 async def create_pool() -> aiomysql.Pool:
     """
     Create the global connection pool.
@@ -33,6 +38,10 @@ async def create_pool() -> aiomysql.Pool:
     )
     return _pool
 
+# CONTRACT
+# takes:  nothing
+# returns: (aiomysql.Pool) — the existing global connection pool
+# raises:  RuntimeError — when pool has not been created yet
 async def get_pool() -> aiomysql.Pool:
     """
     Return the existing pool.
@@ -42,12 +51,23 @@ async def get_pool() -> aiomysql.Pool:
         raise RuntimeError("Database connection pool has not been created yet.")
     return _pool
 
+# CONTRACT
+# takes:  row (dict) — a single database row with potential BIT field bytes
+# returns: (dict) — the row with single-byte BIT fields converted to booleans
+# raises:  nothing
 def _normalize_bit_fields(row: dict) -> dict:
     return {
         k: (v == b'\x01' if isinstance(v, bytes) and len(v) == 1 else v)
         for k, v in row.items()
     }
 
+# CONTRACT
+# takes:  sql (str) — SELECT query to execute,
+#          params (tuple) — parameterized query values
+# returns: (list[dict]) — list of row dicts (column_name → value)
+# raises:  RuntimeError — when pool has not been created,
+#           ValueError — when sql is not a SELECT statement,
+#           TimeoutError — when query exceeds 5-second timeout
 async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
     """
     Execute a SELECT-only query using the global pool.
@@ -81,6 +101,13 @@ async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
     except asyncio.TimeoutError:
         raise TimeoutError("Database query execution timed out (5s limit reached).")
 
+# CONTRACT
+# takes:  sql (str) — INSERT or UPDATE statement to execute,
+#          params (tuple) — parameterized query values
+# returns: (int) — lastrowid for INSERT, rowcount for UPDATE
+# raises:  RuntimeError — when pool has not been created,
+#           ValueError — when sql is a SELECT statement,
+#           TimeoutError — when write exceeds 5-second timeout
 async def execute_write(sql: str, params: tuple = ()) -> int:
     """
     Execute an INSERT or UPDATE statement.
@@ -112,6 +139,10 @@ async def execute_write(sql: str, params: tuple = ()) -> int:
     except asyncio.TimeoutError:
         raise TimeoutError("Database write timed out (5s limit).")
 
+# CONTRACT
+# takes:  nothing
+# returns: nothing
+# raises:  nothing
 async def close_pool():
     """
     Close the pool. Called during FastAPI shutdown in main.py lifespan.

@@ -39,6 +39,10 @@ _kb_doc_ids_cache: list[str] | None = None
 _kb_env_mtime: float = 0.0
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (list[str]) — KB document IDs loaded from .env, cached until file changes
+# raises:  nothing
 def _get_kb_document_ids() -> list[str]:
     """
     Dynamically load KB_DOCUMENT_IDS from .env. Re-reads the file if its
@@ -71,6 +75,10 @@ def _get_kb_document_ids() -> list[str]:
 
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
@@ -93,6 +101,10 @@ class PipelineResponse:
 _GENERIC_DB_ERROR = "I couldn't run that query. Try rephrasing."
 
 
+# CONTRACT
+# takes:  results (list[dict]) — query result rows to check
+# returns: (bool) — True if the first result row contains a CaseMasterID key
+# raises:  nothing
 def _has_case_master_id(results: list[dict]) -> bool:
     if not results:
         return False
@@ -100,12 +112,20 @@ def _has_case_master_id(results: list[dict]) -> bool:
     return isinstance(first, dict) and ("CaseMasterID" in first or "case_master_id" in first)
 
 
+# CONTRACT
+# takes:  case_master_ids (list[int]) — list of CaseMasterIDs to check
+# returns: (bool) — True if any case IDs are present (graph derivable on demand)
+# raises:  nothing
 async def _check_graph_available(case_master_ids: list[int]) -> bool:
     # Graph edges are derived live from Accused/CaseMaster (Option A, MIGRATE_STEP4).
     # Return True whenever we have case IDs -- the builder derives edges on demand.
     return bool(case_master_ids)
 
 
+# CONTRACT
+# takes:  history (list[dict]) — conversation history turns
+# returns: (list[dict]) — the table snapshot from the most recent assistant turn, or []
+# raises:  nothing
 def _most_recent_table(history: list[dict]) -> list[dict]:
     """
     Return the most recent assistant turn's stored table snapshot, or [].
@@ -120,6 +140,10 @@ def _most_recent_table(history: list[dict]) -> list[dict]:
     return []
 
 
+# CONTRACT
+# takes:  question (str) — user question, history (list[dict]) — conversation history, recent_table (list[dict]) — last result set
+# returns: (PipelineResponse) — answer generated without SQL, with error handling
+# raises:  nothing (never raises, errors surfaced in response fields)
 async def _run_direct(
     question: str, history: list[dict], recent_table: list[dict]
 ) -> PipelineResponse:
@@ -146,6 +170,10 @@ async def _run_direct(
     return response
 
 
+# CONTRACT
+# takes:  question (str) — user question, history (list[dict] | None) — conversation history, officer (dict | None) — authenticated officer JWT payload
+# returns: (PipelineResponse) — full pipeline result with answer, table data, media, graph flag
+# raises:  nothing (never raises, all failures surfaced via error/answer_text fields)
 async def run_pipeline(
     question: str, history: list[dict] | None = None, officer: dict | None = None
 ) -> PipelineResponse:

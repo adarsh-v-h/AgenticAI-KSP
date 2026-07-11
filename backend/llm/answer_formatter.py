@@ -16,10 +16,21 @@ _RETRY_ROWS = 15
 _RETRY_FIELD_CHARS = 80
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  question (str) — the user's natural-language question,
+#          results (list[dict]) — raw rows from the DB query,
+#          media_attachments (list[dict]) — resolved media references for the response,
+#          history (list[dict] | None) — prior conversation turns for context
+# returns: (str) — natural-language answer formatted from the query results
+# raises:  LLMError — when the LLM call fails (non-payload-size errors)
 async def format_answer(
     question: str,
     results: list[dict],
@@ -73,6 +84,12 @@ async def format_answer(
         )
 
 
+# CONTRACT
+# takes:  question (str) — the user's natural-language question,
+#          history (list[dict] | None) — prior conversation turns for context,
+#          has_recent_data (bool) — whether the session has recent query results available
+# returns: (str) — routing decision, either "SQL" or "DIRECT"
+# raises:  nothing (catches all exceptions, defaults to "SQL")
 async def route_intent(
     question: str,
     history: list[dict] | None,
@@ -107,6 +124,12 @@ async def route_intent(
         return "SQL"
 
 
+# CONTRACT
+# takes:  question (str) — the user's natural-language question,
+#          history (list[dict] | None) — prior conversation turns for context,
+#          recent_table (list[dict] | None) — most recent query result rows for grounding
+# returns: (str) — natural-language answer generated without running SQL
+# raises:  LLMError — when the underlying LLM call fails
 async def generate_direct_answer(
     question: str,
     history: list[dict] | None,

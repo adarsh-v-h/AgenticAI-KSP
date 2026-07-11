@@ -82,15 +82,27 @@ class MessagesResponse(BaseModel):
     messages: list[Message]
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  event (dict) — SSE event payload to serialize
+# returns: (str) — formatted SSE message string ending with blank line
+# raises:  nothing
 def _sse(event: dict) -> str:
     """Format a single SSE message. Must end with a blank line."""
     return f"data: {json.dumps(event, default=str)}\n\n"
 
 
+# CONTRACT
+# takes:  session_id (str) — session to persist turn to, officer (dict) — authenticated officer, question (str) — user question, result (PipelineResponse) — pipeline output, session_exists (bool) — whether session row already exists
+# returns: nothing
+# raises:  nothing (never raises, failures are logged)
 async def _persist_turn(session_id: str, officer: dict, question: str, result, session_exists: bool) -> None:
     """
     Persist a completed pipeline turn to MySQL (Step 4).
@@ -140,6 +152,10 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result, s
         _log(f"_persist_turn failed (non-fatal): {e}")
 
 
+# CONTRACT
+# takes:  session_id (str) — session to authorize, officer_id (int) — EmployeeID of the requesting officer
+# returns: (bool) — True if session exists and is owned by this officer, False if session does not exist yet
+# raises:  HTTPException — when session exists but belongs to another officer (404)
 async def _authorize_session_write(session_id: str, officer_id: int) -> bool:
     """
     Authorization gate for chat write paths (POST /api/chat and the SSE stream).
@@ -526,6 +542,10 @@ async def chat_stream(
     )
 
 
+# CONTRACT
+# takes:  text (str) — answer text to split into streaming tokens
+# returns: (list[str]) — space-preserving tokens for token-by-token SSE streaming
+# raises:  nothing
 def _tokenize(text: str) -> list[str]:
     """
     Split `text` into space-preserving tokens for token-by-token streaming.
