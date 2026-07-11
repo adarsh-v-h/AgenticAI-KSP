@@ -110,6 +110,18 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result, s
             await create_chat_session_row(
                 session_id, officer["officer_id"], question[:60]
             )
+            now_iso = datetime.now(timezone.utc).isoformat()
+            try:
+                await create_session({
+                    "id": session_id,
+                    "officer_id": officer["officer_id"],
+                    "title": question[:60],
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                    "message_count": 0,
+                })
+            except Exception as e:
+                _log(f"WARNING: NoSQL session_metadata create failed for {session_id} (non-fatal): {e}")
 
         await save_message_pair(
             session_id=session_id,
@@ -354,6 +366,9 @@ async def chat(
         )
 
     if not result.error:
+        # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
+        await _persist_turn(request.session_id, officer, question, result, session_exists)
+
         try:
             await save_turn(
                 request.session_id,
@@ -365,8 +380,6 @@ async def chat(
         except Exception as e:
             _log(f"save_turn failed (non-fatal): {e}")
 
-        # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
-        await _persist_turn(request.session_id, officer, question, result, session_exists)
 
     return ChatResponse(
         answer_text=result.answer_text,
@@ -475,6 +488,9 @@ async def chat_stream(
             if result.suggested_follow_ups:
                 yield _sse({"type": "suggested_follow_ups", "items": result.suggested_follow_ups})
 
+            # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
+            await _persist_turn(session_id, officer, q, result, session_exists)
+
             try:
                 await save_turn(
                     session_id,
@@ -486,8 +502,6 @@ async def chat_stream(
             except Exception as e:
                 _log(f"save_turn failed in stream (non-fatal): {e}")
 
-            # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
-            await _persist_turn(session_id, officer, q, result, session_exists)
 
             yield _sse({"type": "done"})
 
