@@ -46,21 +46,37 @@ from db.nosql_client import (
 )
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier
+# returns: (dict | None) — session metadata document from in-memory store, or None
+# raises:  nothing
 async def _local_get(session_id: str) -> dict | None:
     async with _local_lock:
         doc = _local_sessions.get(session_id)
         return dict(doc) if doc is not None else None
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier, document (dict) — metadata to store
+# returns: nothing
+# raises:  nothing
 async def _local_set(session_id: str, document: dict) -> None:
     async with _local_lock:
         _local_sessions[session_id] = dict(document)
 
 
+# CONTRACT
+# takes:  officer_id (int | None) — optional filter for a specific officer's sessions
+# returns: (list[dict]) — all matching session documents from in-memory store
+# raises:  nothing
 async def _local_list(officer_id: int | None = None) -> list[dict]:
     async with _local_lock:
         docs = [dict(d) for d in _local_sessions.values()]
@@ -69,6 +85,10 @@ async def _local_list(officer_id: int | None = None) -> list[dict]:
     return docs
 
 
+# CONTRACT
+# takes:  document (dict) — full session_metadata document with id, officer_id, title, timestamps, message_count
+# returns: (dict) — the stored document
+# raises:  ValueError — when document lacks an 'id' field
 async def create_session(document: dict) -> dict:
     """
     Persist a new session_metadata document. `document` must already contain
@@ -99,6 +119,10 @@ async def create_session(document: dict) -> dict:
     return document
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier to look up
+# returns: (dict | None) — session metadata document or None if not found
+# raises:  nothing (never raises, falls back to in-memory)
 async def get_session(session_id: str) -> dict | None:
     """
     Fetch the session_metadata document for `session_id`. Returns the document
@@ -119,6 +143,10 @@ async def get_session(session_id: str) -> dict | None:
     return await _local_get(session_id)
 
 
+# CONTRACT
+# takes:  session_id (str) — session to update, updates (dict) — key-value pairs to merge
+# returns: (dict | None) — merged document or None if session not found
+# raises:  nothing (never raises, failures are logged)
 async def update_session(session_id: str, updates: dict) -> dict | None:
     """
     Apply `updates` to an existing session_metadata document and persist via
@@ -153,6 +181,10 @@ async def update_session(session_id: str, updates: dict) -> dict | None:
     return merged
 
 
+# CONTRACT
+# takes:  officer_id (int) — EmployeeID to filter sessions by
+# returns: (list[dict]) — session metadata documents sorted by updated_at descending
+# raises:  nothing (never raises, falls back to in-memory)
 async def list_sessions(officer_id: int) -> list[dict]:
     """
     Return all session_metadata documents for `officer_id`, ordered by
@@ -194,6 +226,10 @@ _TITLE_MAX_LENGTH = 60
 _TITLE_FALLBACK = "New chat"
 
 
+# CONTRACT
+# takes:  message (str) — the first user message in a session
+# returns: (str) — short human-readable title (≤60 chars) for the session
+# raises:  nothing
 def generate_title(message: str) -> str:
     """
     Generate a human-readable session title from the first user message.

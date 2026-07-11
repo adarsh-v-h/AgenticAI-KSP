@@ -6,6 +6,10 @@ import {
   getOfficer,
 } from '../api/auth.js'
 
+// CONTRACT
+// takes:  nothing
+// returns: (object) — {isAuthenticated, officer, isLoading, error, login, logout} auth state and actions
+// throws:  never
 export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(isLoggedIn())
   const [officer, setOfficer] = useState(getOfficer())

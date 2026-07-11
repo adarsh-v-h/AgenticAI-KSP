@@ -51,6 +51,10 @@ Pay attention to: column/table names that don't exist in the schema, ENUM litera
 """
 
 
+# CONTRACT
+# takes:  history (list[dict]) — conversation history turns, max_turns (int) — max user/assistant pairs to include, max_chars (int) — max chars per assistant answer
+# returns: (str) — compressed history block for prompts, or "" if empty
+# raises:  nothing
 def _format_history_for_prompt(
     history: list[dict],
     max_turns: int = 2,
@@ -94,6 +98,10 @@ def _format_history_for_prompt(
     return "\n".join(lines)
 
 
+# CONTRACT
+# takes:  history (list[dict]) — conversation history with optional sql field, max_turns (int) — max pairs, max_answer_chars (int) — max chars per answer
+# returns: (str) — history block including prior SQL for follow-up preservation, or ""
+# raises:  nothing
 def _format_history_for_sql_prompt(
     history: list[dict],
     max_turns: int = 2,
@@ -136,6 +144,10 @@ def _format_history_for_sql_prompt(
     return "\n".join(lines)
 
 
+# CONTRACT
+# takes:  officer (dict | None) — authenticated employee info with officer_id and badge_number
+# returns: (str) — identity block for SQL prompt resolving first-person references, or ""
+# raises:  nothing
 def _format_officer_for_prompt(officer: dict | None) -> str:
     """
     Build a short identity block describing the authenticated employee so the
@@ -166,6 +178,10 @@ def _format_officer_for_prompt(officer: dict | None) -> str:
     )
 
 
+# CONTRACT
+# takes:  question (str) — user question, schema (str) — DB schema text, few_shots (str) — example queries, history (list[dict] | None) — conversation history, officer (dict | None) — authenticated officer identity
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for the SQL generation LLM call
+# raises:  nothing
 def build_sql_prompt(
     question: str,
     schema: str,
@@ -203,6 +219,10 @@ def build_sql_prompt(
     return sys_p, user_p
 
 
+# CONTRACT
+# takes:  results (list[dict]) — query results to trim, max_rows (int) — row cap, max_field_chars (int) — per-field char cap
+# returns: (list[dict]) — trimmed results with long string fields clipped
+# raises:  nothing
 def _truncate_for_answer(results: list[dict], max_rows: int = 50, max_field_chars: int = 200) -> list[dict]:
     """Trim results to `max_rows` rows and clip long string fields."""
     trimmed = []
@@ -217,6 +237,10 @@ def _truncate_for_answer(results: list[dict], max_rows: int = 50, max_field_char
     return trimmed
 
 
+# CONTRACT
+# takes:  media_refs (list[dict]) — media attachment dicts with media_type fields
+# returns: (str) — human-readable summary like "3 attachment(s): 2 image, 1 video"
+# raises:  nothing
 def _summarize_media(media_refs: list[dict]) -> str:
     if not media_refs:
         return "None"
@@ -228,6 +252,10 @@ def _summarize_media(media_refs: list[dict]) -> str:
     return f"{len(media_refs)} attachment(s): " + ", ".join(parts)
 
 
+# CONTRACT
+# takes:  question (str) — officer's question, results (list[dict]) — query results, media_refs (list[dict]) — media attachments, history (list[dict] | None) — conversation history, max_rows (int) — result row cap, max_field_chars (int) — per-field char cap
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for answer-formatting LLM call
+# raises:  nothing
 def build_answer_prompt(
     question: str,
     results: list[dict],
@@ -273,6 +301,10 @@ def build_answer_prompt(
     return ANSWER_SYSTEM_PROMPT, user_p
 
 
+# CONTRACT
+# takes:  original_sql (str) — the invalid SQL, error (str) — error message, schema (str) — DB schema text, officer (dict | None) — authenticated officer identity
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for the SQL correction LLM call
+# raises:  nothing
 def build_correction_prompt(
     original_sql: str,
     error: str,
@@ -332,6 +364,10 @@ RULES:
 7. For greetings or general questions, respond naturally and briefly."""
 
 
+# CONTRACT
+# takes:  question (str) — officer's latest message, history (list[dict] | None) — conversation history, has_recent_data (bool) — whether recent query results are in context
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for intent router classification
+# raises:  nothing
 def build_router_prompt(
     question: str,
     history: list[dict] | None,
@@ -354,6 +390,10 @@ def build_router_prompt(
     return ROUTER_SYSTEM_PROMPT, "\n".join(parts)
 
 
+# CONTRACT
+# takes:  question (str) — officer's question, history (list[dict] | None) — conversation history, recent_table (list[dict] | None) — most recent query result set
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for direct conversational answer
+# raises:  nothing
 def build_direct_answer_prompt(
     question: str,
     history: list[dict] | None,

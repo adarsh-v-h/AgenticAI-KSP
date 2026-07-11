@@ -11,11 +11,19 @@ from decimal import Decimal
 from db.connection import execute_query, execute_write
 
 
+# CONTRACT
+# takes:  msg (any) — message to log to stderr
+# returns: nothing
+# raises:  nothing
 def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
 # ponytail: single serializer helper, ceiling: one chat payload shape, upgrade: replace with a shared JSON encoder if more stores adopt it.
+# CONTRACT
+# takes:  obj (any) — object that json.dumps cannot serialize natively
+# returns: (str | float) — ISO string for dates/times, float for Decimals
+# raises:  TypeError — when the object type is not handled
 def _serialize(obj):
     if isinstance(obj, (date, datetime)):
         return obj.isoformat()
@@ -29,6 +37,12 @@ def _serialize(obj):
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
+# CONTRACT
+# takes:  session_id (str) — unique session identifier,
+#          officer_id (int) — ID of the officer who owns the session,
+#          title (str) — display title for the session (truncated to 60 chars)
+# returns: (bool) — True on success, False on failure
+# raises:  nothing (catches all exceptions internally)
 async def create_session(session_id: str, officer_id: int, title: str) -> bool:
     try:
         await execute_write(
@@ -43,6 +57,11 @@ async def create_session(session_id: str, officer_id: int, title: str) -> bool:
         return False
 
 
+# CONTRACT
+# takes:  session_id (str) — session to update,
+#          increment_count (bool) — whether to also increment message_count by 2
+# returns: nothing
+# raises:  nothing (catches all exceptions internally)
 async def update_session_timestamp(session_id: str, increment_count: bool = True):
     try:
         if increment_count:
@@ -61,6 +80,11 @@ async def update_session_timestamp(session_id: str, increment_count: bool = True
         _log(f"WARNING: Failed to update session timestamp {session_id}: {e}")
 
 
+# CONTRACT
+# takes:  officer_id (int) — ID of the officer whose sessions to retrieve,
+#          limit (int) — maximum number of sessions to return
+# returns: (list[dict]) — list of session metadata dicts ordered by most recently updated
+# raises:  nothing (catches all exceptions, returns empty list on failure)
 async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dict]:
     try:
         rows = await execute_query(
@@ -86,6 +110,11 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
         return []
 
 
+# CONTRACT
+# takes:  session_id (str) — session to verify ownership of,
+#          officer_id (int) — expected owner's ID
+# returns: (bool) — True if the officer owns the session, False otherwise
+# raises:  nothing (catches all exceptions, returns False on failure)
 async def verify_session_owner(session_id: str, officer_id: int) -> bool:
     try:
         rows = await execute_query(
@@ -100,6 +129,19 @@ async def verify_session_owner(session_id: str, officer_id: int) -> bool:
         return False
 
 
+# CONTRACT
+# takes:  session_id (str) — session to save messages to,
+#          question (str) — the user's question text,
+#          answer_text (str) — the assistant's answer text,
+#          sql_generated (str) — SQL query that was generated (empty if none),
+#          has_table (bool) — whether the response includes tabular data,
+#          has_media (bool) — whether the response includes media attachments,
+#          graph_available (bool) — whether a graph visualization is available,
+#          table_data (list[dict]) — raw query result rows to persist,
+#          media_attachments (list[dict]) — media references for the response,
+#          assistant_follow_ups (list | None) — suggested follow-up questions
+# returns: (int | None) — the assistant message's row ID, or None on failure
+# raises:  nothing (catches all exceptions internally)
 async def save_message_pair(
     session_id: str,
     question: str,
@@ -146,6 +188,10 @@ async def save_message_pair(
         return None
 
 
+# CONTRACT
+# takes:  session_id (str) — session whose messages to retrieve
+# returns: (list[dict]) — ordered list of message dicts with parsed table_data and follow_ups
+# raises:  nothing (catches all exceptions, returns empty list on failure)
 async def get_messages_for_session(session_id: str) -> list[dict]:
     try:
         rows = await execute_query(

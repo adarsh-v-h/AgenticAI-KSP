@@ -25,6 +25,10 @@ from db.schema_catalog import SCHEMA_CATALOG  # noqa: E402
 _MAX_TABLES = 5
 
 
+# CONTRACT
+# takes:  question_lower (str) — lowercased user question, keyword (str) — keyword to match against
+# returns: (bool) — True if the keyword is present in the question respecting word boundaries
+# raises:  nothing
 def _keyword_matches(question_lower: str, keyword: str) -> bool:
     """
     Match a keyword against the lowercased question.
@@ -42,6 +46,10 @@ def _keyword_matches(question_lower: str, keyword: str) -> bool:
     return re.search(pattern, question_lower) is not None
 
 
+# CONTRACT
+# takes:  question (str) — natural language question from the user
+# returns: (list[str]) — relevant table names, CaseMaster always first, capped at 5
+# raises:  nothing
 def select_relevant_tables(question: str) -> list[str]:
     """
     Return a list of table names relevant to the question. CaseMaster always

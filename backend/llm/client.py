@@ -8,6 +8,10 @@ class LLMError(Exception):
     pass
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (dict) — authorization and content-type headers for Catalyst QuickML API calls
+# raises:  ValueError — when required env vars (CATALYST_API_TOKEN, CATALYST_ORG_ID) are not set
 def _llm_headers() -> dict:
     """Build the auth + org headers required by every Catalyst QuickML call."""
     return {
@@ -17,6 +21,10 @@ def _llm_headers() -> dict:
     }
 
 
+# CONTRACT
+# takes:  data (dict) — raw JSON response body from a GLM chat completion endpoint
+# returns: (str) — extracted assistant response text, or empty string if not found
+# raises:  nothing
 def _extract_response_text(data: dict) -> str:
     """
     Extract the assistant's text from a GLM chat completion response.
@@ -39,6 +47,10 @@ def _extract_response_text(data: dict) -> str:
     return ""
 
 
+# CONTRACT
+# takes:  model_key (str) — environment variable name that resolves to the model identifier
+# returns: (bool) — True if model responded with non-empty 200, False otherwise
+# raises:  nothing (catches all exceptions internally)
 async def ping_model(model_key: str) -> bool:
     """
     Send a minimal test message to the given model.
@@ -78,6 +90,13 @@ async def ping_model(model_key: str) -> bool:
     return False
 
 
+# CONTRACT
+# takes:  model_key (str) — env var name resolving to the model identifier (e.g. "MODEL_SQL"),
+#          prompt (str) — user/task prompt to send to the model,
+#          system_prompt (str) — system instruction for the model,
+#          max_tokens (int) — maximum tokens to generate in the response
+# returns: (str) — the model's non-empty response text
+# raises:  LLMError — on network failure, bad HTTP status, invalid JSON, or empty response
 async def call_llm(
     model_key: str,
     prompt: str,

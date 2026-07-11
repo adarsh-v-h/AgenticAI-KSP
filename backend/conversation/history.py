@@ -42,16 +42,28 @@ _TABLE_SNAPSHOT_ROWS = 30
 _LEGACY_TIMESTAMP = "1970-01-01T00:00:00+00:00"
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (str) — unique message ID prefixed with 'm-'
+# raises:  nothing
 def _new_message_id() -> str:
     """Generate a unique message_id prefixed with 'm-'."""
     return f"m-{uuid.uuid4()}"
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (str) — current UTC time as ISO 8601 string
+# raises:  nothing
 def _now_iso() -> str:
     """Current time as an ISO 8601 UTC string."""
     return datetime.now(timezone.utc).isoformat()
 
 
+# CONTRACT
+# takes:  turns (list[dict]) — raw message dicts from storage, possibly missing message_id/timestamp
+# returns: (list[dict]) — fresh list of message dicts with message_id and timestamp guaranteed
+# raises:  nothing
 def _migrate_messages(turns: list[dict]) -> list[dict]:
     """
     Lazy migration: ensure every message has a `message_id` and `timestamp`.
@@ -91,25 +103,45 @@ from db.nosql_client import (
 )
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier
+# returns: (list[dict]) — last MAX_TURNS messages from in-memory store
+# raises:  nothing
 async def _local_get(session_id: str) -> list[dict]:
     async with _local_lock:
         return list(_local_history.get(session_id, []))[-MAX_TURNS:]
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier, turns (list[dict]) — messages to store
+# returns: nothing
+# raises:  nothing
 async def _local_set(session_id: str, turns: list[dict]) -> None:
     async with _local_lock:
         _local_history[session_id] = turns[-MAX_TURNS:]
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier to clear
+# returns: nothing
+# raises:  nothing
 async def _local_clear(session_id: str) -> None:
     async with _local_lock:
         _local_history.pop(session_id, None)
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier to fetch history for
+# returns: (list[dict]) — last MAX_TURNS messages with message_id and timestamp fields
+# raises:  nothing (falls back to in-memory store on failure)
 async def get_history(session_id: str) -> list[dict]:
     """
     Fetch conversation history for `session_id`. Returns the last MAX_TURNS
@@ -140,6 +172,10 @@ async def get_history(session_id: str) -> list[dict]:
     return await _local_get(session_id)
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier, user_message (str) — first user message text, had_prior_messages (bool) — whether session had prior history, messages_added (int) — count of messages just persisted, now (str) — ISO timestamp of the save
+# returns: nothing
+# raises:  nothing (never raises, logs failures internally)
 async def _sync_session_metadata(
     session_id: str,
     user_message: str,
@@ -207,6 +243,10 @@ async def _sync_session_metadata(
         _log(f"session_metadata sync failed for {session_id}: {e}")
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier, user_message (str) — the user's question, assistant_message (str) — the assistant's response, assistant_sql (str | None) — SQL generated for this turn, assistant_table (list[dict] | None) — query result snapshot for follow-ups
+# returns: nothing
+# raises:  nothing (never raises, failures are logged)
 async def save_turn(
     session_id: str,
     user_message: str,
@@ -286,6 +326,10 @@ async def save_turn(
         _log(f"ERROR: history save/update failed for {session_id}: {e}")
 
 
+# CONTRACT
+# takes:  session_id (str) — session identifier to delete history for
+# returns: nothing
+# raises:  nothing (never raises)
 async def clear_history(session_id: str) -> None:
     """Delete history for `session_id`. Never raises."""
     if not session_id:
@@ -297,6 +341,10 @@ async def clear_history(session_id: str) -> None:
         _log(f"ERROR: history DELETE failed for {session_id}: {e}")
 
 
+# CONTRACT
+# takes:  nothing
+# returns: nothing
+# raises:  nothing (never raises, logs warning on failure)
 async def init_nosql_table() -> None:
     """
     Probe Catalyst NoSQL once at startup. We don't try to create the table

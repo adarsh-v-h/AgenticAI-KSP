@@ -31,11 +31,24 @@ class CannotAnswerError(Exception):
     pass
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     """Single-channel logger so we don't sprinkle prints everywhere."""
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  question (str) — natural-language question from the user,
+#          table_names (list[str]) — candidate table names for schema scope,
+#          history (list[dict] | None) — prior conversation turns for context,
+#          officer (dict | None) — officer metadata for role-based filtering
+# returns: (tuple[str, int]) — sanitized SQL query and number of LLM attempts consumed
+# raises:  CannotAnswerError — when the model signals the question cannot be answered from the DB,
+#           SQLGenerationError — when validation fails on all attempts,
+#           LLMError — when the underlying LLM API call fails
 async def generate_sql(
     question: str,
     table_names: list[str],
@@ -114,6 +127,14 @@ async def generate_sql(
     )
 
 
+# CONTRACT
+# takes:  original_sql (str) — the SQL query that caused a MySQL execution error,
+#          db_error (str) — the MySQL error message from execution,
+#          table_names (list[str]) — candidate table names for schema context,
+#          officer (dict | None) — officer metadata for role-based filtering
+# returns: (str) — sanitized and validated corrected SQL query
+# raises:  SQLGenerationError — when corrected SQL is empty, fails validation, or is CANNOT_ANSWER,
+#           LLMError — when the underlying LLM API call fails
 async def correct_sql_after_execution_error(
     original_sql: str,
     db_error: str,

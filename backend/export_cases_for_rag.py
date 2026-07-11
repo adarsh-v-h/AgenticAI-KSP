@@ -5,6 +5,10 @@ import os
 OUTPUT_DIR = "rag_export"
 
 
+# CONTRACT
+# takes:  nothing
+# returns: nothing
+# raises:  Exception — when DB pool creation or query execution fails
 async def main():
     await create_pool()
     try:

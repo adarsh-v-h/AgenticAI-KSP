@@ -20,6 +20,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+# CONTRACT
+# takes:  key (str) — environment variable name, required (bool) — whether to exit on missing value
+# returns: (str) — environment variable value
+# raises:  SystemExit — when required=True and the variable is not set
 def _get_env(key: str, required: bool = True) -> str:
     val = os.getenv(key, "")
     if required and not val:
@@ -28,6 +32,10 @@ def _get_env(key: str, required: bool = True) -> str:
     return val
 
 
+# CONTRACT
+# takes:  env_path (Path) — path to .env file to write the new token to
+# returns: (str) — the new access token
+# raises:  SystemExit — when refresh token env vars are missing or response lacks access_token
 def refresh_token(env_path: Path) -> str:
     """
     Refresh the Catalyst OAuth access token using the refresh token.
@@ -63,6 +71,10 @@ def refresh_token(env_path: Path) -> str:
     return new_token
 
 
+# CONTRACT
+# takes:  project_id (str) — Catalyst project ID, org_id (str) — Catalyst org ID, token (str) — OAuth access token
+# returns: (list[dict]) — list of document metadata dicts with at least document_id
+# raises:  nothing (returns empty list on failure)
 def list_kb_documents(project_id: str, org_id: str, token: str) -> list[dict]:
     """
     List all documents in the QuickML RAG Knowledge Base.
@@ -131,6 +143,10 @@ def list_kb_documents(project_id: str, org_id: str, token: str) -> list[dict]:
     return []
 
 
+# CONTRACT
+# takes:  env_path (Path) — path to the .env file to update, key (str) — variable name, value (str) — new value
+# returns: nothing
+# raises:  OSError — when file cannot be read or written
 def _update_env_var(env_path: Path, key: str, value: str) -> None:
     """Update or append a key=value pair in the .env file."""
     lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -149,6 +165,10 @@ def _update_env_var(env_path: Path, key: str, value: str) -> None:
     env_path.write_text("".join(new_lines), encoding="utf-8")
 
 
+# CONTRACT
+# takes:  nothing
+# returns: nothing
+# raises:  SystemExit — via argparse on invalid arguments or missing env vars
 def main():
     parser = argparse.ArgumentParser(
         description="Sync KB_DOCUMENT_IDS in .env with Zoho Catalyst KB."

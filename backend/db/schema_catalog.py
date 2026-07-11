@@ -1,4 +1,4 @@
-﻿"""
+"""
 Schema catalog â€” table descriptions, columns, and keywords for the schema linker.
 Used by:
   - pipeline.schema_linker.select_relevant_tables()
@@ -254,6 +254,12 @@ SCHEMA_CATALOG = {
 }
 
 
+# CONTRACT
+# takes:  name (str) — table name to format,
+#          meta (dict) — table metadata with description and columns,
+#          max_col_chars (int | None) — optional max length to truncate column descriptions
+# returns: (str) — formatted multi-line table block for LLM prompt injection
+# raises:  nothing
 def _format_table(name: str, meta: dict, max_col_chars: int | None = None) -> str:
     """Build the per-table block for a schema string."""
     lines = [f"TABLE: {name}", f"Description: {meta['description']}", "Columns:"]
@@ -264,6 +270,10 @@ def _format_table(name: str, meta: dict, max_col_chars: int | None = None) -> st
     return "\n".join(lines)
 
 
+# CONTRACT
+# takes:  table_names (list[str]) — list of table names to include in the schema
+# returns: (str) — compact schema string suitable for LLM prompt injection
+# raises:  nothing
 def get_schema_for_tables(table_names: list[str]) -> str:
     """
     Build a compact schema string for LLM prompt injection.
@@ -435,6 +445,10 @@ _FEW_SHOT_BANK: list[dict] = [
 ]
 
 
+# CONTRACT
+# takes:  table_names (list[str]) — selected table names to score examples against
+# returns: (str) — formatted string with up to 3 relevant NL->SQL example pairs
+# raises:  nothing
 def get_few_shot_examples(table_names: list[str]) -> str:
     """
     Return exactly 3 example NL->SQL pairs relevant to the selected tables.

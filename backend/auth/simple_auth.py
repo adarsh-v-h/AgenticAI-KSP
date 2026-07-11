@@ -23,6 +23,10 @@ ALGORITHM = "HS256"
 _security = HTTPBearer(auto_error=False)
 
 
+# CONTRACT
+# takes:  officer_id (int) — EmployeeID, badge_number (str) — KGID identifier, role (str) — employee role
+# returns: (str) — signed JWT token with 24-hour expiry
+# raises:  nothing
 def create_access_token(officer_id: int, badge_number: str, role: str) -> str:
     """
     Sign a JWT carrying EmployeeID (as officer_id), KGID (as badge_number), role, and a 24-hour expiry.
@@ -39,6 +43,10 @@ def create_access_token(officer_id: int, badge_number: str, role: str) -> str:
     return jwt.encode(payload, get("APP_SECRET_KEY"), algorithm=ALGORITHM)
 
 
+# CONTRACT
+# takes:  detail (str) — error message for the 401 response
+# returns: (HTTPException) — configured 401 HTTP exception with WWW-Authenticate header
+# raises:  nothing
 def _unauthorized(detail: str = "Invalid or expired token. Please log in again.") -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -47,6 +55,10 @@ def _unauthorized(detail: str = "Invalid or expired token. Please log in again."
     )
 
 
+# CONTRACT
+# takes:  token (str) — JWT string to verify
+# returns: (dict) — decoded JWT payload
+# raises:  HTTPException — when token is missing, invalid, or expired (401)
 def verify_token(token: str) -> dict:
     """
     Verify JWT signature and expiry. Returns the decoded payload.
@@ -60,6 +72,10 @@ def verify_token(token: str) -> dict:
         raise _unauthorized()
 
 
+# CONTRACT
+# takes:  credentials (HTTPAuthorizationCredentials | None) — Bearer token from Authorization header
+# returns: (dict) — decoded JWT payload for the authenticated officer
+# raises:  HTTPException — when no credentials or token invalid (401)
 async def get_current_officer(
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ) -> dict:
@@ -72,6 +88,10 @@ async def get_current_officer(
     return verify_token(credentials.credentials)
 
 
+# CONTRACT
+# takes:  request (Request) — the incoming HTTP request, credentials (HTTPAuthorizationCredentials | None) — Bearer token from header, token (str | None) — fallback JWT from query param
+# returns: (dict) — decoded JWT payload for the authenticated officer
+# raises:  HTTPException — when no token found in header or query param (401)
 async def get_current_officer_sse(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
@@ -93,6 +113,10 @@ async def get_current_officer_sse(
     raise _unauthorized("Missing token.")
 
 
+# CONTRACT
+# takes:  badge_number (str) — employee KGID, password (str) — expected to be KGID+"123"
+# returns: (dict) — {"access_token": str, "officer": {...}} with JWT and officer info
+# raises:  HTTPException — when credentials are invalid or employee not found (401)
 async def login(badge_number: str, password: str) -> dict:
     """
     Authenticate an employee.

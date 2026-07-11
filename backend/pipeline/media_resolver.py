@@ -10,6 +10,10 @@ import hashlib
 from db.connection import execute_query
 
 
+# CONTRACT
+# takes:  results (list[dict]) — query result rows potentially containing CaseMasterID keys
+# returns: (list[int]) — deduplicated list of valid integer CaseMasterIDs in order of first appearance
+# raises:  nothing
 def collect_case_master_ids(results: list[dict]) -> list[int]:
     """Pull unique, valid integer CaseMasterIDs from query results."""
     seen: set[int] = set()
@@ -30,12 +34,20 @@ def collect_case_master_ids(results: list[dict]) -> list[int]:
     return out
 
 
+# CONTRACT
+# takes:  value (str) — input string to derive a numeric seed from
+# returns: (int) — deterministic integer derived from SHA-256 hash of the input
+# raises:  nothing
 def _stable_seed_value(value: str) -> int:
     """Return a deterministic numeric seed from a string."""
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
     return int(digest[:16], 16)
 
 
+# CONTRACT
+# takes:  media_type (str | None) — type of media (image/video/audio), stratus_file_id (str | None) — Stratus file identifier
+# returns: (str | None) — a public placeholder URL for the media, or None if no file ID
+# raises:  nothing
 def _dummy_media_url(media_type: str | None, stratus_file_id: str | None) -> str | None:
     """Map seeded Stratus placeholder IDs to a public dummy media URL."""
     if not stratus_file_id:
@@ -64,6 +76,10 @@ def _dummy_media_url(media_type: str | None, stratus_file_id: str | None) -> str
     return None
 
 
+# CONTRACT
+# takes:  results (list[dict]) — query result rows containing CaseMasterID keys
+# returns: (list[dict]) — media attachment dicts with media_type, url, description, case_master_id
+# raises:  nothing (DB errors propagate but callers catch)
 async def resolve_media(results: list[dict]) -> list[dict]:
     """
     Find attached media for every CaseMasterID present in `results`. Returns a list of:

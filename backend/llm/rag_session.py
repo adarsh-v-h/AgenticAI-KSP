@@ -46,6 +46,10 @@ class RagSession:
                 self.last_entity = entity
                 break
 
+    # CONTRACT
+    # takes:  raw_history (list[dict]) — raw conversation history with role/content fields
+    # returns: (list[dict]) — list of {"query": ..., "response": ...} turn pairs
+    # raises:  nothing
     @staticmethod
     def _convert_history(raw_history: list[dict]) -> list[dict]:
         """
@@ -67,12 +71,20 @@ class RagSession:
                 pending_query = None
         return pairs
 
+    # CONTRACT
+    # takes:  text (str) — text to extract a primary named entity from
+    # returns: (str | None) — first multi-word capitalized name found, or None
+    # raises:  nothing
     def _extract_primary_entity(self, text: str) -> str | None:
         """First multi-word capitalized phrase in the text -- a simple but
         effective heuristic for 'Kavitha Raj', 'Puneeth Bhat' style names."""
         match = _NAME_PATTERN.search(text)
         return match.group(0) if match else None
 
+    # CONTRACT
+    # takes:  query (str) — user query potentially containing pronoun references
+    # returns: (str) — query with pronoun references replaced by the last known entity name
+    # raises:  nothing
     def _resolve_references(self, query: str) -> str:
         if not self.last_entity:
             return query
@@ -81,6 +93,10 @@ class RagSession:
             resolved = re.sub(pat, self.last_entity, resolved, count=1, flags=re.IGNORECASE)
         return resolved
 
+    # CONTRACT
+    # takes:  resolved_query (str) — reference-resolved user query
+    # returns: (str) — query with prior conversation context prepended for RAG
+    # raises:  nothing
     def _build_contextual_query(self, resolved_query: str) -> str:
         if not self.history:
             return resolved_query
@@ -96,6 +112,10 @@ class RagSession:
             f"If the follow-up relates to the previous answer, connect them explicitly.)"
         )
 
+    # CONTRACT
+    # takes:  case_context (str) — latest RAG response text to generate follow-ups from
+    # returns: (list[str]) — up to 3 suggested follow-up questions for the investigator
+    # raises:  nothing (catches LLMError internally)
     async def _generate_follow_ups(self, case_context: str) -> list[str]:
         """
         Generate 3 follow-up questions via a direct call_llm() call, NOT
@@ -147,6 +167,11 @@ class RagSession:
             print(f"follow-up generation failed (non-fatal): {e}")
             return []
 
+    # CONTRACT
+    # takes:  query (str) — the user's raw question
+    # returns: (dict) — response dict with grounded, response, sources, resolved_query, suggested_follow_ups
+    # raises:  RuntimeError — when CATALYST_API_TOKEN is not set,
+    #           httpx.HTTPStatusError — when the RAG API returns a non-2xx status
     async def ask(self, query: str) -> dict:
         resolved_query = self._resolve_references(query)
         contextual_query = self._build_contextual_query(resolved_query)

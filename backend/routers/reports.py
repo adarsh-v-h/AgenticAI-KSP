@@ -68,10 +68,18 @@ class UnsupportedReportFormat(Exception):
         self.message = message
 
 
+# CONTRACT
+# takes:  msg (str) — message to log
+# returns: nothing
+# raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  data_base64 (str) — base64-encoded file content
+# returns: (bytes) — decoded raw file bytes
+# raises:  HTTPException — when base64 is invalid (400) or file exceeds 5 MB (413)
 def _decode_file(data_base64: str) -> bytes:
     try:
         raw = base64.b64decode(data_base64, validate=True)
@@ -82,6 +90,10 @@ def _decode_file(data_base64: str) -> bytes:
     return raw
 
 
+# CONTRACT
+# takes:  raw (bytes) — raw file bytes to decode as text
+# returns: (str) — decoded text content using best-effort encoding detection
+# raises:  nothing
 def _decode_text(raw: bytes) -> str:
     for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
@@ -91,6 +103,10 @@ def _decode_text(raw: bytes) -> str:
     return raw.decode("utf-8", errors="ignore")
 
 
+# CONTRACT
+# takes:  raw (bytes) — raw .docx file bytes (zip archive)
+# returns: (str) — extracted paragraph text from the document body
+# raises:  nothing (returns "" on parse failure)
 def _extract_docx_text(raw: bytes) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
@@ -111,12 +127,20 @@ def _extract_docx_text(raw: bytes) -> str:
     return "\n".join(paragraphs)
 
 
+# CONTRACT
+# takes:  text (str) — HTML content string
+# returns: (str) — plain text with tags and script/style content removed
+# raises:  nothing
 def _extract_html_text(text: str) -> str:
     text = re.sub(r"<(script|style).*?</\1>", " ", text, flags=re.I | re.S)
     text = re.sub(r"<[^>]+>", " ", text)
     return unescape(text)
 
 
+# CONTRACT
+# takes:  raw (bytes) — raw file bytes, file_name (str) — original filename for type detection, mime_type (str) — MIME type hint
+# returns: (str) — extracted and cleaned text, capped at MAX_EXTRACTED_CHARS
+# raises:  UnsupportedReportFormat — when file type cannot be text-extracted (PDF, unknown)
 def extract_report_text(raw: bytes, file_name: str, mime_type: str) -> str:
     lower_name = file_name.lower()
     lower_type = (mime_type or "").lower()
@@ -146,6 +170,10 @@ def extract_report_text(raw: bytes, file_name: str, mime_type: str) -> str:
     return text[:MAX_EXTRACTED_CHARS]
 
 
+# CONTRACT
+# takes:  officer_prompt (str) — officer's analysis request, file_name (str) — uploaded filename, extracted_text (str) — text extracted from the file, history (list[dict]) — recent chat context
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for report analysis LLM call
+# raises:  nothing
 def build_report_prompt(
     officer_prompt: str,
     file_name: str,
@@ -193,6 +221,10 @@ Do not invent facts. If no recurring theme is visible, say that clearly.
     return system_prompt, user_prompt
 
 
+# CONTRACT
+# takes:  session_id (str) — chat session ID, officer (dict) — authenticated officer, question (str) — user prompt, answer (str) — LLM response, session_exists (bool) — whether session row exists
+# returns: nothing
+# raises:  nothing (never raises, failures are logged)
 async def _persist_report_turn(
     session_id: str,
     officer: dict,

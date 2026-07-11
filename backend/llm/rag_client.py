@@ -1,4 +1,4 @@
-﻿"""
+"""
 RAG client for KSP case-report retrieval via Zoho Catalyst QuickML.
 
 Grounding rule 1: zero retrieved_nodes -> honest "not found" fallback.
@@ -56,16 +56,29 @@ class RagResult:
         self.response = response
         self.sources = sources
 
+    # CONTRACT
+    # takes:  nothing
+    # returns: (dict) — dictionary with grounded, response, and sources fields
+    # raises:  nothing
     def to_dict(self):
         return {"grounded": self.grounded, "response": self.response, "sources": self.sources}
 
 
+# CONTRACT
+# takes:  text (str) — text to extract multi-word capitalized phrases and long numbers from
+# returns: (set) — lowercased significant phrases and long numeric strings found in the text
+# raises:  nothing
 def _significant_phrases(text: str) -> set:
     phrases = _PHRASE_PATTERN.findall(text)
     numbers = _LONG_NUMBER_PATTERN.findall(text)
     return set(p.lower() for p in phrases) | set(numbers)
 
 
+# CONTRACT
+# takes:  node_content (str) — text content of a retrieved RAG node,
+#          response_phrases (set) — significant phrases extracted from the RAG response
+# returns: (bool) — True if the node shares at least one significant phrase with the response
+# raises:  nothing
 def _node_supports_response(node_content: str, response_phrases: set) -> bool:
     if not response_phrases:
         return True
@@ -73,11 +86,19 @@ def _node_supports_response(node_content: str, response_phrases: set) -> bool:
     return len(response_phrases & node_phrases) >= 1
 
 
+# CONTRACT
+# takes:  response_text (str) — RAG response text to check for negative/absence claims
+# returns: (bool) — True if the response matches a negative claim pattern
+# raises:  nothing
 def _is_negative_claim(response_text: str) -> bool:
     lowered = response_text.lower()
     return any(re.search(pat, lowered) for pat in _NEGATIVE_CLAIM_PATTERNS)
 
 
+# CONTRACT
+# takes:  query (str) — raw user query potentially containing filler/hedging language
+# returns: (str) — cleaned query with filler patterns removed and whitespace normalized
+# raises:  nothing
 def normalize_query(query: str) -> str:
     cleaned = query
     for pat in _FILLER_PATTERNS:
@@ -87,6 +108,12 @@ def normalize_query(query: str) -> str:
     return cleaned
 
 
+# CONTRACT
+# takes:  query (str) — the search query to send to the RAG endpoint,
+#          document_ids (list[str]) — document IDs to scope the retrieval
+# returns: (RagResult) — grounding status, response text, and filtered source references
+# raises:  RuntimeError — when CATALYST_API_TOKEN env var is not set,
+#           httpx.HTTPStatusError — when the RAG API returns a non-2xx status
 async def _query_rag_once(query: str, document_ids: list[str]) -> RagResult:
     access_token = os.getenv("CATALYST_API_TOKEN")
     if not access_token:
@@ -132,6 +159,12 @@ async def _query_rag_once(query: str, document_ids: list[str]) -> RagResult:
     return RagResult(grounded=True, response=response_text, sources=sources)
 
 
+# CONTRACT
+# takes:  query (str) — the user's search query,
+#          document_ids (list[str]) — document IDs to scope the retrieval
+# returns: (RagResult) — grounding status, response text, and filtered source references
+# raises:  RuntimeError — when CATALYST_API_TOKEN env var is not set,
+#           httpx.HTTPStatusError — when the RAG API returns a non-2xx status
 async def query_rag(query: str, document_ids: list[str]) -> RagResult:
     result = await _query_rag_once(query, document_ids)
     if result.grounded:

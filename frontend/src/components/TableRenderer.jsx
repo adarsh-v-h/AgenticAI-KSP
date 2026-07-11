@@ -2,6 +2,10 @@ const MAX_ROWS = 50
 const TRUNCATE_AT = 100
 
 // ponytail: one-off table formatting, ceiling: <50 rows, upgrade: extract a shared formatter if more table views appear.
+// CONTRACT
+// takes:  value (any) — raw cell value from a table row
+// returns: ({text: string, full: string}) — formatted display text and full value for tooltip (empty if not truncated)
+// throws:  never
 function formatCell(value) {
   if (value === null || value === undefined) return { text: '—', full: '' }
   if (typeof value === 'boolean') return { text: value ? 'Yes' : 'No', full: '' }

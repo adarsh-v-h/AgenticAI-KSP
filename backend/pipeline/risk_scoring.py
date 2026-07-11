@@ -30,6 +30,10 @@ WEIGHTS = {
 VIOLENT_CRIME_NAMES = ("Assault", "Murder", "Domestic Violence", "Robbery")
 
 
+# CONTRACT
+# takes:  accused_id (int) — AccusedMasterID to compute risk score for
+# returns: (dict) — risk assessment with accused_id, risk_score, risk_tier, contributing_factors
+# raises:  nothing (catches all exceptions internally, returns empty score)
 async def compute_risk_for_accused(accused_id: int) -> dict:
     try:
         accused_rows = await execute_query(
@@ -114,10 +118,18 @@ async def compute_risk_for_accused(accused_id: int) -> dict:
         return _empty_score(accused_id)
 
 
+# CONTRACT
+# takes:  accused_id (int) — AccusedMasterID for which no data was found
+# returns: (dict) — zeroed-out risk score dict with empty factors
+# raises:  nothing
 def _empty_score(accused_id: int) -> dict:
     return {"accused_id": accused_id, "risk_score": 0.0, "risk_tier": "low", "contributing_factors": []}
 
 
+# CONTRACT
+# takes:  result (dict) — computed risk score dict with accused_id, risk_score, risk_tier, contributing_factors
+# returns: nothing
+# raises:  Exception — when DB write fails
 async def save_risk_score(result: dict):
     await execute_write(
         """INSERT INTO offender_risk_scores (AccusedMasterID, risk_score, risk_tier, contributing_factors)
@@ -132,6 +144,10 @@ async def save_risk_score(result: dict):
     )
 
 
+# CONTRACT
+# takes:  accused_id (int) — AccusedMasterID to look up cached score for
+# returns: (dict | None) — cached risk score dict or None if not found
+# raises:  Exception — when DB read fails
 async def get_cached_risk_score(accused_id: int) -> dict | None:
     rows = await execute_query(
         "SELECT AccusedMasterID, risk_score, risk_tier, contributing_factors FROM offender_risk_scores WHERE AccusedMasterID = %s",
@@ -148,6 +164,10 @@ async def get_cached_risk_score(accused_id: int) -> dict | None:
     }
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (int) — count of accused persons whose risk scores were recomputed
+# raises:  Exception — when DB operations fail
 async def recompute_all_risk_scores() -> int:
     rows = await execute_query("SELECT DISTINCT AccusedMasterID FROM Accused")
     count = 0
