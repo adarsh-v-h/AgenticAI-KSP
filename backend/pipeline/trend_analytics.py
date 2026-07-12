@@ -44,7 +44,7 @@ async def get_trend_by_crime_type() -> list[dict]:
 
 # CONTRACT
 # takes:  limit (int) — maximum number of stations to return
-# returns: (list[dict]) — rows with station name and crime count, ordered by count descending
+# returns: (list[dict]) — rows with unit_id, station name, and crime count, ordered by count descending
 # raises:  Exception — when DB query fails
 async def get_trend_by_location(limit: int = 10) -> list[dict]:
     """Crime count per police station."""

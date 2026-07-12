@@ -802,7 +802,7 @@
 
 ### get_trend_by_location
 - **Takes:** limit (int) — maximum number of stations to return
-- **Returns:** (list[dict]) — rows with station name and crime count, ordered by count descending
+- **Returns:** (list[dict]) — rows with unit_id, station name, and crime count, ordered by count descending
 - **Raises:** Exception — when DB query fails
 
 ### get_trend_by_month
