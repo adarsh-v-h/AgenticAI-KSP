@@ -61,6 +61,9 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 ```
 ├── .env.example                 # Environment variable template
 ├── .env                         # Runtime config (not committed)
+├── start.sh                     # One-command start (Linux/macOS)
+├── start.bat                    # One-command start (Windows)
+├── contract-lock.md             # Contract format rules
 ├── LICENSE                      # AGPL v3
 │
 ├── Support Documents/
@@ -326,6 +329,29 @@ npm run dev
 ```
 
 Frontend at `http://localhost:5173`. Vite proxies `/api/*` to the backend.
+
+### Quick Start (One Command)
+
+Instead of steps 9-10 separately, use the provided start scripts that run tests, verify DB, and launch both servers:
+
+**Linux / macOS:**
+```bash
+./start.sh
+```
+
+**Windows:**
+```
+start.bat
+```
+
+Both scripts:
+1. Run the backend test suite (abort if anything fails)
+2. Ping the database to confirm connectivity
+3. Start the backend on port 8000
+4. Start the frontend on port 5173
+5. Print URLs when ready
+
+Press `Ctrl+C` (Linux) or close the server windows (Windows) to stop.
 
 ### 11. Log in and test
 
