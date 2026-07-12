@@ -23,7 +23,7 @@ async function get(path) {
   return res.json()
 }
 
-// Note: Response keys match existing backend API (report.md Priority 2 decision)
+// Note: Response keys match existing backend API
 // - monthly/crime-type/stations all return {"trend": [...]}
 // - station breakdown returns {"unit_id": N, "breakdown": [...]}
 // - status/clusters/seasonal use their own keys
