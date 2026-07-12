@@ -18,7 +18,7 @@ from db.connection import execute_query
 async def get_trend_by_month(months_back: int = 12) -> list[dict]:
     """Crime count per month for the last `months_back` months."""
     return await execute_query(
-        """SELECT DATE_FORMAT(CrimeRegisteredDate, '%Y-%m') AS month, COUNT(*) AS count
+        """SELECT DATE_FORMAT(CrimeRegisteredDate, '%%Y-%%m') AS month, COUNT(*) AS count
            FROM CaseMaster
            WHERE CrimeRegisteredDate >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
            GROUP BY month
@@ -49,10 +49,10 @@ async def get_trend_by_crime_type() -> list[dict]:
 async def get_trend_by_location(limit: int = 10) -> list[dict]:
     """Crime count per police station."""
     return await execute_query(
-        """SELECT u.UnitName AS station, COUNT(*) AS count
+        """SELECT u.UnitID AS unit_id, u.UnitName AS station, COUNT(*) AS count
            FROM CaseMaster cm
            JOIN Unit u ON u.UnitID = cm.PoliceStationID
-           GROUP BY u.UnitName
+           GROUP BY u.UnitID, u.UnitName
            ORDER BY count DESC
            LIMIT %s""",
         (limit,)
