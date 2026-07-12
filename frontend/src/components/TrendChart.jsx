@@ -1,6 +1,15 @@
 import { useMemo } from 'react'
 
-const PALETTE = ['#cc785c', '#a9583e', '#8a9b6e', '#5b7c99', '#c9a15a', '#7a6a8f']
+// Using design system colors: primary, primary-active, accent-teal, accent-amber, success
+// Reuses defined tokens instead of arbitrary hex values not in DESIGN.md
+const PALETTE = [
+  'var(--primary)',
+  'var(--primary-active)',
+  'var(--accent-teal)',
+  'var(--accent-amber)',
+  'var(--success)',
+  'var(--muted-soft)',
+]
 
 export default function TrendChart({
   data,
@@ -30,6 +39,9 @@ export default function TrendChart({
   const stepX = innerW / data.length
   const scaleY = (v) => innerH - (Number(v) / maxY) * innerH
 
+  // Rotate labels when there are many categories to prevent overlap
+  const shouldRotateLabels = data.length > 8
+
   return (
     <svg
       className="trend-chart"
@@ -57,6 +69,7 @@ export default function TrendChart({
             const x = i * stepX + (stepX - barW) / 2
             const y = scaleY(d[yKey])
             const h = innerH - y
+            const labelText = String(formatX(d[xKey]))
             return (
               <g key={i}>
                 <rect
@@ -69,17 +82,30 @@ export default function TrendChart({
                   style={{ cursor: onBarClick ? 'pointer' : 'default' }}
                   onClick={onBarClick ? () => onBarClick(d) : undefined}
                 >
-                  <title>{`${formatX(d[xKey])}: ${d[yKey]}`}</title>
+                  <title>{`${labelText}: ${d[yKey]}`}</title>
                 </rect>
-                <text
-                  x={x + barW / 2}
-                  y={innerH + 14}
-                  textAnchor="middle"
-                  fontSize="9"
-                  fill="var(--text-secondary)"
-                >
-                  {String(formatX(d[xKey])).slice(0, 10)}
-                </text>
+                {shouldRotateLabels ? (
+                  <text
+                    x={x + barW / 2}
+                    y={innerH + 8}
+                    textAnchor="end"
+                    fontSize="11"
+                    fill="var(--text-secondary)"
+                    transform={`rotate(-45 ${x + barW / 2} ${innerH + 8})`}
+                  >
+                    {labelText.slice(0, 18)}
+                  </text>
+                ) : (
+                  <text
+                    x={x + barW / 2}
+                    y={innerH + 14}
+                    textAnchor="middle"
+                    fontSize="12"
+                    fill="var(--text-secondary)"
+                  >
+                    {labelText.slice(0, 10)}
+                  </text>
+                )}
               </g>
             )
           })}
@@ -111,7 +137,7 @@ export default function TrendChart({
                 x={i * stepX + stepX / 2}
                 y={innerH + 14}
                 textAnchor="middle"
-                fontSize="9"
+                fontSize="12"
                 fill="var(--text-secondary)"
               >
                 {String(formatX(d[xKey])).slice(0, 10)}

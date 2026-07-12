@@ -43,6 +43,7 @@
   --error: #c64545;
   --success: #5db872;
   --accent-teal: #5db8a6;
+  --accent-amber: #e8a55a;
 
   /* Type */
   --font-display: 'EB Garamond', 'Tiempos Headline', Georgia, serif;
@@ -2288,23 +2289,25 @@ textarea {
 .follow-up-chip {
   display: inline-flex;
   align-items: center;
-  padding: 7px 14px;
-  font-size: 13px;
+  padding: 6px 14px;
+  font-family: var(--font-body);
+  font-size: 14px;
   font-weight: 500;
+  line-height: 1.0;
   text-align: left;
-  color: var(--primary-active);
-  background: var(--surface-hover);
-  border: 1px solid var(--hairline);
+  color: var(--primary);
+  background: var(--surface-card);
+  border: none;
   border-radius: var(--r-pill);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .follow-up-chip:hover {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  background: var(--surface-cream-strong);
+  color: var(--primary-active);
 }
+
 
 
 /* =========================================================================
@@ -2335,7 +2338,8 @@ textarea {
 .analytics-dashboard__header h2 {
   font-family: var(--font-display);
   font-size: 28px;
-  font-weight: 500;
+  font-weight: 400;
+  letter-spacing: -0.3px;
   color: var(--ink);
   margin: 0;
 }
@@ -2383,22 +2387,25 @@ textarea {
   background: var(--canvas);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
-  padding: 20px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .analytics-panel__title {
-  font-family: var(--font-display);
-  font-size: 20px;
+  font-family: var(--font-body);
+  font-size: 22px;
   font-weight: 500;
+  line-height: 1.3;
   color: var(--ink);
   margin: 0;
 }
 
 .analytics-panel__subtitle {
   font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
   color: var(--muted);
   margin: 0;
 }
@@ -2432,7 +2439,7 @@ textarea {
   font-weight: 500;
   font-size: 12px;
   color: var(--body-strong);
-  letter-spacing: 0.4px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
   border-bottom: 1px solid var(--hairline);
 }
@@ -2485,7 +2492,8 @@ textarea {
 
 .analytics-drilldown__header h3 {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.4;
   color: var(--ink);
   margin: 0;
 }
