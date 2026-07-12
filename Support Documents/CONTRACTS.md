@@ -1,6 +1,6 @@
 # Function Contracts
 
-187 functions across 42 files.
+203 functions across 44 files.
 
 ---
 
@@ -821,6 +821,45 @@
 
 ---
 
+## backend/routers/analytics.py
+
+### mo_clusters
+- **Takes:** min_occurrences (int) — minimum cluster size threshold (1-100), officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"clusters": list[dict]} with repeated crime-type/station patterns
+- **Raises:** HTTPException — when authentication fails (401)
+
+### seasonal_pattern
+- **Takes:** officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"pattern": list[dict]} with monthly seasonal crime counts
+- **Raises:** HTTPException — when authentication fails (401)
+
+### station_breakdown
+- **Takes:** unit_id (int) — police station UnitID to drill into, officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"unit_id": int, "breakdown": list[dict]} with crime types for that station
+- **Raises:** HTTPException — when authentication fails (401)
+
+### status_breakdown
+- **Takes:** officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"breakdown": list[dict]} with case status counts
+- **Raises:** HTTPException — when authentication fails (401)
+
+### trends_crime_type
+- **Takes:** officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"trend": list[dict]} with crime type counts
+- **Raises:** HTTPException — when authentication fails (401)
+
+### trends_monthly
+- **Takes:** months_back (int) — number of months to look back (1-60), officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"trend": list[dict]} with monthly crime counts
+- **Raises:** HTTPException — when authentication fails (401)
+
+### trends_stations
+- **Takes:** limit (int) — maximum number of stations to return (1-50), officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"trend": list[dict]} with station case counts
+- **Raises:** HTTPException — when authentication fails (401)
+
+---
+
 ## backend/routers/chat.py
 
 ### _authorize_session_write
@@ -1007,6 +1046,55 @@
 - **Takes:** token (string|null) — JWT access token to store, officer (object|null) — officer profile to store
 - **Returns:** nothing
 - **Raises:** never
+
+---
+
+## frontend/src/api/analytics.js
+
+### authHeaders
+- **Takes:** nothing
+- **Returns:** (object) — headers object with Authorization bearer token if available
+- **Raises:** never
+
+### fetchCrimeTypeTrend
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"trend": array} with crime type counts
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchMoClusters
+- **Takes:** minOccurrences (number) — minimum cluster size threshold (default 2)
+- **Returns:** (Promise<object>) — {"clusters": array} with repeated crime-type/station patterns
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchMonthlyTrend
+- **Takes:** monthsBack (number) — number of months to look back (default 12)
+- **Returns:** (Promise<object>) — {"trend": array} with monthly crime counts
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchSeasonalPattern
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"pattern": array} with monthly seasonal crime counts
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchStationBreakdown
+- **Takes:** unitId (number) — police station UnitID to drill into
+- **Returns:** (Promise<object>) — {"unit_id": number, "breakdown": array} with crime types for that station
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchStationTrend
+- **Takes:** limit (number) — maximum number of stations to return (default 10)
+- **Returns:** (Promise<object>) — {"trend": array} with station case counts
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchStatusBreakdown
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"breakdown": array} with case status counts
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### get
+- **Takes:** path (string) — relative API path to fetch from
+- **Returns:** (Promise<object>) — parsed JSON response from the analytics endpoint
+- **Raises:** AuthError — when session has expired (401), Error — when request fails
 
 ---
 

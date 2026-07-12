@@ -3,11 +3,19 @@ import { AuthError } from './chat'
 
 const BASE = '/api/analytics'
 
+// CONTRACT
+// takes:  nothing
+// returns: (object) — headers object with Authorization bearer token if available
+// raises:  never
 function authHeaders() {
   const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// CONTRACT
+// takes:  path (string) — relative API path to fetch from
+// returns: (Promise<object>) — parsed JSON response from the analytics endpoint
+// raises:  AuthError — when session has expired (401), Error — when request fails
 async function get(path) {
   const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
   if (res.status === 401) throw new AuthError('Session expired')
@@ -19,10 +27,45 @@ async function get(path) {
 // - monthly/crime-type/stations all return {"trend": [...]}
 // - station breakdown returns {"unit_id": N, "breakdown": [...]}
 // - status/clusters/seasonal use their own keys
+
+// CONTRACT
+// takes:  monthsBack (number) — number of months to look back (default 12)
+// returns: (Promise<object>) — {"trend": array} with monthly crime counts
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchMonthlyTrend = (monthsBack = 12) => get(`/trends/monthly?months_back=${monthsBack}`)
+
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<object>) — {"trend": array} with crime type counts
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchCrimeTypeTrend = () => get('/trends/crime-type')
+
+// CONTRACT
+// takes:  limit (number) — maximum number of stations to return (default 10)
+// returns: (Promise<object>) — {"trend": array} with station case counts
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchStationTrend = (limit = 10) => get(`/trends/stations?limit=${limit}`)
+
+// CONTRACT
+// takes:  unitId (number) — police station UnitID to drill into
+// returns: (Promise<object>) — {"unit_id": number, "breakdown": array} with crime types for that station
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchStationBreakdown = (unitId) => get(`/trends/station/${unitId}/breakdown`)
+
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<object>) — {"breakdown": array} with case status counts
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchStatusBreakdown = () => get('/status-breakdown')
+
+// CONTRACT
+// takes:  minOccurrences (number) — minimum cluster size threshold (default 2)
+// returns: (Promise<object>) — {"clusters": array} with repeated crime-type/station patterns
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchMoClusters = (minOccurrences = 2) => get(`/mo-clusters?min_occurrences=${minOccurrences}`)
+
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<object>) — {"pattern": array} with monthly seasonal crime counts
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchSeasonalPattern = () => get('/seasonal')
