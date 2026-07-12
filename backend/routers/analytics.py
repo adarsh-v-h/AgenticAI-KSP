@@ -3,7 +3,7 @@ Analytics endpoints — crime trend/pattern data for the officer dashboard.
 Pure SQL aggregation under the hood (see pipeline/trend_analytics.py); no LLM
 call is on the critical path for correctness.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from auth.simple_auth import get_current_officer
 from pipeline.trend_analytics import (
@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 @router.get("/api/analytics/trends/monthly")
-async def trends_monthly(months_back: int = 12, officer: dict = Depends(get_current_officer)):
+async def trends_monthly(months_back: int = Query(12, ge=1, le=60), officer: dict = Depends(get_current_officer)):
     return {"trend": await get_trend_by_month(months_back)}
 
 
@@ -30,7 +30,7 @@ async def trends_crime_type(officer: dict = Depends(get_current_officer)):
 
 
 @router.get("/api/analytics/trends/stations")
-async def trends_stations(limit: int = 10, officer: dict = Depends(get_current_officer)):
+async def trends_stations(limit: int = Query(10, ge=1, le=50), officer: dict = Depends(get_current_officer)):
     return {"trend": await get_trend_by_location(limit)}
 
 
@@ -46,7 +46,7 @@ async def status_breakdown(officer: dict = Depends(get_current_officer)):
 
 
 @router.get("/api/analytics/mo-clusters")
-async def mo_clusters(min_occurrences: int = 2, officer: dict = Depends(get_current_officer)):
+async def mo_clusters(min_occurrences: int = Query(2, ge=1, le=100), officer: dict = Depends(get_current_officer)):
     """
     The 'wider thinking' endpoint — repeated crime-type/station clusters an
     officer working a single case wouldn't otherwise see.
