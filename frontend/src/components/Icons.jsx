@@ -106,3 +106,15 @@ export function IconSpeaker({ size = 20 }) {
     </svg>
   )
 }
+
+export function IconAnalytics({ size = 20 }) {
+  // Bar chart with three ascending bars — "analytics / trends".
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="5" y1="14" x2="5" y2="10" />
+      <line x1="10" y1="14" x2="10" y2="7" />
+      <line x1="15" y1="14" x2="15" y2="4" />
+      <line x1="2" y1="16" x2="18" y2="16" />
+    </svg>
+  )
+}

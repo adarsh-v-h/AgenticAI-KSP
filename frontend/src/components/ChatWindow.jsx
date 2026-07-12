@@ -11,12 +11,13 @@ import SessionList from './SessionList.jsx'
 import WelcomeScreen from './WelcomeScreen.jsx'
 import Composer from './Composer.jsx'
 import OfficerRow from './OfficerRow.jsx'
-import { IconSidebarOpen, IconSidebarClose, IconNewChat, IconDownload } from './Icons.jsx'
+import { IconSidebarOpen, IconSidebarClose, IconNewChat, IconDownload, IconAnalytics } from './Icons.jsx'
 
 // Lazy-loaded: vis-network is a large dependency only needed when an officer
 // opens a network graph. Code-splitting it keeps the main bundle small and the
 // initial chat load fast â€” the graph chunk is fetched on first use.
 const NetworkGraph = lazy(() => import('./NetworkGraph.jsx'))
+const AnalyticsDashboard = lazy(() => import('./AnalyticsDashboard.jsx'))
 
 const SIDEBAR_COLLAPSED_KEY = 'chs.sidebarCollapsed'
 
@@ -80,6 +81,8 @@ export default function ChatWindow({ officer, onLogout }) {
   const [isExportingActive, setIsExportingActive] = useState(false)
   // Which network graph (if any) is open in the modal overlay. null = closed.
   const [graphTarget, setGraphTarget] = useState(null)
+  // Analytics dashboard modal state
+  const [analyticsOpen, setAnalyticsOpen] = useState(false)
 
   const [sessionError, setSessionError] = useState(null)
   const [sessionsError, setSessionsError] = useState(null)
@@ -467,6 +470,17 @@ export default function ChatWindow({ officer, onLogout }) {
           {sidebarOpen && <span className="new-chat-row__label">New chat</span>}
         </button>
 
+        <button
+          className="new-chat-row"
+          onClick={() => setAnalyticsOpen(true)}
+          title="Crime Pattern & Trend Analytics"
+        >
+          <span className="new-chat-row__icon">
+            <IconAnalytics />
+          </span>
+          {sidebarOpen && <span className="new-chat-row__label">Analytics</span>}
+        </button>
+
         <div className="session-list-container">
           {sidebarOpen && <div className="recents-label">Recents</div>}
           <SessionList
@@ -608,6 +622,15 @@ export default function ChatWindow({ officer, onLogout }) {
           />
         </Suspense>
       ) : null}
+
+      {analyticsOpen && (
+        <Suspense fallback={<div className="modal-loading">Loading analytics…</div>}>
+          <AnalyticsDashboard
+            onClose={() => setAnalyticsOpen(false)}
+            onAuthExpired={onLogout}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
