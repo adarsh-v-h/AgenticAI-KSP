@@ -2253,3 +2253,79 @@ The following files at the project root are one-time local MySQL migration artif
 | `migrate.py` | ALTER TABLE script to add `table_data_json`, `follow_ups_json` columns and widen `session_id` | Obsolete — `schema.sql` already has these; `setup_db.py` creates from scratch |
 | `backfill.py` | Re-ran old SQL queries to populate `table_data_json` for pre-migration messages | Obsolete — no legacy messages exist on the fresh RDS |
 | `backup_pre_migration_20260626.sql` | MySQL dump of the old local DB before schema v2 migration | Obsolete — local backup with no relevance to the AWS RDS deployment |
+
+
+---
+
+### 10.18 Analytics Dashboard Implementation — SixToSeven.md Reconciliation
+
+**Date:** July 12, 2026  
+**Issue:** report.md (SixToSeven.md audit) identified that the backend analytics functions in `trend_analytics.py` and `routers/analytics.py` already existed, but flagged several bugs and noted that the entire frontend (dashboard, chart component, API client, wiring) was missing. Additionally, three runtime bugs were discovered during live testing after the frontend was built.
+
+**Changes Made:**
+
+**1. Backend Bug Fix — Missing `unit_id` in station endpoint (Priority 1 from report.md)**
+- **File:** `backend/pipeline/trend_analytics.py`, `get_trend_by_location()` function
+- **Issue:** The query returned `u.UnitName AS station` and `COUNT(*)`, but not `u.UnitID`, breaking the planned drill-down feature (frontend couldn't call `/trends/station/{unit_id}/breakdown` without the ID).
+- **Fix:** Added `u.UnitID AS unit_id` to the SELECT clause and `u.UnitID` to the GROUP BY clause.
+- **Verified:** `curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/analytics/trends/stations"` now returns `unit_id` in every row.
+
+**2. Backend Enhancement — Input validation (Priority 2 from report.md)**
+- **File:** `backend/routers/analytics.py`
+- **Issue:** Route handlers accepted plain `int` parameters with no bounds checking (`months_back: int = 12`), allowing nonsensical values like `months_back=-5` or `limit=99999`.
+- **Fix:** Added `Query` import from FastAPI and applied bounds validation:
+  - `months_back: int = Query(12, ge=1, le=60)` (1–60 months)
+  - `limit: int = Query(10, ge=1, le=50)` (max 50 stations)
+  - `min_occurrences: int = Query(2, ge=1, le=100)` (min 1, max 100)
+- **Verified:** Requests with out-of-bounds params now return HTTP 422 Unprocessable Entity with clear validation messages.
+
+**3. Response Shape Decision (Priority 2 from report.md)**
+- **Issue:** report.md flagged that SixToSeven.md's planned frontend expected response keys like `breakdown` and `stations`, but the existing backend returned `trend` for most endpoints.
+- **Decision:** Kept the existing backend response shapes (`trend`, `trend`, `trend`) unchanged to avoid breaking any undocumented consumers. Built the frontend to adapt to the existing backend instead.
+- **Frontend Adaptation:** `AnalyticsDashboard.jsx` reads `m.trend`, `c.trend`, `s.trend` instead of the originally planned `m.months`, `c.breakdown`, `s.stations`.
+
+**4. Frontend Implementation (Steps 5–9 from SixToSeven.md)**
+- **Files Created:**
+  - `frontend/src/api/analytics.js` — 7 fetch functions: `fetchMonthlyTrend()`, `fetchCrimeTypeTrend()`, `fetchStationTrend()`, `fetchStationBreakdown()`, `fetchStatusBreakdown()`, `fetchMoClusters()`, `fetchSeasonalPattern()`. Reuses existing `getToken()` from `auth.js` and `AuthError` from `chat.js` (no duplication).
+  - `frontend/src/components/TrendChart.jsx` — Dependency-free SVG chart component supporting bar and line modes, with optional click handlers for drill-down, empty-state handling, and custom axis formatters.
+  - `frontend/src/components/AnalyticsDashboard.jsx` — 6-panel grid dashboard with lazy data fetching, per-panel error isolation via `Promise.allSettled()`, and a drill-down modal for station crime-type breakdown.
+  - `IconAnalytics` added to `frontend/src/components/Icons.jsx` (bar-chart icon, matching existing icon conventions).
+- **Wiring (`frontend/src/components/ChatWindow.jsx`):**
+  - Added `analyticsOpen` state and `handleAnalyticsToggle()`.
+  - Added sidebar button (between "New chat" and session list) with `IconAnalytics`.
+  - Lazy-imported `AnalyticsDashboard` via `React.lazy()` to keep it code-split from the main bundle.
+  - Added Suspense block alongside the existing NetworkGraph Suspense block.
+- **CSS (`frontend/src/styles/main.css`):**
+  - Added ~200 lines of `.analytics-*` classes: `.analytics-dashboard`, `.analytics-dashboard__header`, `.analytics-dashboard__grid`, `.analytics-panel`, `.analytics-panel__title`, `.analytics-panel__state`, `.analytics-table`, `.analytics-drilldown`, `.trend-chart`, `.trend-chart__empty`, and all chart-specific bar/line/axis styles.
+
+**5. Runtime Bug Fix — SQL `%Y` escaping crash**
+- **File:** `backend/pipeline/trend_analytics.py`, `get_trend_by_month()` function
+- **Issue:** Query used `DATE_FORMAT(CrimeRegisteredDate, '%Y-%m')` with literal `%` characters. `aiomysql` uses Python's `%-style` parameter substitution internally (`query % args`), so any `%` in the raw SQL that isn't a placeholder (`%s`) gets misinterpreted as a Python format directive, causing `ValueError: unsupported format character 'Y'` and 500 errors.
+- **Fix:** Escaped literal `%` as `%%` → `'%%Y-%%m'`. The driver un-escapes `%%` back to `%` before sending the query to MySQL, so the database still receives `'%Y-%m'`.
+- **Verified:** `curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/analytics/trends/monthly?months_back=12"` returns 200 OK with real month/count data.
+
+**6. Runtime Bug Fix — Per-panel error isolation in frontend**
+- **File:** `frontend/src/components/AnalyticsDashboard.jsx`
+- **Issue:** Dashboard used `Promise.all([...])` to fetch all 6 panels. When one panel's endpoint returned a 500 error (e.g., `trends/monthly` before the `%Y` fix), the entire `Promise.all` rejected, blanking all 6 panels with a generic "Could not load analytics" message even though 5 of 6 endpoints were working.
+- **Fix:** Replaced `Promise.all()` with `Promise.allSettled()`. Each panel's fetch result is checked independently:
+  - `AuthError` instances still fail the entire dashboard (triggers `onAuthExpired()`).
+  - Individual panel failures set that panel's data to `null`, which renders an inline "Could not load this panel" error without affecting the other 5 panels.
+- **Verified:** When `trends/monthly` was temporarily broken, the other 5 panels loaded normally. After fixing `trends/monthly`, all 6 panels load correctly.
+
+**7. Backend Bug Fix — Clock-dependency in monthly trends**
+- **File:** `backend/pipeline/trend_analytics.py`, `get_trend_by_month()` function
+- **Issue:** Query filtered relative to `CURDATE()` (real-world "today") via `WHERE CrimeRegisteredDate >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)`. The seeded dataset spans 2022-01-01 to 2025-06-30. Since the current date (July 12, 2026) is ~13 months past the dataset's latest date, `months_back=12` looked for June 2025–July 2026 data, returning empty results. This would continue breaking as time passes, regardless of data quality.
+- **Fix:** Replaced `CURDATE()` with `(SELECT MAX(CrimeRegisteredDate) FROM CaseMaster)` as the reference point. "Last N months" is now relative to the dataset's own most recent case, not the real-world clock. With `months_back=12`, the query returns June 2024–June 2025 data (always works regardless of execution date).
+- **Analysis:** All other functions in `trend_analytics.py` (`get_trend_by_crime_type`, `get_trend_by_location`, `get_crime_type_by_location`, `get_status_breakdown`, `get_modus_operandi_clusters`, `get_seasonal_pattern`) are data-independent (all-time aggregations with no date filters) and required no changes.
+- **Verified:** `curl` to `trends/monthly` returns 12 months of real data anchored to the dataset's latest case, not empty results.
+
+**Tests:**
+- All 7 backend analytics endpoints return 200 OK with expected JSON structure.
+- Frontend dashboard loads all 6 panels successfully.
+- Drill-down feature (click station → see crime-type breakdown) works correctly using the `unit_id` from station data.
+- Per-panel error isolation confirmed (temporarily broke one endpoint, verified other 5 panels still rendered).
+
+**Documentation:**
+- This changelog entry documents all changes from report.md implementation.
+- `backend/pipeline/trend_analytics.py` docstrings and CONTRACT comments unchanged (already present and correct).
+- `backend/routers/analytics.py` route docstrings unchanged (already present and correct).
