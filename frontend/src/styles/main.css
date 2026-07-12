@@ -2305,3 +2305,238 @@ textarea {
   border-color: var(--primary);
   color: #fff;
 }
+
+
+/* =========================================================================
+   ANALYTICS DASHBOARD
+   ========================================================================= */
+
+/* Full-screen overlay for the analytics dashboard modal */
+.analytics-dashboard {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header with title and close button */
+.analytics-dashboard__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.analytics-dashboard__header h2 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+.analytics-dashboard__close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 32px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--r-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.analytics-dashboard__close:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* Grid of 6 panels (2 columns on desktop, 1 column on mobile) */
+.analytics-dashboard__grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  gap: 24px;
+  align-content: start;
+}
+
+@media (max-width: 900px) {
+  .analytics-dashboard__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Individual panel card */
+.analytics-panel {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analytics-panel__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+.analytics-panel__subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Panel loading/error states */
+.analytics-panel__state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.analytics-panel__state--error {
+  color: var(--error);
+}
+
+/* Table within MO clusters panel */
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analytics-table thead {
+  background: var(--surface-card);
+}
+
+.analytics-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--body-strong);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.analytics-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.analytics-table tbody tr:nth-child(even) {
+  background: var(--surface-soft);
+}
+
+.analytics-table tbody tr:hover {
+  background: var(--surface-cream-strong);
+}
+
+/* Drill-down panel that slides up from bottom */
+.analytics-drilldown {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 50vh;
+  background: var(--canvas);
+  border-top: 2px solid var(--primary);
+  box-shadow: 0 -4px 24px rgba(20, 20, 19, 0.12);
+  z-index: 910;
+  display: flex;
+  flex-direction: column;
+  animation: slide-up 0.2s ease-out;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.analytics-drilldown__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.analytics-drilldown__header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+
+.analytics-drilldown__header button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--r-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.analytics-drilldown__header button:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* Trend chart component */
+.trend-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.trend-chart--empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  border: 2px dashed var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+}
+
+/* Modal loading fallback */
+.modal-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: var(--canvas);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 16px;
+}
