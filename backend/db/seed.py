@@ -334,12 +334,30 @@ async def seed_cases(conn, lookups, employee_ids):
         for _ in range(count):
             cases_to_generate.append({"case_type": c_type, "assigned_accused": None})
 
+    # Additional recent cases (2025-07 to 2026-07) to ensure monthly trend data
+    recent_counts = {
+        "theft": 12,
+        "assault": 8,
+        "vehicle_theft": 7,
+        "fraud": 6,
+        "cybercrime": 8,
+        "drug_offense": 5,
+        "robbery": 3,
+        "domestic_violence": 4,
+        "missing_person": 3,
+        "murder": 2,
+        "other": 2,
+    }
+    for c_type, count in recent_counts.items():
+        for _ in range(count):
+            cases_to_generate.append({"case_type": c_type, "assigned_accused": None, "force_recent": True})
+
     random.seed(42)
     random.shuffle(cases_to_generate)
 
     inserted_cases = []
     start_date_val = date(2022, 1, 1)
-    end_date_val = date(2025, 6, 30)
+    end_date_val = date(2026, 7, 10)
     seq_counter = {}
 
     async with conn.cursor() as cur:
@@ -355,6 +373,11 @@ async def seed_cases(conn, lookups, employee_ids):
             court_id = lookups["court_ids"][district_idx]
             
             reg_date = random_date(start_date_val, end_date_val)
+            # Force recent cases into the last 12 months for realistic monthly trends
+            if case_data.get("force_recent"):
+                recent_start = date(2025, 7, 1)
+                recent_end = date(2026, 7, 10)
+                reg_date = random_date(recent_start, recent_end)
             year = reg_date.year
             
             inc_from_time = random_time()
