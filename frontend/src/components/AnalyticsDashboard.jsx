@@ -74,7 +74,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         )
 
         // Note: All responses use 'trend' key except status/clusters/seasonal
-        // (per report.md Priority 2 - frontend adapted to existing backend)
+        // (frontend adapted to existing backend response shapes)
         setMonthly(m?.trend ?? null)
         setCrimeType(c?.trend ?? null)
         setStations(s?.trend ?? null)

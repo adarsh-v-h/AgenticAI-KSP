@@ -2260,17 +2260,17 @@ The following files at the project root are one-time local MySQL migration artif
 ### 10.18 Analytics Dashboard Implementation — SixToSeven.md Reconciliation
 
 **Date:** July 12, 2026  
-**Issue:** report.md (SixToSeven.md audit) identified that the backend analytics functions in `trend_analytics.py` and `routers/analytics.py` already existed, but flagged several bugs and noted that the entire frontend (dashboard, chart component, API client, wiring) was missing. Additionally, three runtime bugs were discovered during live testing after the frontend was built.
+**Issue:** During the SixToSeven.md implementation audit, it was identified that the backend analytics functions in `trend_analytics.py` and `routers/analytics.py` already existed, but had several bugs and the entire frontend (dashboard, chart component, API client, wiring) was missing. Additionally, three runtime bugs were discovered during live testing after the frontend was built.
 
 **Changes Made:**
 
-**1. Backend Bug Fix — Missing `unit_id` in station endpoint (Priority 1 from report.md)**
+**1. Backend Bug Fix — Missing `unit_id` in station endpoint**
 - **File:** `backend/pipeline/trend_analytics.py`, `get_trend_by_location()` function
 - **Issue:** The query returned `u.UnitName AS station` and `COUNT(*)`, but not `u.UnitID`, breaking the planned drill-down feature (frontend couldn't call `/trends/station/{unit_id}/breakdown` without the ID).
 - **Fix:** Added `u.UnitID AS unit_id` to the SELECT clause and `u.UnitID` to the GROUP BY clause.
 - **Verified:** `curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/analytics/trends/stations"` now returns `unit_id` in every row.
 
-**2. Backend Enhancement — Input validation (Priority 2 from report.md)**
+**2. Backend Enhancement — Input validation**
 - **File:** `backend/routers/analytics.py`
 - **Issue:** Route handlers accepted plain `int` parameters with no bounds checking (`months_back: int = 12`), allowing nonsensical values like `months_back=-5` or `limit=99999`.
 - **Fix:** Added `Query` import from FastAPI and applied bounds validation:
@@ -2279,8 +2279,8 @@ The following files at the project root are one-time local MySQL migration artif
   - `min_occurrences: int = Query(2, ge=1, le=100)` (min 1, max 100)
 - **Verified:** Requests with out-of-bounds params now return HTTP 422 Unprocessable Entity with clear validation messages.
 
-**3. Response Shape Decision (Priority 2 from report.md)**
-- **Issue:** report.md flagged that SixToSeven.md's planned frontend expected response keys like `breakdown` and `stations`, but the existing backend returned `trend` for most endpoints.
+**3. Response Shape Decision**
+- **Issue:** SixToSeven.md's planned frontend expected response keys like `breakdown` and `stations`, but the existing backend returned `trend` for most endpoints.
 - **Decision:** Kept the existing backend response shapes (`trend`, `trend`, `trend`) unchanged to avoid breaking any undocumented consumers. Built the frontend to adapt to the existing backend instead.
 - **Frontend Adaptation:** `AnalyticsDashboard.jsx` reads `m.trend`, `c.trend`, `s.trend` instead of the originally planned `m.months`, `c.breakdown`, `s.stations`.
 
@@ -2326,6 +2326,6 @@ The following files at the project root are one-time local MySQL migration artif
 - Per-panel error isolation confirmed (temporarily broke one endpoint, verified other 5 panels still rendered).
 
 **Documentation:**
-- This changelog entry documents all changes from report.md implementation.
+- This changelog entry documents all changes from the SixToSeven.md implementation.
 - `backend/pipeline/trend_analytics.py` docstrings and CONTRACT comments unchanged (already present and correct).
 - `backend/routers/analytics.py` route docstrings unchanged (already present and correct).
