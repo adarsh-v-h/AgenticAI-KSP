@@ -1,6 +1,6 @@
 # Function Contracts
 
-223 functions across 50 files.
+228 functions across 50 files.
 
 ---
 
@@ -962,6 +962,11 @@
 - **Returns:** (str) — complete HTML document string for export
 - **Raises:** nothing
 
+### _build_pdf
+- **Takes:** officer_name (str) — officer's display name, badge_number (str) — KGID, title (str) — session title, messages (list) — message dicts with content, table_data, sql_generated, media_attachments
+- **Returns:** (bytes) — complete PDF document as bytes
+- **Raises:** nothing
+
 ### _escape
 - **Takes:** value (Any) — value to HTML-escape for safe rendering
 - **Returns:** (str) — HTML-escaped string representation
@@ -970,6 +975,26 @@
 ### _merge_history_tables
 - **Takes:** messages (list) — message dicts from DB, history (list) — conversation history with table snapshots
 - **Returns:** (list) — messages with table_data hydrated from history where missing
+- **Raises:** nothing
+
+### _render_assistant_message
+- **Takes:** pdf (FPDF) — the PDF document being built, msg (dict) — assistant message dict with content, table_data, sql_generated, media_attachments
+- **Returns:** nothing
+- **Raises:** nothing
+
+### _render_table
+- **Takes:** pdf (FPDF) — the PDF document being built, rows (list[dict]) — table data rows
+- **Returns:** nothing
+- **Raises:** nothing
+
+### _render_user_message
+- **Takes:** pdf (FPDF) — the PDF document being built, content (str) — user message text
+- **Returns:** nothing
+- **Raises:** nothing
+
+### _safe_text
+- **Takes:** text (str) — raw text that may contain characters fpdf2 can't encode
+- **Returns:** (str) — text safe for fpdf2 rendering (latin-1 compatible)
 - **Raises:** nothing
 
 ---

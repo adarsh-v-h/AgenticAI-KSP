@@ -2465,3 +2465,26 @@ The following files at the project root are one-time local MySQL migration artif
 **Documentation:**
 - `CONTRACTS.md` updated: 223 functions across 50 files (+10 new entries).
 - Inline CONTRACT comments added to all new functions.
+
+
+---
+
+### 10.21 PDF Export — Real PDF Generation via fpdf2
+
+**Date:** July 13, 2026
+**What:** Replaced the HTML-only export with actual PDF generation using `fpdf2` (pure Python, no system dependencies).
+
+**Changes:**
+- `backend/routers/export.py` — Added `_build_pdf()`, `_render_user_message()`, `_render_assistant_message()`, `_render_table()`, `_safe_text()`. PDF is now the default format. HTML kept as fallback via `?format=html` query param.
+- `requirements.txt` — Added `fpdf2`.
+- Route signature: `POST /api/chat/sessions/{id}/export?format=pdf|html` (default: `pdf`)
+
+**PDF layout:**
+- Header: KSP branding + officer name/badge + session title + export date
+- User messages: beige background box
+- Assistant messages: prose text + embedded tables (colored headers, alternating rows, max 6 columns, max 50 rows) + SQL query in monospace + media placeholders
+- Footer: confidentiality notice
+
+**Frontend:** No changes needed — `exportSession()` in `api/chat.js` already reads filename from `Content-Disposition` header and triggers a blob download regardless of content type.
+
+**Dependencies:** `fpdf2` — pure Python, no C extensions, no system packages required. Deploys cleanly on Catalyst AppSail without Docker changes.
