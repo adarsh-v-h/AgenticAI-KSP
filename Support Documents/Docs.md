@@ -2488,3 +2488,30 @@ The following files at the project root are one-time local MySQL migration artif
 **Frontend:** No changes needed — `exportSession()` in `api/chat.js` already reads filename from `Content-Disposition` header and triggers a blob download regardless of content type.
 
 **Dependencies:** `fpdf2` — pure Python, no C extensions, no system packages required. Deploys cleanly on Catalyst AppSail without Docker changes.
+
+
+---
+
+### 10.22 Sociological Crime Insights — Demographic Analytics
+
+**Date:** July 14, 2026
+**What:** Added demographic analysis features for crime patterns by age, gender, and occupation — satisfying the "Sociological Crime Insights" requirement from the hackathon feature list.
+
+**New file:**
+- `backend/pipeline/sociological_analytics.py` — 5 pure SQL functions: `get_accused_age_distribution()`, `get_crime_by_gender()`, `get_victim_demographics()`, `get_crime_by_occupation()`, `get_demographic_risk_profile()`
+
+**Modified files:**
+- `backend/routers/analytics.py` — Added 5 new endpoints under `/api/analytics/demographics/*`
+- `frontend/src/api/analytics.js` — Added 5 fetch functions for demographic endpoints
+- `frontend/src/components/AnalyticsDashboard.jsx` — Added 3 new panels: Accused Age Distribution (bar chart), Crime by Gender (table), Crime by Occupation (bar chart)
+
+**New endpoints:**
+- `GET /api/analytics/demographics/accused-age` — age group distribution of accused
+- `GET /api/analytics/demographics/crime-by-gender` — crime type × gender cross-tabulation
+- `GET /api/analytics/demographics/victim-profile` — victim demographics per crime type
+- `GET /api/analytics/demographics/crime-by-occupation` — occupation frequency in complainant data
+- `GET /api/analytics/demographics/risk-profile` — crime type × age group × gender for accused
+
+**Tests:** 11 new tests added (6 PDF export + 5 sociological analytics). Total: 83 tests pass.
+
+**Scope note:** Urbanization/migration/economic stress correlations are not implemented — the schema has no columns for those indicators. The feature covers what's achievable with existing data: age, gender, occupation, caste, and religion demographics.

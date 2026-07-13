@@ -15,6 +15,13 @@ from pipeline.trend_analytics import (
     get_modus_operandi_clusters,
     get_seasonal_pattern,
 )
+from pipeline.sociological_analytics import (
+    get_accused_age_distribution,
+    get_crime_by_gender,
+    get_victim_demographics,
+    get_crime_by_occupation,
+    get_demographic_risk_profile,
+)
 
 router = APIRouter()
 
@@ -81,3 +88,39 @@ async def mo_clusters(min_occurrences: int = Query(2, ge=1, le=100), officer: di
 @router.get("/api/analytics/seasonal")
 async def seasonal_pattern(officer: dict = Depends(get_current_officer)):
     return {"pattern": await get_seasonal_pattern()}
+
+
+# ─── Sociological / Demographic Endpoints ────────────────────────────────────
+
+
+@router.get("/api/analytics/demographics/accused-age")
+async def demographics_accused_age(officer: dict = Depends(get_current_officer)):
+    """Accused persons bucketed by age group."""
+    return {"data": await get_accused_age_distribution()}
+
+
+@router.get("/api/analytics/demographics/crime-by-gender")
+async def demographics_crime_by_gender(officer: dict = Depends(get_current_officer)):
+    """Crime type breakdown by accused gender."""
+    return {"data": await get_crime_by_gender()}
+
+
+@router.get("/api/analytics/demographics/victim-profile")
+async def demographics_victim_profile(officer: dict = Depends(get_current_officer)):
+    """Victim age/gender breakdown per crime type."""
+    return {"data": await get_victim_demographics()}
+
+
+@router.get("/api/analytics/demographics/crime-by-occupation")
+async def demographics_crime_by_occupation(
+    limit: int = Query(10, ge=1, le=50),
+    officer: dict = Depends(get_current_officer),
+):
+    """Top occupations in complainant data."""
+    return {"data": await get_crime_by_occupation(limit)}
+
+
+@router.get("/api/analytics/demographics/risk-profile")
+async def demographics_risk_profile(officer: dict = Depends(get_current_officer)):
+    """Cross-tabulation: crime type × age group × gender for accused."""
+    return {"data": await get_demographic_risk_profile()}

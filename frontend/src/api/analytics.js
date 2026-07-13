@@ -69,3 +69,12 @@ export const fetchMoClusters = (minOccurrences = 2) => get(`/mo-clusters?min_occ
 // returns: (Promise<object>) — {"pattern": array} with monthly seasonal crime counts
 // raises:  AuthError — when session expired, Error — when request fails
 export const fetchSeasonalPattern = () => get('/seasonal')
+
+
+// ─── Sociological / Demographic endpoints ───────────────────────────────────
+
+export const fetchAccusedAgeDistribution = () => get('/demographics/accused-age')
+export const fetchCrimeByGender = () => get('/demographics/crime-by-gender')
+export const fetchVictimProfile = () => get('/demographics/victim-profile')
+export const fetchCrimeByOccupation = (limit = 10) => get(`/demographics/crime-by-occupation?limit=${limit}`)
+export const fetchDemographicRiskProfile = () => get('/demographics/risk-profile')

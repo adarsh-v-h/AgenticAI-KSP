@@ -8,6 +8,9 @@ import {
   fetchStatusBreakdown,
   fetchMoClusters,
   fetchSeasonalPattern,
+  fetchAccusedAgeDistribution,
+  fetchCrimeByGender,
+  fetchCrimeByOccupation,
 } from '../api/analytics'
 import { AuthError } from '../api/chat'
 
@@ -34,6 +37,9 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
   const [statusBreakdown, setStatusBreakdown] = useState(null)
   const [moClusters, setMoClusters] = useState(null)
   const [seasonal, setSeasonal] = useState(null)
+  const [accusedAge, setAccusedAge] = useState(null)
+  const [crimeByGender, setCrimeByGender] = useState(null)
+  const [crimeByOccupation, setCrimeByOccupation] = useState(null)
 
   const [selectedStation, setSelectedStation] = useState(null) // {unit_id, station}
   const [drilldown, setDrilldown] = useState(null)
@@ -56,6 +62,9 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
           fetchStatusBreakdown(),
           fetchMoClusters(2),
           fetchSeasonalPattern(),
+          fetchAccusedAgeDistribution(),
+          fetchCrimeByGender(),
+          fetchCrimeByOccupation(10),
         ])
         if (cancelled) return
 
@@ -69,7 +78,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         }
 
         // Extract fulfilled values; failed panels get null
-        const [m, c, s, st, mo, se] = results.map((r) =>
+        const [m, c, s, st, mo, se, aa, cg, co] = results.map((r) =>
           r.status === 'fulfilled' ? r.value : null
         )
 
@@ -81,6 +90,9 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         setStatusBreakdown(st?.breakdown ?? null)
         setMoClusters(mo?.clusters ?? null)
         setSeasonal(se?.pattern ?? null)
+        setAccusedAge(aa?.data ?? null)
+        setCrimeByGender(cg?.data ?? null)
+        setCrimeByOccupation(co?.data ?? null)
       } catch (err) {
         if (cancelled) return
         // Fallback for unexpected errors not caught by allSettled
@@ -227,6 +239,39 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 type="bar"
                 formatX={(v) => String(v).slice(0, 3)}
               />
+            )}
+          </Panel>
+
+          <Panel title="Accused Age Distribution" subtitle="Sociological insight — offender demographics">
+            {accusedAge === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : (
+              <TrendChart data={accusedAge} xKey="age_group" yKey="count" type="bar" />
+            )}
+          </Panel>
+
+          <Panel title="Crime by Gender" subtitle="Crime type breakdown by accused gender">
+            {crimeByGender === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : crimeByGender.length > 0 ? (
+              <table className="analytics-table">
+                <thead><tr><th>Crime Type</th><th>Gender</th><th>Count</th></tr></thead>
+                <tbody>
+                  {crimeByGender.slice(0, 20).map((row, i) => (
+                    <tr key={i}><td>{row.crime_type}</td><td>{row.gender}</td><td>{row.count}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="analytics-panel__state">No data available</div>
+            )}
+          </Panel>
+
+          <Panel title="Crime by Occupation" subtitle="Top occupations in complainant data">
+            {crimeByOccupation === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : (
+              <TrendChart data={crimeByOccupation} xKey="occupation" yKey="count" type="bar" />
             )}
           </Panel>
         </div>
