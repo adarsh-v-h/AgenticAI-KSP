@@ -71,7 +71,10 @@ backend/
 │   ├── schema_linker.py       # Keyword-based table selector
 │   ├── risk_scoring.py        # Offender risk scoring (rule-based, explainable)
 │   ├── trend_analytics.py     # Crime pattern analytics (pure SQL aggregation)
-│   └── similar_cases.py       # Similar case finder
+│   ├── similar_cases.py       # Similar case finder
+│   ├── case_timeline.py       # Case timeline builder (CaseMaster + ArrestSurrender events)
+│   ├── case_summary.py        # LLM-generated investigative case brief
+│   └── evidence_trail.py      # Chat SQL provenance writer (chat_evidence_trail)
 ├── conversation/
 │   ├── history.py             # Conversation history + recent-table snapshot (NoSQL + in-memory fallback)
 │   └── session_store.py       # Session metadata + title generation (NoSQL + fallback)
@@ -89,7 +92,7 @@ backend/
 │   ├── voice.py               # POST /api/voice/transcribe, /api/voice/speak
 │   ├── governance.py          # GET /api/audit-log (supervisor-only)
 │   ├── analytics.py           # GET /api/analytics/* (trend/pattern endpoints)
-│   ├── decision_support.py    # Decision support endpoints
+│   ├── decision_support.py    # Decision support (similar cases, timeline, summary)
 │   ├── profiling.py           # GET /api/profiling/risk/* (offender risk scores)
 │   └── auth.py                # POST /api/auth/login + /api/auth/logout
 └── tests/
@@ -404,6 +407,7 @@ Attempt 2:
 | `CORRECTION_SYSTEM_PROMPT` | SQL correction | Fix the broken SQL; return only corrected SQL; no explanation |
 | `ROUTER_SYSTEM_PROMPT` | Intent router | Reply with exactly one word — `SQL` or `DIRECT`. DIRECT for follow-ups about already-shown data (referential words: "those", "them", "that", "the third one"…), filtering/ranking/insight over results already in context, greetings, and general questions. SQL when fresh crime data is needed. |
 | `DIRECT_ANSWER_SYSTEM_PROMPT` | Direct answers | Answer from conversation + provided results only; **never fabricate** facts/numbers/trends/percentages not present in the data (explicit anti-hallucination rule); no markdown tables; concise professional prose. |
+| `CASE_SUMMARY_SYSTEM_PROMPT` | Case summary generation | Write a 3-5 sentence professional investigative case brief for a KSP officer; cover what happened, who is involved, and current status; do not invent facts not present in the data; plain prose only, no markdown/headers. |
 
 **Functions:**
 
@@ -419,6 +423,7 @@ Attempt 2:
 | `build_correction_prompt(original_sql, error, schema, officer=None) -> (system_prompt, user_prompt)` | Builds the correction prompt: the bad SQL, the error message, optional officer block, and schema. |
 | `build_router_prompt(question, history, has_recent_data) -> (system_prompt, user_prompt)` | Builds the tiny router prompt: a compressed history slice, a flag stating whether recent results are in context, and the latest message. Kept small for a fast decision. |
 | `build_direct_answer_prompt(question, history, recent_table) -> (system_prompt, user_prompt)` | Builds the direct-answer prompt: a richer history slice (`max_turns=4`, `max_chars=400`) plus the most recent result set (up to 30 rows as JSON) when available. |
+| `build_case_summary_prompt(case_row, accused_rows, victim_rows) -> (system_prompt, user_prompt)` | Builds the case summary prompt from structured facts. Formats accused/victim lists with names and ages ("none on record" if empty), assembles a fact sheet (CrimeNo, registration date, crime type, status, station, brief facts), and pairs it with `CASE_SUMMARY_SYSTEM_PROMPT`. |
 
 ---
 
@@ -485,7 +490,7 @@ Attempt 2:
 | Function | Description |
 |----------|-------------|
 | `sanitize_sql(sql) -> str` | Cleans raw LLM output: strips whitespace, removes markdown code fences (` ```sql `), removes surrounding backticks, drops trailing semicolons. Preserves internal backticks (e.g., `` `rank` ``). |
-| `_extract_tables(sql) -> list[str]` | Regex-based extraction of table names after `FROM` and `JOIN` clauses. Handles backtick-quoted identifiers. Not a full parser — catches simple cases, MySQL catches the rest. |
+| `extract_tables(sql) -> list[str]` | Regex-based extraction of table names after `FROM` and `JOIN` clauses. Handles backtick-quoted identifiers. Not a full parser — catches simple cases, MySQL catches the rest. Public function — promoted from `_extract_tables` (Step 3) because `pipeline/evidence_trail.py` is a second caller outside `validate_sql()`. |
 | `validate_sql(sql, allowed_tables=None) -> ValidationResult` | **The validation chain.** Checks in order: (1) Not None/empty. (2) Not `CANNOT_ANSWER`. (3) Starts with `SELECT` or `WITH`. (4) No semicolons inside (blocks multi-statement injection). (5) No forbidden keywords (after stripping benign column-name patterns). (6) All referenced tables are in `ALLOWED_TABLES`. Returns `ValidationResult`. Never raises. |
 
 **Self-test:** When run directly (`python sql_validator.py`), executes 12 test cases covering valid SQL, injection attempts, markdown-wrapped SQL, false-positive prevention, and unknown tables.
@@ -607,6 +612,7 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 | `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); deserializes `table_data` from the `table_data_json` column for assistant messages. |
 | `save_rich_data(message_id, table_data, media_attachments)` | Writes `{table_data, media_attachments}` to NoSQL `message_rich_data` under key `msg_rich_{message_id}`. Falls back to `local_rich_data.json` on any NoSQL error. Non-fatal. |
 | `load_rich_data(message_id) -> dict \| None` | Reads and parses the rich-data document for a message from NoSQL, or from `local_rich_data.json` if NoSQL is missing/fails. Returns `None` on miss/error. |
+| `get_evidence_trail_for_message(message_id, officer_id) -> dict \| None` | **Ownership-scoped read:** joins `chat_evidence_trail` → `chat_messages` → `chat_sessions` to return the evidence trail row only if the message belongs to the requesting officer's session. Returns `None` if the message doesn't exist, belongs to another officer, or has no evidence trail row (DIRECT-path answers never get one — that's expected). Non-fatal — catches all exceptions and returns `None`. |
 
 > **Environment note:** The NoSQL `message_rich_data` round-trip depends on a reachable Catalyst NoSQL endpoint + valid token. When NoSQL is unavailable the MySQL persistence still works fully; only the rich table/media hydration on reload degrades (rows come back empty unless they exist in the local JSON fallback `local_rich_data.json`).
 
@@ -678,13 +684,14 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 |----------|-------------|
 | `_sse(event) -> str` | Formats a dict as an SSE `data:` line with `\n\n` terminator |
 | `_authorize_session_write(session_id, officer_id) -> bool` | **Authorization gate for write paths.** Mitigates BOLA/IDOR (OWASP API1:2023) by verifying that `session_id` either (a) doesn't exist yet (create-or-append: officer will own it), or (b) exists and belongs to `officer_id`. Raises HTTP 404 (not 403) if owned by another officer. Returns the existence flag (True if session exists) so `_persist_turn` avoids a duplicate query. Single indexed PK lookup — negligible cost. |
-| `_persist_turn(session_id, officer, question, result, session_exists)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message (when `session_exists=False`), saves the user+assistant pair via `chat_store.save_message_pair` (table data serialized to MySQL `table_data_json` column), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. Called after `save_turn` in both chat endpoints. |
+| `_persist_turn(session_id, officer, question, result, session_exists)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message (when `session_exists=False`), saves the user+assistant pair via `chat_store.save_message_pair` (table data serialized to MySQL `table_data_json` column), calls `save_evidence_trail(message_id, sql_generated, table_data)` to record SQL provenance in `chat_evidence_trail` (Step 3), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. Called after `save_turn` in both chat endpoints. |
 | `list_chat_sessions(officer)` | `GET /api/chat/sessions` — lists the officer's sessions newest-first **from MySQL** (`chat_store.get_sessions_for_officer`). Always HTTP 200 (returns `[]` on DB error). |
 | `create_chat_session(officer)` | `POST /api/chat/sessions` — creates a NoSQL `session_metadata` doc and returns `SessionMetadata` (HTTP 201). **Currently unused by the UI** (see [9.5](#95-backend-created-sessions-on-new-chat--deprecated-flow-change)). |
 | `get_session_messages(session_id, officer)` | `GET /api/chat/sessions/{id}/messages` — **read authorization:** verifies ownership via `chat_store.verify_session_owner` (404 on mismatch/not-found), then returns all messages oldest-first from MySQL with `table_data` deserialized from the `table_data_json` column. **No pagination** (the prior `limit`/`before_message_id` cursor flow was removed — see [9.9](#99-message-pagination--removed)). |
 | `chat(request, officer)` | `POST /api/chat` — non-streaming endpoint (testing/fallback). **Enforces write authorization** via `_authorize_session_write` before any pipeline work. Fetches history, runs pipeline, `save_turn` (with `assistant_table`), then `_persist_turn`. Always returns HTTP 200 with `ChatResponse`. Returns HTTP 404 if `session_id` belongs to another officer. |
 | `chat_stream(question, session_id, officer)` | `GET /api/chat/stream` — SSE streaming endpoint. Protected by `get_current_officer_sse` (header or query param). **Enforces write authorization** via `_authorize_session_write` before opening the stream, so a forged `session_id` returns a clean HTTP 404 instead of an in-stream error. After the pipeline, `save_turn` (with `assistant_table`) then `_persist_turn`. Returns `StreamingResponse` with `text/event-stream`. |
 | `_tokenize(text) -> list[str]` | Splits text into space-preserving tokens for word-by-word streaming. Each token (except last) includes trailing space. |
+| `message_evidence_trail(message_id, officer)` | `GET /api/chat/messages/{message_id}/evidence-trail` — **ownership-scoped read** of the SQL provenance record for a specific assistant message. Delegates to `chat_store.get_evidence_trail_for_message`, which joins through `chat_messages` → `chat_sessions` to enforce BOLA/IDOR scoping. Returns the trail row (sql_executed, tables_queried, row_count, case_ids_referenced). Returns HTTP 404 if the message doesn't exist, belongs to another officer's session, or has no trail row (DIRECT-path answers). |
 
 **SSE event types emitted by `chat_stream`:**
 
@@ -2162,6 +2169,59 @@ All three endpoints require officer authentication via `get_current_officer`.
 
 ---
 
+### 3.X `backend/pipeline/case_timeline.py`
+
+**Purpose:** Builds a chronological timeline for a single case. Events come from `CaseMaster` registration/incident dates and `ArrestSurrender` records (one per arrested/surrendered accused). No `ChargesheetDetails` reference — that table is on the deferred migration list.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `build_case_timeline(case_master_id) -> list[dict]` | Returns chronologically ordered events: `[{"date": "2024-05-15", "event": "Case registered", "detail": "..."}, ...]`. Queries `CaseMaster` for `IncidentFromDate` and `CrimeRegisteredDate`, then `ArrestSurrender` joined with `Accused` for arrest/surrender events with accused name. Returns `[]` if the case doesn't exist. Events are sorted by date ascending. |
+
+---
+
+### 3.X `backend/pipeline/case_summary.py`
+
+**Purpose:** LLM-generated investigative case brief — a 3-5 sentence professional summary of a single case, built from structured `CaseMaster`/`Accused`/`Victim` facts. Uses `MODEL_ANSWER` via the same `call_llm()` interface every other LLM call in the codebase already uses — no new model, no new plumbing.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `generate_case_summary(case_master_id) -> dict` | Returns `{"summary": str, "error": None}` on success, or `{"summary": None, "error": str}` on failure. Queries `CaseMaster` (joined with `CrimeSubHead`, `CaseStatusMaster`, `Unit`) for case facts, `Accused` and `Victim` for involved parties. Passes structured data to `build_case_summary_prompt()` to assemble the LLM prompt, then calls `call_llm("MODEL_ANSWER", ..., max_tokens=4000)`. Never raises — catches `LLMError` and surfaces it in the return dict. |
+
+---
+
+### 3.X `backend/pipeline/evidence_trail.py`
+
+**Purpose:** Writes SQL provenance for chat answers into `chat_evidence_trail` — the "why did the assistant say this" explainability record. The `chat_evidence_trail` table was created in Step 1 (BLUEPRINT2) but nothing wrote to it until this step. Non-fatal by design: a failure here must never break a chat turn.
+
+**Key helpers:**
+- `_log(msg)` — writes to stderr with `[evidence_trail]` prefix.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `save_evidence_trail(message_id, sql_generated, table_data)` | Persists one row per assistant turn that actually ran SQL. **DIRECT-path answers** (no SQL) are skipped entirely — there's nothing to trail, and that's correct, not an error condition. Uses `extract_tables()` from `sql_validator.py` to identify queried tables and `collect_case_master_ids()` from `media_resolver.py` to extract referenced case IDs (capped at 100). Writes via `execute_write` to `chat_evidence_trail` with `message_id`, `sql_executed`, `tables_queried` (comma-separated), `row_count`, and `case_ids_referenced` (comma-separated). Never raises — catches all exceptions and logs to stderr. Called from `_persist_turn` in `routers/chat.py` after `save_message_pair`. |
+
+---
+
+### 3.X `backend/routers/decision_support.py` (updated)
+
+**Purpose:** Decision-support endpoints — per-case investigative aids that connect a case to patterns/other cases the officer may not have manually cross-referenced.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `similar_cases(case_id, limit=5, officer)` | `GET /api/decision-support/similar-cases/{case_id}` — returns cases similar to `case_id`, each with `match_reasons` so the officer sees exactly why it surfaced. Delegates to `pipeline/similar_cases.find_similar_cases`. Auth-gated via `get_current_officer`. Returns `{"case_id": int, "similar_cases": list}`. |
+| `case_timeline(case_id, officer)` | `GET /api/decision-support/timeline/{case_id}` — returns a chronological event list for a case. Delegates to `pipeline/case_timeline.build_case_timeline`. Auth-gated via `get_current_officer`. Returns `{"case_id": int, "timeline": list}`. |
+| `case_summary(case_id, officer)` | `GET /api/decision-support/summary/{case_id}` — returns an LLM-generated investigative brief for a case. Delegates to `pipeline/case_summary.generate_case_summary`. Auth-gated via `get_current_officer`. Returns `{"case_id": int, "summary": str|None, "error": str|None}`. |
+
+---
+
 ## 10.14 LLM Migration — Qwen → GLM-4.7-Flash
 
 **Date:** July 11, 2026  
@@ -2329,3 +2389,34 @@ The following files at the project root are one-time local MySQL migration artif
 - This changelog entry documents all changes from the SixToSeven.md implementation.
 - `backend/pipeline/trend_analytics.py` docstrings and CONTRACT comments unchanged (already present and correct).
 - `backend/routers/analytics.py` route docstrings unchanged (already present and correct).
+
+---
+
+### 10.19 Decision Support & Evidence Trail — SevenToEight.md (Step 3)
+
+**Date:** July 13, 2026
+**What:** Implemented case timeline, LLM case summary, and SQL evidence trail — the three remaining Step 3 deliverables from BLUEPRINT2.
+
+**New pipeline modules:**
+- **`backend/pipeline/case_timeline.py`** — `build_case_timeline(case_master_id)` queries `CaseMaster` for registration/incident dates and `ArrestSurrender` (joined with `Accused`) for arrest events, returning a chronologically sorted list of `{date, event, detail}` dicts. Returns `[]` for non-existent cases.
+- **`backend/pipeline/case_summary.py`** — `generate_case_summary(case_master_id)` gathers structured facts from `CaseMaster`/`CrimeSubHead`/`CaseStatusMaster`/`Unit`/`Accused`/`Victim`, assembles a prompt via `build_case_summary_prompt()`, and calls `call_llm("MODEL_ANSWER", ..., max_tokens=4000)`. Returns `{summary, error}` — never raises.
+- **`backend/pipeline/evidence_trail.py`** — `save_evidence_trail(message_id, sql_generated, table_data)` records SQL provenance in `chat_evidence_trail`. Uses `extract_tables()` from `sql_validator.py` (promoted from `_extract_tables` to public) and `collect_case_master_ids()` from `media_resolver.py`. Non-fatal — failures logged, never break a chat turn. Wired into `_persist_turn` in `routers/chat.py`.
+
+**New prompts:**
+- **`backend/llm/prompts.py`** — added `CASE_SUMMARY_SYSTEM_PROMPT` (3-5 sentence investigative brief, plain prose, no hallucination) and `build_case_summary_prompt(case_row, accused_rows, victim_rows)`.
+
+**New store function:**
+- **`backend/db/chat_store.py`** — added `get_evidence_trail_for_message(message_id, officer_id)` — ownership-scoped read via join through `chat_messages` → `chat_sessions`. Returns `None` on any failure.
+
+**New routes:**
+- `GET /api/decision-support/timeline/{case_id}` — chronological event list. Auth-gated.
+- `GET /api/decision-support/summary/{case_id}` — LLM-generated case brief. Auth-gated.
+- `GET /api/chat/messages/{message_id}/evidence-trail` — SQL provenance for a chat message. BOLA/IDOR-scoped.
+
+**Interface change:**
+- `pipeline/sql_validator.py` — `_extract_tables()` promoted to public `extract_tables()` because `evidence_trail.py` is a second caller outside `validate_sql()`. No signature change.
+
+**Documentation:**
+- Updated `README.md` project structure tree and API endpoints table.
+- Updated `CONTRACTS.md` with 10 new function contracts (213 functions across 47 files).
+- Updated `Docs.md` §2 architecture tree, §3.10 prompts.py, §3.12 sql_validator.py, §3.16b chat_store.py, §3.18 routers/chat.py, and added §3.X sections for case_timeline.py, case_summary.py, evidence_trail.py, and decision_support.py (updated).
