@@ -1,6 +1,6 @@
 # Function Contracts
 
-203 functions across 44 files.
+213 functions across 47 files.
 
 ---
 
@@ -254,6 +254,11 @@
 - **Takes:** session_id (str) — session to verify ownership of,; officer_id (int) — expected owner's ID
 - **Returns:** (bool) — True if the officer owns the session, False otherwise
 - **Raises:** nothing (catches all exceptions, returns False on failure)
+
+### get_evidence_trail_for_message
+- **Takes:** message_id (int) — message row ID to look up, officer_id (int) — EmployeeID of the requesting officer
+- **Returns:** (dict | None) — evidence trail row scoped to the requesting officer, or None if not found/not owned/no trail
+- **Raises:** nothing (catches all exceptions, returns None on failure)
 
 ---
 
@@ -531,6 +536,11 @@
 - **Returns:** (tuple[str, str]) — (system_prompt, user_prompt) for the SQL generation LLM call
 - **Raises:** nothing
 
+### build_case_summary_prompt
+- **Takes:** case_row (dict) — case facts from CaseMaster/CrimeSubHead/CaseStatusMaster/Unit join, accused_rows (list[dict]) — accused persons with AccusedName and AgeYear, victim_rows (list[dict]) — victims with VictimName and AgeYear
+- **Returns:** (tuple[str, str]) — (system_prompt, user_prompt) for case summary LLM call
+- **Raises:** nothing
+
 ---
 
 ## backend/llm/rag_client.py
@@ -749,6 +759,38 @@
 
 ---
 
+## backend/pipeline/case_timeline.py
+
+### build_case_timeline
+- **Takes:** case_master_id (int) — CaseMasterID of the case to build a timeline for
+- **Returns:** (list[dict]) — chronologically ordered events [{"date": str, "event": str, "detail": str}, ...], empty list if case doesn't exist
+- **Raises:** nothing (returns empty list on missing case)
+
+---
+
+## backend/pipeline/case_summary.py
+
+### generate_case_summary
+- **Takes:** case_master_id (int) — CaseMasterID of the case to summarize
+- **Returns:** (dict) — {"summary": str, "error": None} on success, or {"summary": None, "error": str} on failure
+- **Raises:** nothing (never raises, errors surfaced in return dict)
+
+---
+
+## backend/pipeline/evidence_trail.py
+
+### _log
+- **Takes:** msg (str) — message to log
+- **Returns:** nothing
+- **Raises:** nothing
+
+### save_evidence_trail
+- **Takes:** message_id (int | None) — assistant message row ID from chat_messages, sql_generated (str | None) — SQL query that was executed, table_data (list[dict] | None) — raw query result rows
+- **Returns:** nothing
+- **Raises:** nothing (non-fatal, failures are logged to stderr)
+
+---
+
 ## backend/pipeline/sql_validator.py
 
 ### _extract_cte_names
@@ -756,7 +798,7 @@
 - **Returns:** (list[str]) — lowercase CTE names defined in WITH clauses
 - **Raises:** nothing
 
-### _extract_tables
+### extract_tables
 - **Takes:** sql (str) — SQL string to extract table references from
 - **Returns:** (list[str]) — table names found after FROM/JOIN keywords
 - **Raises:** nothing
@@ -886,6 +928,30 @@
 - **Takes:** text (str) — answer text to split into streaming tokens
 - **Returns:** (list[str]) — space-preserving tokens for token-by-token SSE streaming
 - **Raises:** nothing
+
+### message_evidence_trail
+- **Takes:** message_id (int) — message row ID, officer (dict) — authenticated officer from token
+- **Returns:** (dict) — evidence trail row with trail_id, message_id, sql_executed, tables_queried, row_count, case_ids_referenced, created_at
+- **Raises:** HTTPException — when message not found, not owned by officer, or has no evidence trail (404)
+
+---
+
+## backend/routers/decision_support.py
+
+### similar_cases
+- **Takes:** case_id (int) — CaseMasterID to find similar cases for, limit (int) — max results (default 5), officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"case_id": int, "similar_cases": list[dict]} with match_score and match_reasons
+- **Raises:** HTTPException — when authentication fails (401)
+
+### case_timeline
+- **Takes:** case_id (int) — CaseMasterID to build timeline for, officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"case_id": int, "timeline": list[dict]} with chronologically ordered events
+- **Raises:** HTTPException — when authentication fails (401)
+
+### case_summary
+- **Takes:** case_id (int) — CaseMasterID to summarize, officer (dict) — authenticated officer from token
+- **Returns:** (dict) — {"case_id": int, "summary": str | None, "error": str | None}
+- **Raises:** HTTPException — when authentication fails (401)
 
 ---
 

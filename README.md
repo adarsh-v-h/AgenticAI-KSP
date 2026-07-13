@@ -99,7 +99,10 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── media_resolver.py    # Evidence media lookup
 │   │   ├── risk_scoring.py      # Offender risk scoring (explainable)
 │   │   ├── trend_analytics.py   # Crime pattern analytics (SQL aggregation)
-│   │   └── similar_cases.py     # Similar case finder
+│   │   ├── similar_cases.py     # Similar case finder
+│   │   ├── case_timeline.py     # Case timeline builder
+│   │   ├── case_summary.py      # LLM-generated case brief
+│   │   └── evidence_trail.py    # Chat SQL provenance logger
 │   ├── auth/
 │   │   ├── simple_auth.py       # JWT auth for local dev
 │   │   └── role_guard.py        # RBAC + audit logging
@@ -118,7 +121,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── voice.py             # Voice routes
 │   │   ├── governance.py        # Audit log (supervisor-only)
 │   │   ├── analytics.py         # Crime trend endpoints
-│   │   ├── decision_support.py  # Decision support
+│   │   ├── decision_support.py  # Decision support (similar cases, timeline, summary)
 │   │   └── profiling.py         # Offender risk scores
 │   └── tests/
 │       ├── test_unit.py         # 57 pure unit tests
@@ -398,6 +401,10 @@ Password formula: `<KGID>123`
 | `GET` | `/api/analytics/trends/*` | Yes | Crime trend data |
 | `GET` | `/api/profiling/risk/{accused_id}` | Yes | Offender risk score |
 | `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders |
+| `GET` | `/api/decision-support/similar-cases/{case_id}` | Yes | Similar case finder |
+| `GET` | `/api/decision-support/timeline/{case_id}` | Yes | Case timeline events |
+| `GET` | `/api/decision-support/summary/{case_id}` | Yes | LLM-generated case brief |
+| `GET` | `/api/chat/messages/{message_id}/evidence-trail` | Yes | SQL provenance for a chat message |
 | `GET` | `/api/audit-log` | Supervisor | Audit log entries |
 | `GET` | `/api/graph/fir/{id}` | Yes | Network graph for a case |
 | `GET` | `/api/graph/accused/{id}` | Yes | Network graph for an accused |
