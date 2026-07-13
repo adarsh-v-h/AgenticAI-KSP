@@ -1,6 +1,6 @@
 # Function Contracts
 
-213 functions across 47 files.
+223 functions across 50 files.
 
 ---
 
@@ -1257,6 +1257,72 @@
 ### useAuth
 - **Takes:** nothing
 - **Returns:** (object) — {isAuthenticated, officer, isLoading, error, login, logout} auth state and actions
+- **Raises:** never
+
+---
+
+## frontend/src/api/profiling.js
+
+### authHeaders
+- **Takes:** nothing
+- **Returns:** (object) — headers object with Authorization bearer token if available
+- **Raises:** never
+
+### fetchRiskScore
+- **Takes:** accusedId (number|string) — unique identifier of the accused person
+- **Returns:** (Promise<object|null>) — parsed JSON risk score data, or null if not found (404)
+- **Raises:** AuthError — when session expired (401), Error — when request fails
+
+---
+
+## frontend/src/api/decisionSupport.js
+
+### authHeaders
+- **Takes:** nothing
+- **Returns:** (object) — headers object with Authorization bearer token
+- **Raises:** never
+
+### get
+- **Takes:** path (string) — API sub-path to append to the decision-support base URL
+- **Returns:** (Promise<object>) — parsed JSON response body
+- **Raises:** AuthError — when session expired (401), Error — when request fails
+
+### fetchCaseTimeline
+- **Takes:** caseId (number|string) — unique identifier of the case
+- **Returns:** (Promise<object>) — {case_id, timeline: list[dict]}
+- **Raises:** AuthError — when session expired (401), Error — when request fails
+
+### fetchCaseSummary
+- **Takes:** caseId (number|string) — unique identifier of the case
+- **Returns:** (Promise<object>) — {case_id, summary, error}
+- **Raises:** AuthError — when session expired (401), Error — when request fails
+
+### fetchSimilarCases
+- **Takes:** caseId (number|string) — unique identifier of the case, limit (number) — max results (default 5)
+- **Returns:** (Promise<object>) — {case_id, similar_cases: list[dict]}
+- **Raises:** AuthError — when session expired (401), Error — when request fails
+
+---
+
+## frontend/src/api/evidenceTrail.js
+
+### authHeaders
+- **Takes:** nothing
+- **Returns:** (object) — headers object with Authorization bearer token
+- **Raises:** never
+
+### fetchEvidenceTrail
+- **Takes:** messageId (string|number) — unique identifier of the chat message
+- **Returns:** (Promise<object|null>) — parsed JSON evidence trail, or null if not found/not owned/DIRECT-path
+- **Raises:** AuthError — when session expired (401), Error — when request fails
+
+---
+
+## frontend/src/components/MessageBubble.jsx
+
+### firstAccusedId
+- **Takes:** tableData (Array<object>|any) — structured table rows from the chat response
+- **Returns:** (number|null) — the first valid AccusedMasterID as a number, or null if none found
 - **Raises:** never
 
 ---

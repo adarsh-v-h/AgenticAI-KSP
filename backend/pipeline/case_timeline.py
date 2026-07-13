@@ -2,7 +2,7 @@
 Builds a chronological timeline for a single case.
 Events come from: CaseMaster registration/incident dates, and ArrestSurrender
 events (one per arrested/surrendered accused). No ChargesheetDetails reference
--- that table is on MIGRATE.md's deferred list.
+-- that table is on the deferred list and not part of the current schema.
 """
 from db.connection import execute_query
 
