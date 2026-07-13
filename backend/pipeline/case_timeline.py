@@ -7,6 +7,10 @@ events (one per arrested/surrendered accused). No ChargesheetDetails reference
 from db.connection import execute_query
 
 
+# CONTRACT
+# takes:  case_master_id (int) — CaseMasterID of the case to build a timeline for
+# returns: (list[dict]) — chronologically ordered events [{date, event, detail}], empty if case doesn't exist
+# raises:  nothing
 async def build_case_timeline(case_master_id: int) -> list[dict]:
     """
     Returns chronologically ordered events:

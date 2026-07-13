@@ -9,6 +9,10 @@ from llm.client import call_llm, LLMError
 from llm.prompts import build_case_summary_prompt
 
 
+# CONTRACT
+# takes:  case_master_id (int) — CaseMasterID of the case to summarize
+# returns: (dict) — {"summary": str, "error": None} on success, or {"summary": None, "error": str} on failure
+# raises:  nothing (never raises, errors surfaced in return dict)
 async def generate_case_summary(case_master_id: int) -> dict:
     """
     Returns {"summary": str, "error": None} on success, or

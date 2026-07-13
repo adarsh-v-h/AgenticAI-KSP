@@ -10,10 +10,20 @@ from pipeline.sql_validator import extract_tables
 from pipeline.media_resolver import collect_case_master_ids
 
 
+# CONTRACT
+# takes:  msg (str) — message to log to stderr
+# returns: nothing
+# raises:  nothing
 def _log(msg):
     print(f"[evidence_trail] {msg}", file=sys.stderr, flush=True)
 
 
+# CONTRACT
+# takes:  message_id (int | None) — assistant message row ID from chat_messages,
+#          sql_generated (str | None) — SQL query that was executed,
+#          table_data (list[dict] | None) — raw query result rows
+# returns: nothing
+# raises:  nothing (non-fatal, failures logged to stderr)
 async def save_evidence_trail(message_id: int | None, sql_generated: str | None, table_data: list[dict] | None):
     """
     Persists one row per assistant turn that actually ran SQL.

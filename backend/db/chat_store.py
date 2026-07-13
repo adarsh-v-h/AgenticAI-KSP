@@ -243,6 +243,11 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
         return []
 
 
+# CONTRACT
+# takes:  message_id (int) — message row ID to look up,
+#          officer_id (int) — EmployeeID of the requesting officer
+# returns: (dict | None) — evidence trail row scoped to the officer, or None if not found/not owned/no trail
+# raises:  nothing (catches all exceptions, returns None on failure)
 async def get_evidence_trail_for_message(message_id: int, officer_id: int) -> dict | None:
     """
     Returns the chat_evidence_trail row for a message, scoped to the
