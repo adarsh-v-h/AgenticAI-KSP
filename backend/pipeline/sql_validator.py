@@ -125,12 +125,7 @@ def extract_tables(sql: str) -> list[str]:
         re.IGNORECASE,
     )
     raw = pattern.findall(sql)
-    cleaned = []
-    for r in raw:
-        name = r.strip("`\"")
-        if name:
-            cleaned.append(name)
-    return cleaned
+    return [name for r in raw if (name := r.strip("`\""))]
 
 
 # CONTRACT

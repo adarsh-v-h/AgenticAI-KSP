@@ -95,16 +95,16 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
                LIMIT %s""",
             (officer_id, limit)
         )
-        result = []
-        for row in rows:
-            result.append({
+        return [
+            {
                 "session_id": row["session_id"],
                 "title": row["title"],
                 "message_count": row["message_count"],
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-            })
-        return result
+            }
+            for row in rows
+        ]
     except Exception as e:
         _log(f"WARNING: Failed to load sessions for officer {officer_id}: {e}")
         return []

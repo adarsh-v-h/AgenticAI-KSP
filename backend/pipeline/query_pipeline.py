@@ -117,8 +117,6 @@ def _has_case_master_id(results: list[dict]) -> bool:
 # returns: (bool) — True if any case IDs are present (graph derivable on demand)
 # raises:  nothing
 async def _check_graph_available(case_master_ids: list[int]) -> bool:
-    # Graph edges are derived live from Accused/CaseMaster (Option A, MIGRATE_STEP4).
-    # Return True whenever we have case IDs -- the builder derives edges on demand.
     return bool(case_master_ids)
 
 
@@ -132,12 +130,12 @@ def _most_recent_table(history: list[dict]) -> list[dict]:
     Walks history newest-first so a follow-up can be answered from the last
     result set without re-querying the database.
     """
-    for turn in reversed(history or []):
-        if (turn.get("role") or "").lower() == "assistant":
-            table = turn.get("table")
-            if isinstance(table, list) and table:
-                return table
-    return []
+    return next(
+        (turn["table"] for turn in reversed(history or [])
+         if (turn.get("role") or "").lower() == "assistant"
+         and isinstance(turn.get("table"), list) and turn.get("table")),
+        []
+    )
 
 
 # CONTRACT
@@ -403,7 +401,7 @@ async def run_pipeline(
 
     response.media_attachments = media
 
-    # 5. Graph availability probe
+    # 5. Graph availability — edges are derived live from Accused/CaseMaster on demand.
     if case_master_ids:
         response.graph_available = await _check_graph_available(case_master_ids)
 

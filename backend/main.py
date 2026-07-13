@@ -80,6 +80,23 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
+
+# Security response headers — defense-in-depth for clickjacking, MIME sniffing, referrer leaks
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+        return response
+
+
+app.add_middleware(_SecurityHeadersMiddleware)
+
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(export_router)
