@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import TableRenderer from './TableRenderer.jsx'
 import MediaViewer from './MediaViewer.jsx'
+import RiskBadge from './RiskBadge.jsx'
+import EvidenceTrail from './EvidenceTrail.jsx'
 import { IconNetwork, IconSpeaker } from './Icons.jsx'
 import { speakText } from '../api/voice.js'
 import { useLang } from '../context/LangContext.jsx'
@@ -17,6 +19,16 @@ function firstFirId(tableData) {
     Array.isArray(tableData) &&
     tableData.find((row) => row?.CaseMasterID != null && Number.isFinite(Number(row.CaseMasterID)))
   return match ? Number(match.CaseMasterID) : null
+}
+
+function firstAccusedId(tableData) {
+  if (!Array.isArray(tableData)) return null
+  for (const row of tableData) {
+    const raw = row?.AccusedMasterID ?? row?.accused_master_id
+    const id = Number(raw)
+    if (Number.isFinite(id) && id > 0) return id
+  }
+  return null
 }
 
 
@@ -88,6 +100,9 @@ export default function MessageBubble({
   mediaAttachments,
   graphAvailable,
   onOpenGraph,
+  onCaseDetailRequest,
+  messageId,
+  onAuthExpired,
   suggestedFollowUps,
   onFollowUpClick,
   isStreaming,
@@ -111,6 +126,7 @@ export default function MessageBubble({
 
   const { lang } = useLang()
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const [evidenceOpen, setEvidenceOpen] = useState(false)
 
   // On-demand read-aloud (Zia TTS). Best-effort: speakText never throws and
   // returns false when synthesis is unavailable, so the button just resets.
@@ -162,7 +178,35 @@ export default function MessageBubble({
             <span>View network</span>
           </button>
         ) : null}
+
+        {firstFirId(tableData) != null ? (
+          <button
+            type="button"
+            className="message-action-btn"
+            onClick={() => onCaseDetailRequest?.(firstFirId(tableData))}
+          >
+            View case details
+          </button>
+        ) : null}
+
+        {!isStreaming && messageId ? (
+          <button
+            type="button"
+            className="message-action-btn"
+            onClick={() => setEvidenceOpen((v) => !v)}
+          >
+            {evidenceOpen ? 'Hide trail' : 'Why this answer?'}
+          </button>
+        ) : null}
+
+        {firstAccusedId(tableData) != null ? (
+          <RiskBadge accusedId={firstAccusedId(tableData)} onAuthExpired={onAuthExpired} />
+        ) : null}
       </div>
+
+      {evidenceOpen && messageId ? (
+        <EvidenceTrail messageId={messageId} onAuthExpired={onAuthExpired} />
+      ) : null}
 
       {!isStreaming && !error && Array.isArray(suggestedFollowUps) && suggestedFollowUps.length > 0 ? (
         <div className="message__follow-ups">
