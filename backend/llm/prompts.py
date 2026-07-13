@@ -432,6 +432,12 @@ who is involved, and the current status. Do not invent facts not present in the 
 markdown, no headers -- plain prose only."""
 
 
+# CONTRACT
+# takes:  case_row (dict) — case facts from CaseMaster/CrimeSubHead/CaseStatusMaster/Unit join,
+#          accused_rows (list[dict]) — accused persons with AccusedName and AgeYear,
+#          victim_rows (list[dict]) — victims with VictimName and AgeYear
+# returns: (tuple[str, str]) — (system_prompt, user_prompt) for case summary LLM call
+# raises:  nothing
 def build_case_summary_prompt(case_row: dict, accused_rows: list[dict], victim_rows: list[dict]) -> tuple[str, str]:
     """Build (system_prompt, user_prompt) for case summary generation."""
     accused_str = ", ".join(
