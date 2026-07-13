@@ -394,7 +394,7 @@ async def chat(
             sql_generated="",
             graph_available=False,
             suggested_follow_ups=[],
-            error=str(e),
+            error="internal_error",
         )
 
     if not result.error:
@@ -570,8 +570,4 @@ def _tokenize(text: str) -> list[str]:
     if not text:
         return []
     words = text.split(" ")
-    out: list[str] = []
-    last = len(words) - 1
-    for i, w in enumerate(words):
-        out.append(w if i == last else w + " ")
-    return out
+    return [w + " " if i < len(words) - 1 else w for i, w in enumerate(words)]

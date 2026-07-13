@@ -218,13 +218,11 @@ def main():
         return
 
     # Extract IDs
-    doc_ids = []
-    for doc in docs:
-        did = doc.get("document_id") or doc.get("id") or doc.get("documentId")
-        if did:
-            doc_ids.append(str(did))
-
-    doc_ids = sorted(set(doc_ids))
+    doc_ids = sorted({
+        str(did)
+        for doc in docs
+        if (did := doc.get("document_id") or doc.get("id") or doc.get("documentId"))
+    })
 
     print(f"\nDiscovered {len(doc_ids)} document IDs:")
     for did in doc_ids:

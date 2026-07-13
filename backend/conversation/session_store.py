@@ -25,9 +25,6 @@ project's NoSQL exposes a different path, only those helpers need to change.
 
 import sys
 import asyncio
-import httpx
-
-from config.settings import get
 
 _NOSQL_TIMEOUT = 5.0
 
@@ -80,9 +77,7 @@ async def _local_set(session_id: str, document: dict) -> None:
 async def _local_list(officer_id: int | None = None) -> list[dict]:
     async with _local_lock:
         docs = [dict(d) for d in _local_sessions.values()]
-    if officer_id is not None:
-        docs = [d for d in docs if d.get("officer_id") == officer_id]
-    return docs
+    return [d for d in docs if d.get("officer_id") == officer_id] if officer_id is not None else docs
 
 
 # CONTRACT
@@ -259,9 +254,10 @@ def generate_title(message: str) -> str:
     if not message:
         return _TITLE_FALLBACK
 
-    words = message.lower().split()
-    significant = [w.strip("?.,!") for w in words]
-    significant = [w for w in significant if w and w not in _TITLE_STOP_WORDS]
+    significant = [
+        w for raw in message.lower().split()
+        if (w := raw.strip("?.,!")) and w not in _TITLE_STOP_WORDS
+    ]
 
     if not significant:
         return _TITLE_FALLBACK

@@ -25,7 +25,7 @@ _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 _dotenv_path = os.path.join(_project_root, ".env")
 _loaded = load_dotenv(dotenv_path=_dotenv_path)
 
-CATALYST_ORG = os.getenv("CATALYST_ORG_ID", "60073906151")
+CATALYST_ORG = os.getenv("CATALYST_ORG_ID", "")
 CATALYST_PROJECT_ID = os.getenv("CATALYST_PROJECT_ID")
 RAG_URL = f"https://api.catalyst.zoho.in/quickml/v1/project/{CATALYST_PROJECT_ID}/rag/answer"
 
@@ -71,7 +71,7 @@ class RagResult:
 def _significant_phrases(text: str) -> set:
     phrases = _PHRASE_PATTERN.findall(text)
     numbers = _LONG_NUMBER_PATTERN.findall(text)
-    return set(p.lower() for p in phrases) | set(numbers)
+    return {p.lower() for p in phrases} | set(numbers)
 
 
 # CONTRACT

@@ -225,16 +225,11 @@ def build_sql_prompt(
 # raises:  nothing
 def _truncate_for_answer(results: list[dict], max_rows: int = 50, max_field_chars: int = 200) -> list[dict]:
     """Trim results to `max_rows` rows and clip long string fields."""
-    trimmed = []
-    for row in results[:max_rows]:
-        new_row = {}
-        for k, v in row.items():
-            if isinstance(v, str) and len(v) > max_field_chars:
-                new_row[k] = v[:max_field_chars] + "…"
-            else:
-                new_row[k] = v
-        trimmed.append(new_row)
-    return trimmed
+    return [
+        {k: (v[:max_field_chars] + "…" if isinstance(v, str) and len(v) > max_field_chars else v)
+         for k, v in row.items()}
+        for row in results[:max_rows]
+    ]
 
 
 # CONTRACT

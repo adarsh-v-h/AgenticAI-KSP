@@ -1,5 +1,4 @@
 import sys
-import json
 import httpx
 from config.settings import get
 
@@ -79,10 +78,7 @@ def deserialize_from_catalyst(c_val):
 def deserialize_item(item_data: dict) -> dict:
     if not item_data:
         return {}
-    res = {}
-    for k, v in item_data.items():
-        res[k] = deserialize_from_catalyst(v)
-    return res
+    return {k: deserialize_from_catalyst(v) for k, v in item_data.items()}
 
 # CONTRACT
 # takes:  table_name (str) — NoSQL table to fetch from,
