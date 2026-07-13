@@ -299,7 +299,7 @@ CREATE TABLE chat_messages (
     FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
 );
 
--- BLUEPRINT2 tables — roles, audit, risk scoring (Step 1)
+-- Extended tables — roles, audit, risk scoring
 
 CREATE TABLE IF NOT EXISTS offender_risk_scores (
     AccusedMasterID      INT PRIMARY KEY,

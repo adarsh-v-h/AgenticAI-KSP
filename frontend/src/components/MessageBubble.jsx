@@ -21,6 +21,10 @@ function firstFirId(tableData) {
   return match ? Number(match.CaseMasterID) : null
 }
 
+// CONTRACT
+// takes:  tableData (Array<object>|any) — structured table rows from the chat response
+// returns: (number|null) — the first valid AccusedMasterID as a number, or null if none found
+// throws:  never
 function firstAccusedId(tableData) {
   if (!Array.isArray(tableData)) return null
   for (const row of tableData) {

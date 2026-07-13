@@ -233,7 +233,7 @@ backend/
 
 **Rich data storage migration:** The `table_data_json` column (MEDIUMTEXT) was added to `chat_messages` to co-locate tabular query results with the message they belong to. Previously, this data lived in a separate NoSQL document (`message_rich_data`). The new approach eliminates a round-trip, simplifies recovery logic, and keeps all message data in one indexed query. The `_serialize()` helper in `chat_store.py` handles `date`/`datetime`/`timedelta` objects during JSON serialization.
 
-**BLUEPRINT2 tables:** The three tables (`offender_risk_scores`, `chat_evidence_trail`, `audit_log`) were added in Step 1 to support role-based access control, audit logging, risk scoring, and evidence tracking features.
+**Extended schema tables:** The three tables (`offender_risk_scores`, `chat_evidence_trail`, `audit_log`) were added to support role-based access control, audit logging, risk scoring, and evidence tracking features.
 
 **Design rationale:** A unified `CaseMaster` table holds all cases, and details like `ComplainantDetails`, `Victim`, `Accused`, `ActSectionAssociation`, and `ArrestSurrender` are separated into distinct tables. This maps directly to the official Karnataka State Police database layout and permits structured, set-based queries (such as checking who is still at large by checking if an accused has no matching `ArrestSurrender` entry).
 
@@ -2012,12 +2012,12 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 ---
 
-### 10.10 BLUEPRINT2 Step 1 — Roles, Audit Log, and Governance Foundation
+### 10.10 Roles, Audit Log, and Governance Foundation
 
 **Date:** June 29, 2026  
-**What:** Implemented role-based access control, audit logging, and supervisor-only governance endpoints. This is Step 1 of the BLUEPRINT2 feature set, establishing the foundation for analytics, risk scoring, and decision support features in subsequent steps.
+**What:** Implemented role-based access control, audit logging, and supervisor-only governance endpoints — the foundation for analytics, risk scoring, and decision support features.
 
-**Database Schema (`backend/db/blueprint2_schema.sql`):**
+**Database Schema (extended tables):**
 - **`offender_risk_scores`:** Risk scoring table with FK to `Accused(AccusedMasterID)`. Columns: `risk_score` (DECIMAL), `risk_tier` (ENUM: low/medium/high/critical), `contributing_factors` (TEXT), `computed_at` (TIMESTAMP).
 - **`chat_evidence_trail`:** Tracks SQL queries and case references from chat interactions. Columns: `message_id` (FK→chat_messages), `sql_executed` (TEXT), `tables_queried` (VARCHAR 300), `row_count` (INT), `case_ids_referenced` (VARCHAR 500 — comma-separated CaseMasterID values), `created_at` (TIMESTAMP). Indexed on `message_id`.
 - **`audit_log`:** Records all sensitive actions. Columns: `officer_id` (FK→Employee), `action` (VARCHAR 50), `resource_type` (VARCHAR 50), `resource_id` (VARCHAR 50), `details` (TEXT), `ip_address` (VARCHAR 45), `created_at` (TIMESTAMP). Indexed on `(officer_id, created_at)` and `(resource_type, resource_id)`.
@@ -2034,7 +2034,7 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 - Registered `governance_router` alongside existing routers (`auth`, `chat`, `export`, `reports`, `voice`).
 
 **Verification Status:**
-- All 5 verification tests from BLUEPRINT2 Step 1 passed:
+- All 5 verification tests passed:
   1. JWT payload includes `role` field correctly (tested with investigator-role token).
   2. Existing `/api/chat` endpoint works without regression (returned valid response with no breaking changes).
   3. `require_role()` correctly blocks investigator-role from supervisor-only endpoint (HTTP 403 with proper error message).
@@ -2195,7 +2195,7 @@ All three endpoints require officer authentication via `get_current_officer`.
 
 ### 3.X `backend/pipeline/evidence_trail.py`
 
-**Purpose:** Writes SQL provenance for chat answers into `chat_evidence_trail` — the "why did the assistant say this" explainability record. The `chat_evidence_trail` table was created in Step 1 (BLUEPRINT2) but nothing wrote to it until this step. Non-fatal by design: a failure here must never break a chat turn.
+**Purpose:** Writes SQL provenance for chat answers into `chat_evidence_trail` — the "why did the assistant say this" explainability record. The table was created with the schema extensions but nothing wrote to it until this step. Non-fatal by design: a failure here must never break a chat turn.
 
 **Key helpers:**
 - `_log(msg)` — writes to stderr with `[evidence_trail]` prefix.
@@ -2317,10 +2317,10 @@ The following files at the project root are one-time local MySQL migration artif
 
 ---
 
-### 10.18 Analytics Dashboard Implementation — SixToSeven.md Reconciliation
+### 10.18 Analytics Dashboard Implementation
 
 **Date:** July 12, 2026  
-**Issue:** During the SixToSeven.md implementation audit, it was identified that the backend analytics functions in `trend_analytics.py` and `routers/analytics.py` already existed, but had several bugs and the entire frontend (dashboard, chart component, API client, wiring) was missing. Additionally, three runtime bugs were discovered during live testing after the frontend was built.
+**Issue:** During the analytics implementation audit, it was identified that the backend analytics functions in `trend_analytics.py` and `routers/analytics.py` already existed, but had several bugs and the entire frontend (dashboard, chart component, API client, wiring) was missing. Additionally, three runtime bugs were discovered during live testing after the frontend was built.
 
 **Changes Made:**
 
@@ -2340,11 +2340,11 @@ The following files at the project root are one-time local MySQL migration artif
 - **Verified:** Requests with out-of-bounds params now return HTTP 422 Unprocessable Entity with clear validation messages.
 
 **3. Response Shape Decision**
-- **Issue:** SixToSeven.md's planned frontend expected response keys like `breakdown` and `stations`, but the existing backend returned `trend` for most endpoints.
+- **Issue:** The originally planned frontend expected response keys like `breakdown` and `stations`, but the existing backend returned `trend` for most endpoints.
 - **Decision:** Kept the existing backend response shapes (`trend`, `trend`, `trend`) unchanged to avoid breaking any undocumented consumers. Built the frontend to adapt to the existing backend instead.
 - **Frontend Adaptation:** `AnalyticsDashboard.jsx` reads `m.trend`, `c.trend`, `s.trend` instead of the originally planned `m.months`, `c.breakdown`, `s.stations`.
 
-**4. Frontend Implementation (Steps 5–9 from SixToSeven.md)**
+**4. Frontend Implementation**
 - **Files Created:**
   - `frontend/src/api/analytics.js` — 7 fetch functions: `fetchMonthlyTrend()`, `fetchCrimeTypeTrend()`, `fetchStationTrend()`, `fetchStationBreakdown()`, `fetchStatusBreakdown()`, `fetchMoClusters()`, `fetchSeasonalPattern()`. Reuses existing `getToken()` from `auth.js` and `AuthError` from `chat.js` (no duplication).
   - `frontend/src/components/TrendChart.jsx` — Dependency-free SVG chart component supporting bar and line modes, with optional click handlers for drill-down, empty-state handling, and custom axis formatters.
@@ -2386,16 +2386,16 @@ The following files at the project root are one-time local MySQL migration artif
 - Per-panel error isolation confirmed (temporarily broke one endpoint, verified other 5 panels still rendered).
 
 **Documentation:**
-- This changelog entry documents all changes from the SixToSeven.md implementation.
+- This changelog entry documents all changes from the analytics implementation.
 - `backend/pipeline/trend_analytics.py` docstrings and CONTRACT comments unchanged (already present and correct).
 - `backend/routers/analytics.py` route docstrings unchanged (already present and correct).
 
 ---
 
-### 10.19 Decision Support & Evidence Trail — SevenToEight.md (Step 3)
+### 10.19 Decision Support & Evidence Trail
 
 **Date:** July 13, 2026
-**What:** Implemented case timeline, LLM case summary, and SQL evidence trail — the three remaining Step 3 deliverables from BLUEPRINT2.
+**What:** Implemented case timeline, LLM case summary, and SQL evidence trail — the remaining backend deliverables for decision support and explainability.
 
 **New pipeline modules:**
 - **`backend/pipeline/case_timeline.py`** — `build_case_timeline(case_master_id)` queries `CaseMaster` for registration/incident dates and `ArrestSurrender` (joined with `Accused`) for arrest events, returning a chronologically sorted list of `{date, event, detail}` dicts. Returns `[]` for non-existent cases.
@@ -2420,3 +2420,48 @@ The following files at the project root are one-time local MySQL migration artif
 - Updated `README.md` project structure tree and API endpoints table.
 - Updated `CONTRACTS.md` with 10 new function contracts (213 functions across 47 files).
 - Updated `Docs.md` §2 architecture tree, §3.10 prompts.py, §3.12 sql_validator.py, §3.16b chat_store.py, §3.18 routers/chat.py, and added §3.X sections for case_timeline.py, case_summary.py, evidence_trail.py, and decision_support.py (updated).
+
+
+---
+
+### 10.20 Frontend: RiskBadge, CaseDetailPanel, EvidenceTrail (FINAL)
+
+**Date:** July 13, 2026
+**What:** Built the three frontend components that surface Steps 1-3's backend features to officers. Zero backend changes — all endpoints already existed and were tested.
+
+**New files created:**
+
+| File | Purpose |
+|------|---------|
+| `frontend/src/api/profiling.js` | Fetch client for `/api/profiling/risk/{accusedId}` |
+| `frontend/src/api/decisionSupport.js` | Fetch client for timeline/summary/similar-cases endpoints |
+| `frontend/src/api/evidenceTrail.js` | Fetch client for `/api/chat/messages/{id}/evidence-trail` |
+| `frontend/src/components/RiskBadge.jsx` | Inline colored pill showing risk tier + expandable contributing factors |
+| `frontend/src/components/EvidenceTrail.jsx` | Inline expandable section showing SQL provenance (tables, rows, query) |
+| `frontend/src/components/CaseDetailPanel.jsx` | Full-screen modal with 3 tabs (Timeline, Summary, Similar Cases) |
+
+**Modified files:**
+
+| File | Change |
+|------|--------|
+| `frontend/src/components/MessageBubble.jsx` | Added `firstAccusedId()` helper, imported RiskBadge + EvidenceTrail, added "View case details" button, added "Why this answer?" toggle, accepts new props (`onCaseDetailRequest`, `messageId`, `onAuthExpired`) |
+| `frontend/src/components/ChatWindow.jsx` | Added `CaseDetailPanel` lazy import + state, added `messageId` sourcing via post-`onDone` fetch, passes new props to MessageBubble |
+| `frontend/src/styles/main.css` | Added ~130 lines: `.risk-badge*`, `.case-detail-panel*`, `.case-timeline`, `.case-summary-text`, `.evidence-trail*` |
+
+**Architecture decisions:**
+
+1. **RiskBadge triggers from `AccusedMasterID` in table data** — same pattern as "View network" triggering from `CaseMasterID`. Shows wherever a query naturally surfaces accused rows.
+2. **CaseDetailPanel tabs load independently** — Summary (LLM-backed, slow) doesn't block Timeline/Similar Cases (SQL, fast). Data cached per-caseId, no refetch on tab switch.
+3. **EvidenceTrail uses message_id fetched after stream completes** — persistence creates the `message_id` after `done` is sent, so the frontend fetches messages right after `onDone` to get the real ID. Non-fatal: failure just means no trail button until session reload.
+4. **Evidence trail 404 = "No SQL ran"** — DIRECT-path answers, missing messages, and ownership failures all surface the same "No SQL ran for this answer" message, per the 404-not-403 BOLA convention.
+5. **Code-split correctly** — CaseDetailPanel is a separate chunk (2.72 kB), loaded only on first "View case details" click. RiskBadge and EvidenceTrail are inlined in the main bundle (tiny components, no lazy-load needed).
+
+**Feature implementation status:** All feature areas complete:
+- Roles, Audit Log, Governance
+- Crime Trend Analytics Dashboard
+- Case Timeline, Case Summary, Evidence Trail (backend)
+- RiskBadge, CaseDetailPanel, EvidenceTrail (frontend)
+
+**Documentation:**
+- `CONTRACTS.md` updated: 223 functions across 50 files (+10 new entries).
+- Inline CONTRACT comments added to all new functions.

@@ -68,8 +68,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │
 ├── Support Documents/
 │   ├── Docs.md                  # Full technical documentation
-│   ├── DESIGN.md                # Frontend design spec
-│   └── BLUEPRINT2.md            # Feature roadmap
+│   └── DESIGN.md                # Frontend design spec
 │
 ├── backend/
 │   ├── main.py                  # FastAPI app, startup lifecycle, health check

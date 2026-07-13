@@ -372,12 +372,12 @@ async def test_e2e_rag_pipeline():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# GROUP 5 — Role-Based Access Control (BLUEPRINT2 Step 1)
+# GROUP 5 — Role-Based Access Control
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def test_role_based_auth_jwt_includes_role():
     """
-    Test 1: Login includes role in JWT (automates FiveToSix.md Test 1).
+    Test 1: Login includes role in JWT.
     
     Verifies that logging in as different officer roles returns a JWT with
     the correct role claim in the payload.
@@ -434,7 +434,7 @@ async def test_role_based_auth_jwt_includes_role():
 
 async def test_role_based_auth_blocks_wrong_role():
     """
-    Test 3: require_role() blocks mismatched roles (automates FiveToSix.md Test 3).
+    Test 3: require_role() blocks mismatched roles.
     
     Verifies that an investigator-role officer gets HTTP 403 when attempting
     to access a supervisor-only endpoint.
@@ -474,7 +474,7 @@ async def test_role_based_auth_blocks_wrong_role():
 
 async def test_role_based_auth_allows_correct_role():
     """
-    Test 4: require_role() allows matching roles (automates FiveToSix.md Test 4).
+    Test 4: require_role() allows matching roles.
     
     Verifies that a supervisor-role officer successfully accesses the
     supervisor-only audit-log endpoint.
@@ -514,7 +514,7 @@ async def test_role_based_auth_allows_correct_role():
 
 async def test_log_action_writes_to_audit_log():
     """
-    Test 5: log_action() writes to audit_log (automates FiveToSix.md Test 5).
+    Test 5: log_action() writes to audit_log.
     
     Verifies that log_action() successfully writes a row to the audit_log table
     and that the entry can be retrieved via the audit-log endpoint.
@@ -732,7 +732,7 @@ async def test_audit_log_no_data_leak_on_403():
 
 async def test_chat_endpoints_not_role_gated():
     """
-    Regression: Chat endpoints work with any role (automates FiveToSix.md regression check).
+    Regression: Chat endpoints work with any role.
     
     Verifies that /api/chat and /api/chat/stream are NOT gated by require_role()
     and work for officers of any role (investigator, supervisor, analyst).
