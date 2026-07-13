@@ -18,6 +18,7 @@ import { IconSidebarOpen, IconSidebarClose, IconNewChat, IconDownload, IconAnaly
 // initial chat load fast â€” the graph chunk is fetched on first use.
 const NetworkGraph = lazy(() => import('./NetworkGraph.jsx'))
 const AnalyticsDashboard = lazy(() => import('./AnalyticsDashboard.jsx'))
+const CaseDetailPanel = lazy(() => import('./CaseDetailPanel.jsx'))
 
 const SIDEBAR_COLLAPSED_KEY = 'chs.sidebarCollapsed'
 
@@ -83,6 +84,9 @@ export default function ChatWindow({ officer, onLogout }) {
   const [graphTarget, setGraphTarget] = useState(null)
   // Analytics dashboard modal state
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  // Case detail panel state
+  const [caseDetailOpen, setCaseDetailOpen] = useState(false)
+  const [caseDetailId, setCaseDetailId] = useState(null)
 
   const [sessionError, setSessionError] = useState(null)
   const [sessionsError, setSessionsError] = useState(null)
@@ -311,6 +315,15 @@ export default function ChatWindow({ officer, onLogout }) {
           fetchSessions()
             .then((loaded) => setSessions(loaded))
             .catch(() => {})
+          // Fetch real message_id for evidence trail
+          fetchMessages(turnSessionId)
+            .then(({ messages: freshMsgs }) => {
+              const lastAssistant = [...freshMsgs].reverse().find((m) => m.role === 'assistant')
+              if (lastAssistant) {
+                updateLastAssistant(() => ({ messageId: lastAssistant.message_id }))
+              }
+            })
+            .catch(() => {})
           requestAnimationFrame(() => textareaRef.current?.focus())
         },
       })
@@ -335,6 +348,7 @@ export default function ChatWindow({ officer, onLogout }) {
             id: m.message_id,
             role: m.role,
             content: m.content,
+            messageId: m.message_id,
             tableData:
               Array.isArray(m.table_data) && m.table_data.length > 0
                 ? m.table_data
@@ -594,6 +608,9 @@ export default function ChatWindow({ officer, onLogout }) {
                     mediaAttachments={m.mediaAttachments}
                     graphAvailable={m.graphAvailable}
                     onOpenGraph={setGraphTarget}
+                    onCaseDetailRequest={(caseId) => { setCaseDetailId(caseId); setCaseDetailOpen(true) }}
+                    messageId={m.messageId}
+                    onAuthExpired={onLogout}
                     suggestedFollowUps={m.suggestedFollowUps}
                     onFollowUpClick={handleSend}
                     isStreaming={m.isStreaming}
@@ -627,6 +644,16 @@ export default function ChatWindow({ officer, onLogout }) {
         <Suspense fallback={<div className="modal-loading">Loading analytics…</div>}>
           <AnalyticsDashboard
             onClose={() => setAnalyticsOpen(false)}
+            onAuthExpired={onLogout}
+          />
+        </Suspense>
+      )}
+
+      {caseDetailOpen && caseDetailId && (
+        <Suspense fallback={<div className="modal-loading">Loading case details…</div>}>
+          <CaseDetailPanel
+            caseId={caseDetailId}
+            onClose={() => setCaseDetailOpen(false)}
             onAuthExpired={onLogout}
           />
         </Suspense>
