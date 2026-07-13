@@ -421,3 +421,36 @@ def build_direct_answer_prompt(
     parts.append(f"Officer's question: {question}\n")
     parts.append("Answer the question professionally:")
     return DIRECT_ANSWER_SYSTEM_PROMPT, "\n".join(parts)
+
+
+# ─── Case Summary Prompt ─────────────────────────────────────────────────────
+
+CASE_SUMMARY_SYSTEM_PROMPT = """You are an assistant writing a concise investigative case brief \
+for a Karnataka State Police officer. Given structured case facts (crime type, status, station, \
+brief facts, accused, victims), write a 3-5 sentence professional summary covering what happened, \
+who is involved, and the current status. Do not invent facts not present in the data. No \
+markdown, no headers -- plain prose only."""
+
+
+def build_case_summary_prompt(case_row: dict, accused_rows: list[dict], victim_rows: list[dict]) -> tuple[str, str]:
+    """Build (system_prompt, user_prompt) for case summary generation."""
+    accused_str = ", ".join(
+        f"{a['AccusedName']} ({a['AgeYear']})" if a.get("AgeYear") else (a["AccusedName"] or "Unknown")
+        for a in accused_rows
+    ) or "none on record"
+    victim_str = ", ".join(
+        f"{v['VictimName']} ({v['AgeYear']})" if v.get("AgeYear") else (v["VictimName"] or "Unknown")
+        for v in victim_rows
+    ) or "none on record"
+
+    user_prompt = f"""Case: {case_row['CrimeNo']}
+Registered: {case_row['CrimeRegisteredDate']}
+Crime type: {case_row['CrimeHeadName']}
+Status: {case_row['CaseStatusName']}
+Station: {case_row['UnitName']}
+Brief facts: {case_row['BriefFacts'] or 'Not recorded'}
+Accused: {accused_str}
+Victims: {victim_str}
+
+Write the case brief."""
+    return CASE_SUMMARY_SYSTEM_PROMPT, user_prompt

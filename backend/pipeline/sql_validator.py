@@ -112,7 +112,7 @@ def _extract_cte_names(sql: str) -> list[str]:
 # takes:  sql (str) — SQL string to extract table references from
 # returns: (list[str]) — table names found after FROM/JOIN keywords
 # raises:  nothing
-def _extract_tables(sql: str) -> list[str]:
+def extract_tables(sql: str) -> list[str]:
     """
     Pull out table names that appear after FROM and JOIN clauses.
 
@@ -176,7 +176,7 @@ def validate_sql(sql: str, allowed_tables: list[str] | None = None) -> Validatio
             )
 
     # Table allow-list check.
-    referenced = _extract_tables(cleaned)
+    referenced = extract_tables(cleaned)
     cte_names = {n for n in _extract_cte_names(cleaned)}
     if referenced:
         allowed = {t.lower() for t in allowed_tables}
