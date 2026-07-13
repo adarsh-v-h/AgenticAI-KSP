@@ -99,6 +99,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── risk_scoring.py      # Offender risk scoring (explainable)
 │   │   ├── trend_analytics.py   # Crime pattern analytics (SQL aggregation)
 │   │   ├── similar_cases.py     # Similar case finder
+│   │   ├── sociological_analytics.py  # Demographic crime insights
 │   │   ├── case_timeline.py     # Case timeline builder
 │   │   ├── case_summary.py      # LLM-generated case brief
 │   │   └── evidence_trail.py    # Chat SQL provenance logger
@@ -398,6 +399,7 @@ Password formula: `<KGID>123`
 | `POST` | `/api/voice/transcribe` | Yes | STT (Zia) |
 | `POST` | `/api/voice/speak` | Yes | TTS (Zia) |
 | `GET` | `/api/analytics/trends/*` | Yes | Crime trend data |
+| `GET` | `/api/analytics/demographics/*` | Yes | Sociological/demographic insights |
 | `GET` | `/api/profiling/risk/{accused_id}` | Yes | Offender risk score |
 | `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders |
 | `GET` | `/api/decision-support/similar-cases/{case_id}` | Yes | Similar case finder |
@@ -427,11 +429,14 @@ python backend/debug_tools.py all      # Run all checks
 ## Running Tests
 
 ```bash
-# Unit tests (no network/DB needed)
+# Unit tests (no network/DB needed) — 83 tests
 python -m pytest backend/tests/test_unit.py -v
 
 # Pipeline + session tests (no network needed)
 python -m pytest backend/tests/test_pipeline_and_sessions.py -v
+
+# All tests together
+python -m pytest backend/tests/test_unit.py backend/tests/test_pipeline_and_sessions.py -q
 
 # Integration tests (needs live tokens + DB)
 python backend/tests/test_integration.py all

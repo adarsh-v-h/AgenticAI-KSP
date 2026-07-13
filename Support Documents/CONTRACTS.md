@@ -1,6 +1,6 @@
 # Function Contracts
 
-228 functions across 50 files.
+233 functions across 51 files.
 
 ---
 
@@ -756,6 +756,35 @@
 - **Takes:** case_master_id (int) — CaseMasterID of the source case, limit (int) — max results to return
 - **Returns:** (list[dict]) — similar cases ranked by match_score with match_reasons
 - **Raises:** nothing (returns empty list on missing source case)
+
+---
+
+## backend/pipeline/sociological_analytics.py
+
+### get_accused_age_distribution
+- **Takes:** nothing
+- **Returns:** (list[dict]) — rows with age_group and count of accused persons
+- **Raises:** Exception — when DB query fails
+
+### get_crime_by_gender
+- **Takes:** nothing
+- **Returns:** (list[dict]) — rows with crime_type, gender, and count
+- **Raises:** Exception — when DB query fails
+
+### get_victim_demographics
+- **Takes:** nothing
+- **Returns:** (list[dict]) — rows with crime_type, age_group, gender, and count for victims
+- **Raises:** Exception — when DB query fails
+
+### get_crime_by_occupation
+- **Takes:** limit (int) — max number of occupations to return
+- **Returns:** (list[dict]) — rows with occupation and count of complainants
+- **Raises:** Exception — when DB query fails
+
+### get_demographic_risk_profile
+- **Takes:** nothing
+- **Returns:** (list[dict]) — rows with crime_type, age_group, gender, and count for accused
+- **Raises:** Exception — when DB query fails
 
 ---
 

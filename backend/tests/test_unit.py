@@ -450,3 +450,127 @@ class TestVoiceTranscribe:
         monkeypatch.setattr(zv, "get", lambda key: f"http://fake/{key}")
         out = asyncio.run(zv.translate_to_english("hello", "en"))
         assert out == "hello"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION: PDF Export
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from routers.export import _build_pdf, _safe_text
+
+
+class TestPDFExport:
+    def test_build_pdf_returns_bytes(self):
+        messages = [
+            {"role": "user", "content": "How many cases?"},
+            {"role": "assistant", "content": "There are 10 cases.",
+             "table_data": [{"count": 10}], "sql_generated": "SELECT COUNT(*) FROM CaseMaster",
+             "media_attachments": []},
+        ]
+        result = _build_pdf("Test Officer", "1234567", "Test Session", messages)
+        assert isinstance(result, (bytes, bytearray))
+        assert len(result) > 100
+        # PDF magic bytes
+        assert result[:4] == b"%PDF"
+
+    def test_build_pdf_handles_empty_messages(self):
+        result = _build_pdf("Officer", "000", "Empty", [])
+        assert isinstance(result, (bytes, bytearray))
+        assert result[:4] == b"%PDF"
+
+    def test_build_pdf_handles_table_data(self):
+        messages = [
+            {"role": "assistant", "content": "Results:",
+             "table_data": [
+                 {"Name": "Mahesh Gowda", "Cases": 8},
+                 {"Name": "Ravi Kumar", "Cases": 5},
+             ],
+             "sql_generated": "", "media_attachments": []},
+        ]
+        result = _build_pdf("Officer", "000", "Table Test", messages)
+        assert isinstance(result, (bytes, bytearray))
+        assert len(result) > 200
+
+    def test_build_pdf_handles_media_placeholders(self):
+        messages = [
+            {"role": "assistant", "content": "Evidence found.",
+             "table_data": [], "sql_generated": "",
+             "media_attachments": [
+                 {"media_type": "image", "description": "Crime scene photo"},
+                 {"media_type": "video", "description": "CCTV footage"},
+             ]},
+        ]
+        result = _build_pdf("Officer", "000", "Media Test", messages)
+        assert isinstance(result, (bytes, bytearray))
+
+    def test_safe_text_handles_unicode(self):
+        assert _safe_text("Hello") == "Hello"
+        assert _safe_text("") == ""
+        assert _safe_text(None) == ""
+        # Non-latin chars get replaced
+        result = _safe_text("ಕನ್ನಡ text")
+        assert "text" in result
+
+    def test_build_pdf_with_sql_generated(self):
+        messages = [
+            {"role": "assistant", "content": "Found 36 cases.",
+             "table_data": [{"count": 36}],
+             "sql_generated": "SELECT COUNT(*) AS count FROM CaseMaster WHERE CaseStatusID = 4",
+             "media_attachments": []},
+        ]
+        result = _build_pdf("Officer", "000", "SQL Test", messages)
+        assert isinstance(result, (bytes, bytearray))
+        assert len(result) > 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION: Sociological Analytics
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from pipeline.sociological_analytics import (
+    get_accused_age_distribution,
+    get_crime_by_gender,
+    get_victim_demographics,
+    get_crime_by_occupation,
+    get_demographic_risk_profile,
+)
+
+
+class TestSociologicalAnalytics:
+    def test_accused_age_distribution(self, monkeypatch):
+        mock_data = [{"age_group": "18-25", "count": 43}, {"age_group": "26-35", "count": 69}]
+        async def mock_exec(sql, params=()): return mock_data
+        monkeypatch.setattr("pipeline.sociological_analytics.execute_query", mock_exec)
+        result = asyncio.run(get_accused_age_distribution())
+        assert result == mock_data
+        assert result[0]["age_group"] == "18-25"
+
+    def test_crime_by_gender(self, monkeypatch):
+        mock_data = [{"crime_type": "Theft", "gender": "Male", "count": 60}]
+        async def mock_exec(sql, params=()): return mock_data
+        monkeypatch.setattr("pipeline.sociological_analytics.execute_query", mock_exec)
+        result = asyncio.run(get_crime_by_gender())
+        assert len(result) == 1
+        assert result[0]["gender"] == "Male"
+
+    def test_victim_demographics(self, monkeypatch):
+        mock_data = [{"crime_type": "Assault", "age_group": "18-35", "gender": "Male", "count": 15}]
+        async def mock_exec(sql, params=()): return mock_data
+        monkeypatch.setattr("pipeline.sociological_analytics.execute_query", mock_exec)
+        result = asyncio.run(get_victim_demographics())
+        assert result[0]["crime_type"] == "Assault"
+
+    def test_crime_by_occupation(self, monkeypatch):
+        mock_data = [{"occupation": "Farmer", "count": 39}, {"occupation": "Student", "count": 35}]
+        async def mock_exec(sql, params=()): return mock_data
+        monkeypatch.setattr("pipeline.sociological_analytics.execute_query", mock_exec)
+        result = asyncio.run(get_crime_by_occupation(10))
+        assert result[0]["occupation"] == "Farmer"
+
+    def test_demographic_risk_profile(self, monkeypatch):
+        mock_data = [{"crime_type": "Theft", "age_group": "36-50", "gender": "Male", "count": 20}]
+        async def mock_exec(sql, params=()): return mock_data
+        monkeypatch.setattr("pipeline.sociological_analytics.execute_query", mock_exec)
+        result = asyncio.run(get_demographic_risk_profile())
+        assert result[0]["age_group"] == "36-50"
+        assert result[0]["count"] == 20
