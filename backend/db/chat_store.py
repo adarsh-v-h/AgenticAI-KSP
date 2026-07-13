@@ -241,3 +241,30 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
     except Exception as e:
         _log(f"WARNING: Failed to load messages for session {session_id}: {e}")
         return []
+
+
+async def get_evidence_trail_for_message(message_id: int, officer_id: int) -> dict | None:
+    """
+    Returns the chat_evidence_trail row for a message, scoped to the
+    requesting officer via a join through chat_messages -> chat_sessions.
+    Returns None if the message doesn't exist, belongs to another officer,
+    or has no evidence trail row.
+    """
+    try:
+        rows = await execute_query(
+            """SELECT et.trail_id, et.message_id, et.sql_executed, et.tables_queried,
+                      et.row_count, et.case_ids_referenced, et.created_at
+               FROM chat_evidence_trail et
+               JOIN chat_messages cm ON cm.message_id = et.message_id
+               JOIN chat_sessions cs ON cs.session_id = cm.session_id
+               WHERE et.message_id = %s AND cs.officer_id = %s""",
+            (message_id, officer_id)
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
+        return row
+    except Exception as e:
+        _log(f"WARNING: get_evidence_trail_for_message failed: {e}")
+        return None

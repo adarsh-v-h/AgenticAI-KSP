@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends
 
 from auth.simple_auth import get_current_officer
 from pipeline.similar_cases import find_similar_cases
+from pipeline.case_timeline import build_case_timeline
+from pipeline.case_summary import generate_case_summary
 
 router = APIRouter()
 
@@ -18,3 +20,17 @@ async def similar_cases(case_id: int, limit: int = 5, officer: dict = Depends(ge
     """
     results = await find_similar_cases(case_id, limit)
     return {"case_id": case_id, "similar_cases": results}
+
+
+@router.get("/api/decision-support/timeline/{case_id}")
+async def case_timeline(case_id: int, officer: dict = Depends(get_current_officer)):
+    """Chronological event list for a case."""
+    events = await build_case_timeline(case_id)
+    return {"case_id": case_id, "timeline": events}
+
+
+@router.get("/api/decision-support/summary/{case_id}")
+async def case_summary(case_id: int, officer: dict = Depends(get_current_officer)):
+    """LLM-generated investigative brief for a case."""
+    result = await generate_case_summary(case_id)
+    return {"case_id": case_id, **result}

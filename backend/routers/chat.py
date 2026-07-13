@@ -32,7 +32,9 @@ from db.chat_store import (
     get_sessions_for_officer,
     get_messages_for_session,
     verify_session_owner,
+    get_evidence_trail_for_message,
 )
+from pipeline.evidence_trail import save_evidence_trail
 
 router = APIRouter()
 
@@ -135,7 +137,7 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result, s
             except Exception as e:
                 _log(f"WARNING: NoSQL session_metadata create failed for {session_id} (non-fatal): {e}")
 
-        await save_message_pair(
+        message_id = await save_message_pair(
             session_id=session_id,
             question=question,
             answer_text=result.answer_text,
@@ -147,6 +149,7 @@ async def _persist_turn(session_id: str, officer: dict, question: str, result, s
             media_attachments=result.media_attachments,
             assistant_follow_ups=result.suggested_follow_ups,
         )
+        await save_evidence_trail(message_id, result.sql_generated, result.table_data)
         await update_session_timestamp(session_id)
     except Exception as e:
         _log(f"_persist_turn failed (non-fatal): {e}")
@@ -332,6 +335,19 @@ async def get_session_messages(
     ]
 
     return MessagesResponse(messages=messages)
+
+
+@router.get("/api/chat/messages/{message_id}/evidence-trail")
+async def message_evidence_trail(message_id: int, officer: dict = Depends(get_current_officer)):
+    """
+    Ownership-scoped read of the evidence trail for a specific message.
+    Returns 404 whether the message doesn't exist, belongs to another
+    officer's session, or has no trail row (DIRECT-path answers).
+    """
+    trail = await get_evidence_trail_for_message(message_id, officer["officer_id"])
+    if trail is None:
+        raise HTTPException(status_code=404, detail="No evidence trail for this message")
+    return trail
 
 
 @router.post("/api/chat", response_model=ChatResponse)
