@@ -42,10 +42,10 @@ SCHEMA_CATALOG = {
             "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
             "AccusedName": "VARCHAR(150)",
             "AgeYear": "INT",
-            "GenderID": "INT",
+            "GenderID": "INT - 1=Male, 2=Female, 3=Other",
             "PersonID": "VARCHAR(10)"
         },
-        "keywords": ["accused", "suspect", "offender", "criminal", "name", "repeat", "prior", "habitual", "gang"]
+        "keywords": ["accused", "suspect", "offender", "criminal", "name", "repeat", "prior", "habitual", "gang", "gender", "male", "female", "age"]
     },
     "Victim": {
         "description": "Victims linked to cases. One case can have multiple victims.",
@@ -54,7 +54,7 @@ SCHEMA_CATALOG = {
             "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
             "VictimName": "VARCHAR(150)",
             "AgeYear": "INT",
-            "GenderID": "INT",
+            "GenderID": "INT - 1=Male, 2=Female, 3=Other",
             "VictimPolice": "BIT"
         },
         "keywords": ["victim", "injured", "affected", "hurt", "attacked", "dead"]
@@ -66,7 +66,7 @@ SCHEMA_CATALOG = {
             "CaseMasterID": "INT FK -> CaseMaster.CaseMasterID",
             "ComplainantName": "VARCHAR(150)",
             "MobileNo": "VARCHAR(15)",
-            "GenderID": "INT"
+            "GenderID": "INT - 1=Male, 2=Female, 3=Other"
         },
         "keywords": ["complainant", "reporter", "filed by", "complaint"]
     },
@@ -81,7 +81,7 @@ SCHEMA_CATALOG = {
             "KGID": "VARCHAR(30) UNIQUE",
             "FirstName": "VARCHAR(100)",
             "EmployeeDOB": "DATE",
-            "GenderID": "INT",
+            "GenderID": "INT - 1=Male, 2=Female, 3=Other",
             "BloodGroupID": "INT",
             "PhysicallyChallenged": "BIT",
             "AppointmentDate": "DATE",

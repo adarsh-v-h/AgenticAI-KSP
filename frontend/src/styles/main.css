@@ -2365,14 +2365,14 @@ textarea {
   color: var(--ink);
 }
 
-/* Grid of 6 panels (2 columns on desktop, 1 column on mobile) */
+/* Grid of panels — full-width responsive layout */
 .analytics-dashboard__grid {
   flex: 1;
   overflow-y: auto;
-  padding: 32px;
+  padding: 24px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
   align-content: start;
 }
 
@@ -2387,10 +2387,11 @@ textarea {
   background: var(--canvas);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
-  padding: 24px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0; /* prevent overflow from tables/charts */
 }
 
 .analytics-panel__title {
@@ -2426,7 +2427,9 @@ textarea {
 .analytics-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
+  display: block;
+  overflow-x: auto;
 }
 
 .analytics-table thead {

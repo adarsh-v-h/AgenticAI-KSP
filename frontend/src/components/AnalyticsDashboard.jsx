@@ -11,6 +11,8 @@ import {
   fetchAccusedAgeDistribution,
   fetchCrimeByGender,
   fetchCrimeByOccupation,
+  fetchVictimProfile,
+  fetchDemographicRiskProfile,
 } from '../api/analytics'
 import { AuthError } from '../api/chat'
 
@@ -40,6 +42,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
   const [accusedAge, setAccusedAge] = useState(null)
   const [crimeByGender, setCrimeByGender] = useState(null)
   const [crimeByOccupation, setCrimeByOccupation] = useState(null)
+  const [victimProfile, setVictimProfile] = useState(null)
+  const [riskProfile, setRiskProfile] = useState(null)
 
   const [selectedStation, setSelectedStation] = useState(null) // {unit_id, station}
   const [drilldown, setDrilldown] = useState(null)
@@ -65,6 +69,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
           fetchAccusedAgeDistribution(),
           fetchCrimeByGender(),
           fetchCrimeByOccupation(10),
+          fetchVictimProfile(),
+          fetchDemographicRiskProfile(),
         ])
         if (cancelled) return
 
@@ -78,7 +84,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         }
 
         // Extract fulfilled values; failed panels get null
-        const [m, c, s, st, mo, se, aa, cg, co] = results.map((r) =>
+        const [m, c, s, st, mo, se, aa, cg, co, vp, rp] = results.map((r) =>
           r.status === 'fulfilled' ? r.value : null
         )
 
@@ -93,6 +99,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         setAccusedAge(aa?.data ?? null)
         setCrimeByGender(cg?.data ?? null)
         setCrimeByOccupation(co?.data ?? null)
+        setVictimProfile(vp?.data ?? null)
+        setRiskProfile(rp?.data ?? null)
       } catch (err) {
         if (cancelled) return
         // Fallback for unexpected errors not caught by allSettled
@@ -272,6 +280,40 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
               <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
             ) : (
               <TrendChart data={crimeByOccupation} xKey="occupation" yKey="count" type="bar" />
+            )}
+          </Panel>
+
+          <Panel title="Victim Profile" subtitle="Victim demographics by crime type, age group, and gender">
+            {victimProfile === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : victimProfile.length > 0 ? (
+              <table className="analytics-table">
+                <thead><tr><th>Crime Type</th><th>Age Group</th><th>Gender</th><th>Count</th></tr></thead>
+                <tbody>
+                  {victimProfile.slice(0, 20).map((row, i) => (
+                    <tr key={i}><td>{row.crime_type}</td><td>{row.age_group}</td><td>{row.gender}</td><td>{row.count}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="analytics-panel__state">No data available</div>
+            )}
+          </Panel>
+
+          <Panel title="Demographic Risk Profile" subtitle="Crime type × age group × gender for accused — social risk factors">
+            {riskProfile === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : riskProfile.length > 0 ? (
+              <table className="analytics-table">
+                <thead><tr><th>Crime Type</th><th>Age Group</th><th>Gender</th><th>Count</th></tr></thead>
+                <tbody>
+                  {riskProfile.slice(0, 20).map((row, i) => (
+                    <tr key={i}><td>{row.crime_type}</td><td>{row.age_group}</td><td>{row.gender}</td><td>{row.count}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="analytics-panel__state">No data available</div>
             )}
           </Panel>
         </div>
