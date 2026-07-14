@@ -2365,7 +2365,6 @@ textarea {
   color: var(--ink);
 }
 
-/* Grid of panels — full-width responsive layout */
 .analytics-dashboard__grid {
   flex: 1;
   overflow-y: auto;
@@ -2374,8 +2373,8 @@ textarea {
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
   align-content: start;
+  align-items: start;
 }
-
 @media (max-width: 900px) {
   .analytics-dashboard__grid {
     grid-template-columns: 1fr;
@@ -2430,6 +2429,8 @@ textarea {
   font-size: 12px;
   display: block;
   overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 .analytics-table thead {
