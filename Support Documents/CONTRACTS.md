@@ -1196,6 +1196,31 @@
 - **Returns:** (Promise<object>) — {"pattern": array} with monthly seasonal crime counts
 - **Raises:** AuthError — when session expired, Error — when request fails
 
+### fetchAccusedAgeDistribution
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"data": array} with age group breakdown for accused persons
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchCrimeByGender
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"data": array} with crime type × gender cross-tabulation
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchVictimProfile
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"data": array} with victim demographics by crime type, age group, and gender
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchCrimeByOccupation
+- **Takes:** limit (number) — maximum number of occupation rows to return (default 10)
+- **Returns:** (Promise<object>) — {"data": array} with occupation frequency in complainant data
+- **Raises:** AuthError — when session expired, Error — when request fails
+
+### fetchDemographicRiskProfile
+- **Takes:** nothing
+- **Returns:** (Promise<object>) — {"data": array} with crime type × age group × gender for accused
+- **Raises:** AuthError — when session expired, Error — when request fails
+
 ### fetchStationBreakdown
 - **Takes:** unitId (number) — police station UnitID to drill into
 - **Returns:** (Promise<object>) — {"unit_id": number, "breakdown": array} with crime types for that station

@@ -75,6 +75,17 @@ export const fetchSeasonalPattern = () => get('/seasonal')
 
 export const fetchAccusedAgeDistribution = () => get('/demographics/accused-age')
 export const fetchCrimeByGender = () => get('/demographics/crime-by-gender')
+
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<object>) — {"data": array} with victim demographics by crime type, age group, and gender
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchVictimProfile = () => get('/demographics/victim-profile')
+
 export const fetchCrimeByOccupation = (limit = 10) => get(`/demographics/crime-by-occupation?limit=${limit}`)
+
+// CONTRACT
+// takes:  nothing
+// returns: (Promise<object>) — {"data": array} with crime type × age group × gender for accused
+// raises:  AuthError — when session expired, Error — when request fails
 export const fetchDemographicRiskProfile = () => get('/demographics/risk-profile')

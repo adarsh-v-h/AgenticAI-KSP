@@ -2503,7 +2503,9 @@ The following files at the project root are one-time local MySQL migration artif
 **Modified files:**
 - `backend/routers/analytics.py` — Added 5 new endpoints under `/api/analytics/demographics/*`
 - `frontend/src/api/analytics.js` — Added 5 fetch functions for demographic endpoints
-- `frontend/src/components/AnalyticsDashboard.jsx` — Added 3 new panels: Accused Age Distribution (bar chart), Crime by Gender (table), Crime by Occupation (bar chart)
+- `frontend/src/components/AnalyticsDashboard.jsx` — Added 5 new panels: Accused Age Distribution (bar chart), Crime by Gender (table), Crime by Occupation (bar chart), Victim Profile (table), Demographic Risk Profile (table)
+- `backend/db/schema_catalog.py` — Added GenderID enum documentation (1=Male, 2=Female, 3=Other) and demographic keywords (gender, male, female, age) to Accused table for improved NL2SQL routing
+- `backend/llm/prompts.py` — Updated ROUTER_SYSTEM_PROMPT to explicitly route demographics/gender/age/occupation queries to SQL path (prevents router from misclassifying these as DIRECT-answerable general questions)
 
 **New endpoints:**
 - `GET /api/analytics/demographics/accused-age` — age group distribution of accused
