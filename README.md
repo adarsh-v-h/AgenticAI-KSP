@@ -399,7 +399,11 @@ Password formula: `<KGID>123`
 | `POST` | `/api/voice/transcribe` | Yes | STT (Zia) |
 | `POST` | `/api/voice/speak` | Yes | TTS (Zia) |
 | `GET` | `/api/analytics/trends/*` | Yes | Crime trend data |
-| `GET` | `/api/analytics/demographics/*` | Yes | Sociological/demographic insights |
+| `GET` | `/api/analytics/demographics/accused-age` | Yes | Accused age distribution |
+| `GET` | `/api/analytics/demographics/crime-by-gender` | Yes | Crime × gender breakdown |
+| `GET` | `/api/analytics/demographics/victim-profile` | Yes | Victim demographics |
+| `GET` | `/api/analytics/demographics/crime-by-occupation` | Yes | Crime × occupation breakdown |
+| `GET` | `/api/analytics/demographics/risk-profile` | Yes | Accused demographic risk factors |
 | `GET` | `/api/profiling/risk/{accused_id}` | Yes | Offender risk score |
 | `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders |
 | `GET` | `/api/decision-support/similar-cases/{case_id}` | Yes | Similar case finder |
