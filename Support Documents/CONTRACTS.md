@@ -1,6 +1,6 @@
 # Function Contracts
 
-233 functions across 51 files.
+241 functions across 54 files.
 
 ---
 
@@ -1403,5 +1403,62 @@
 - **Takes:** tableData (Array<object>|any) — structured table rows from the chat response
 - **Returns:** (number|null) — the first valid AccusedMasterID as a number, or null if none found
 - **Raises:** never
+
+---
+
+
+## backend/pipeline/rule_engine.py
+
+### try_rule_response
+- **Takes:** question (str) — the user's raw message to check against rules
+- **Returns:** (str | None) — instant response if matched, None to pass through to LLM pipeline
+- **Raises:** nothing
+
+---
+
+## backend/pipeline/crime_forecasting.py
+
+### get_hotspot_alerts
+- **Takes:** threshold_pct (float) — minimum percentage increase to trigger an alert (default 50%)
+- **Returns:** (list[dict]) — hotspot alerts with station, unit_id, counts, change_pct, alert_level
+- **Raises:** Exception — when DB query fails
+
+### get_repeat_crime_alerts
+- **Takes:** min_occurrences (int) — minimum case count threshold, days (int) — lookback window
+- **Returns:** (list[dict]) — repeat crime alerts with crime_type, station, count
+- **Raises:** Exception — when DB query fails
+
+### get_gang_activity_alerts
+- **Takes:** nothing
+- **Returns:** (list[dict]) — gang activity alerts with accused_name, case_count, crime_types, stations
+- **Raises:** Exception — when DB query fails
+
+### get_forecasting_summary
+- **Takes:** nothing
+- **Returns:** (dict) — combined forecasting data with hotspot_alerts, repeat_crime_alerts, gang_activity_alerts, total_alerts
+- **Raises:** Exception — when DB queries fail
+
+---
+
+## backend/conversation/dialogue_state.py
+
+### extract_state
+- **Takes:** history (list[dict]) — conversation history with role/content/table fields
+- **Returns:** (dict) — structured state with last_crime_type, last_station, last_accused, result_count, topic
+- **Raises:** nothing
+
+### state_to_prompt_block
+- **Takes:** state (dict) — structured state dict from extract_state()
+- **Returns:** (str) — compact multi-line context block for LLM prompt injection, empty string if no state
+- **Raises:** nothing
+
+---
+
+## backend/db/schema_catalog.py (additions)
+
+### _question_similarity
+- **Takes:** q1 (str) — first question string, q2 (str) — second question string
+- **Returns:** (float) — Jaccard similarity score between 0.0 and 1.0
+- **Raises:** nothing
 
 ---

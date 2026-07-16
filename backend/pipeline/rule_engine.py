@@ -30,6 +30,10 @@ _RULES = [
 _COMPILED_RULES = [(re.compile(pattern, re.IGNORECASE), response) for pattern, response in _RULES]
 
 
+# CONTRACT
+# takes:  question (str) — the user's raw message to check against rules
+# returns: (str | None) — instant response if matched, None to pass through to LLM pipeline
+# raises:  nothing
 def try_rule_response(question: str) -> str | None:
     """
     Check the question against the rule engine.
