@@ -197,14 +197,19 @@ def build_sql_prompt(
     injected so first-person questions like "cases I am handling" resolve to
     `investigating_officer_id = <officer_id>` instead of a literal placeholder.
     """
+    from conversation.dialogue_state import extract_state, state_to_prompt_block
+
     history_block = _format_history_for_sql_prompt(history or [])
     officer_block = _format_officer_for_prompt(officer)
-    # Keep system_prompt SHORT — 7B Coder 500s with large system prompts
-    sys_p = SQL_SYSTEM_PROMPT  # no schema injection here
+    state_block = state_to_prompt_block(extract_state(history or []))
+
+    sys_p = SQL_SYSTEM_PROMPT
 
     parts = [f"DATABASE SCHEMA:\n{schema}\n", f"EXAMPLE QUERIES:\n{few_shots}\n"]
     if officer_block:
         parts.append(officer_block + "\n")
+    if state_block:
+        parts.append(state_block + "\n")
     if history_block:
         parts.append(
             "Previous context (use this to preserve filter clauses on follow-up questions):\n"

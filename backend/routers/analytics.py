@@ -124,3 +124,41 @@ async def demographics_crime_by_occupation(
 async def demographics_risk_profile(officer: dict = Depends(get_current_officer)):
     """Cross-tabulation: crime type × age group × gender for accused."""
     return {"data": await get_demographic_risk_profile()}
+
+
+# ─── Crime Forecasting / Early Warning Endpoints ─────────────────────────────
+
+from pipeline.crime_forecasting import (
+    get_hotspot_alerts,
+    get_repeat_crime_alerts,
+    get_gang_activity_alerts,
+    get_forecasting_summary,
+)
+
+
+@router.get("/api/analytics/forecasting/summary")
+async def forecasting_summary(officer: dict = Depends(get_current_officer)):
+    """Combined early warning dashboard."""
+    return await get_forecasting_summary()
+
+
+@router.get("/api/analytics/forecasting/hotspots")
+async def forecasting_hotspots(
+    threshold: float = Query(50.0, ge=10, le=500),
+    officer: dict = Depends(get_current_officer),
+):
+    return {"alerts": await get_hotspot_alerts(threshold)}
+
+
+@router.get("/api/analytics/forecasting/repeat-crimes")
+async def forecasting_repeat_crimes(
+    days: int = Query(90, ge=7, le=365),
+    min_count: int = Query(3, ge=2, le=50),
+    officer: dict = Depends(get_current_officer),
+):
+    return {"alerts": await get_repeat_crime_alerts(min_count, days)}
+
+
+@router.get("/api/analytics/forecasting/gang-activity")
+async def forecasting_gang_activity(officer: dict = Depends(get_current_officer)):
+    return {"alerts": await get_gang_activity_alerts()}

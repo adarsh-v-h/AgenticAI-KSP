@@ -73,7 +73,7 @@ async def generate_sql(
         LLMError: underlying LLM API call itself failed.
     """
     schema = get_schema_for_tables(table_names)
-    few_shots = get_few_shot_examples(table_names)
+    few_shots = get_few_shot_examples(table_names, question=question)
 
     last_sql = ""
     last_error = ""

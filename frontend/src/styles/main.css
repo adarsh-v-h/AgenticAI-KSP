@@ -2462,6 +2462,31 @@ textarea {
   background: var(--surface-cream-strong);
 }
 
+/* Alert level badges for forecasting panels */
+.alert-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #fff;
+}
+
+.alert-badge--critical {
+  background: #d32f2f;
+}
+
+.alert-badge--high {
+  background: #e65100;
+}
+
+.alert-badge--medium {
+  background: #f9a825;
+  color: #333;
+}
+
 /* Drill-down panel that slides up from bottom */
 .analytics-drilldown {
   position: fixed;
