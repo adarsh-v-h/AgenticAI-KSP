@@ -16,4 +16,6 @@ venv/
 .pytest_cache/
 backend/rag_export/
 backend/rag_consolidated/
-rag_export/
+rag_export/
+.codex
+.agents
