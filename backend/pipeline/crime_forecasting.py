@@ -6,6 +6,10 @@ just heuristic thresholds applied to existing crime data.
 from db.connection import execute_query
 
 
+# CONTRACT
+# takes:  threshold_pct (float) — minimum percentage increase to trigger an alert (default 50%)
+# returns: (list[dict]) — hotspot alerts with station, unit_id, counts, change_pct, alert_level
+# raises:  Exception — when DB query fails
 async def get_hotspot_alerts(threshold_pct: float = 50.0) -> list[dict]:
     """
     Identify stations where crime increased significantly in the most recent
@@ -57,6 +61,10 @@ async def get_hotspot_alerts(threshold_pct: float = 50.0) -> list[dict]:
     return alerts
 
 
+# CONTRACT
+# takes:  min_occurrences (int) — minimum case count threshold, days (int) — lookback window
+# returns: (list[dict]) — repeat crime alerts with crime_type, station, count
+# raises:  Exception — when DB query fails
 async def get_repeat_crime_alerts(min_occurrences: int = 3, days: int = 90) -> list[dict]:
     """
     Identify crime type + station combinations that have spiked in the
@@ -78,6 +86,10 @@ async def get_repeat_crime_alerts(min_occurrences: int = 3, days: int = 90) -> l
     )
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (list[dict]) — gang activity alerts with accused_name, case_count, crime_types, stations
+# raises:  Exception — when DB query fails
 async def get_gang_activity_alerts() -> list[dict]:
     """
     Identify accused persons who appeared in 2+ cases in the last 90 days
@@ -105,6 +117,10 @@ async def get_gang_activity_alerts() -> list[dict]:
     )
 
 
+# CONTRACT
+# takes:  nothing
+# returns: (dict) — combined forecasting data with hotspot_alerts, repeat_crime_alerts, gang_activity_alerts, total_alerts
+# raises:  Exception — when DB queries fail
 async def get_forecasting_summary() -> dict:
     """
     Combined forecasting dashboard data — all alerts in one call.

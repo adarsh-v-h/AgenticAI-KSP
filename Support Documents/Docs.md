@@ -2517,3 +2517,39 @@ The following files at the project root are one-time local MySQL migration artif
 **Tests:** 11 new tests added (6 PDF export + 5 sociological analytics). Total: 83 tests pass.
 
 **Scope note:** Urbanization/migration/economic stress correlations are not implemented — the schema has no columns for those indicators. The feature covers what's achievable with existing data: age, gender, occupation, caste, and religion demographics.
+
+
+---
+
+### 10.23 Advanced Pipeline Improvements — Rule Engine, Forecasting, Few-Shot, State Engine
+
+**Date:** July 14, 2026
+**What:** Four pipeline optimizations implemented from the Advanced System Design analysis.
+
+**1. Rule Engine Before LLM** (`backend/pipeline/rule_engine.py`)
+- Intercepts greetings, help, thanks, goodbye BEFORE any LLM call
+- Instant deterministic responses (0ms vs 3-4s for trivial messages)
+- `try_rule_response(question)` → response string or None (pass-through)
+- Wired as first check in `run_pipeline()` in `query_pipeline.py`
+
+**2. Crime Forecasting & Early Warning** (`backend/pipeline/crime_forecasting.py`)
+- `get_hotspot_alerts()` — stations with ≥50% crime increase (recent quarter vs previous)
+- `get_repeat_crime_alerts()` — crime type + station combos with 3+ cases in 90 days
+- `get_gang_activity_alerts()` — accused in 2+ cases in 90 days (excludes placeholder names)
+- `get_forecasting_summary()` — combined dashboard data
+- 4 new endpoints at `/api/analytics/forecasting/*`
+- 3 new frontend panels in AnalyticsDashboard (Hotspot Alerts, Repeat Crimes, Gang Activity)
+
+**3. Dynamic Few-Shot Retrieval** (`backend/db/schema_catalog.py`)
+- Added `_question_similarity(q1, q2)` — Jaccard word-overlap scoring
+- `get_few_shot_examples` now accepts `question` param
+- Scoring: table overlap (40%) + question similarity (60%) — picks examples most relevant to the officer's actual phrasing
+- `sql_generator.py` passes `question=question` to the function
+
+**4. Conversation State Engine** (`backend/conversation/dialogue_state.py`)
+- `extract_state(history)` — parses history into structured state (crime_type, station, accused, topic, result_count)
+- `state_to_prompt_block(state)` — renders compact context block for LLM
+- Injected into `build_sql_prompt()` — gives the LLM structured awareness of what the officer is working on
+- Additive: raw history still preserved for SQL clause continuity
+
+**No breaking changes.** All 83 tests pass. Frontend builds clean.

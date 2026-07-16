@@ -100,6 +100,8 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── trend_analytics.py   # Crime pattern analytics (SQL aggregation)
 │   │   ├── similar_cases.py     # Similar case finder
 │   │   ├── sociological_analytics.py  # Demographic crime insights
+│   │   ├── crime_forecasting.py # Early warning / hotspot detection
+│   │   ├── rule_engine.py       # Instant responses for trivial messages
 │   │   ├── case_timeline.py     # Case timeline builder
 │   │   ├── case_summary.py      # LLM-generated case brief
 │   │   └── evidence_trail.py    # Chat SQL provenance logger
@@ -108,7 +110,8 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   └── role_guard.py        # RBAC + audit logging
 │   ├── conversation/
 │   │   ├── history.py           # Conversation history (NoSQL + fallback)
-│   │   └── session_store.py     # Session metadata + title generation
+│   │   ├── session_store.py     # Session metadata + title generation
+│   │   └── dialogue_state.py    # Structured conversation state extraction
 │   ├── graph/
 │   │   └── network_builder.py   # Criminal network graph (vis.js format)
 │   ├── voice/
@@ -404,6 +407,10 @@ Password formula: `<KGID>123`
 | `GET` | `/api/analytics/demographics/victim-profile` | Yes | Victim demographics |
 | `GET` | `/api/analytics/demographics/crime-by-occupation` | Yes | Crime × occupation breakdown |
 | `GET` | `/api/analytics/demographics/risk-profile` | Yes | Accused demographic risk factors |
+| `GET` | `/api/analytics/forecasting/summary` | Yes | Combined early warning dashboard |
+| `GET` | `/api/analytics/forecasting/hotspots` | Yes | Stations with crime spikes |
+| `GET` | `/api/analytics/forecasting/repeat-crimes` | Yes | Repeat crime clusters |
+| `GET` | `/api/analytics/forecasting/gang-activity` | Yes | Potential organized crime |
 | `GET` | `/api/profiling/risk/{accused_id}` | Yes | Offender risk score |
 | `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders |
 | `GET` | `/api/decision-support/similar-cases/{case_id}` | Yes | Similar case finder |

@@ -24,13 +24,3 @@
 - This is the only feature that fundamentally cannot be built from existing data
 
 **Workaround for demo:** The chatbot can answer questions like "Show me fraud cases" or "What's the total amount in fraud cases" by extracting amounts from BriefFacts via the LLM — this provides partial coverage without new infrastructure.
-
----
-
-## Previously Missing (Now Implemented or Planned)
-
-| Feature | Status |
-|---------|--------|
-| Crime Forecasting & Early Warning | Implementation plan ready at `Implementation/04_crime_forecasting_early_warning.md` |
-| Sociological Crime Insights | ✅ Implemented (5 demographic endpoints + 5 dashboard panels) |
-| PDF Export | ✅ Implemented (fpdf2, application/pdf) |
