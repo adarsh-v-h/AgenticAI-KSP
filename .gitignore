@@ -19,3 +19,4 @@ backend/rag_consolidated/
 rag_export/
 .codex
 .agents
+.hypothesis
