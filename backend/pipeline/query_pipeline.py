@@ -19,6 +19,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
+from pipeline.rule_engine import try_rule_response
 from pipeline.schema_linker import select_relevant_tables
 from llm.rag_session import RagSession
 from llm.sql_generator import (
@@ -186,6 +187,12 @@ async def run_pipeline(
     history = history or []
     start = time.monotonic()
     response = PipelineResponse()
+
+    # --- Rule engine: intercept trivial messages before any LLM call ---
+    rule_answer = try_rule_response(question)
+    if rule_answer is not None:
+        response.answer_text = rule_answer
+        return response
 
     # --- FIX 1: narrative-intent keyword pre-router ---
     # SQL generation can almost always produce SOME valid query, so

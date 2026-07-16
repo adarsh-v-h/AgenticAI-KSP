@@ -89,3 +89,7 @@ export const fetchCrimeByOccupation = (limit = 10) => get(`/demographics/crime-b
 // returns: (Promise<object>) — {"data": array} with crime type × age group × gender for accused
 // raises:  AuthError — when session expired, Error — when request fails
 export const fetchDemographicRiskProfile = () => get('/demographics/risk-profile')
+
+// ─── Crime Forecasting / Early Warning ──────────────────────────────────────
+
+export const fetchForecastingSummary = () => get('/forecasting/summary')

@@ -13,6 +13,7 @@ import {
   fetchCrimeByOccupation,
   fetchVictimProfile,
   fetchDemographicRiskProfile,
+  fetchForecastingSummary,
 } from '../api/analytics'
 import { AuthError } from '../api/chat'
 
@@ -44,6 +45,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
   const [crimeByOccupation, setCrimeByOccupation] = useState(null)
   const [victimProfile, setVictimProfile] = useState(null)
   const [riskProfile, setRiskProfile] = useState(null)
+  const [forecasting, setForecasting] = useState(null)
 
   const [selectedStation, setSelectedStation] = useState(null) // {unit_id, station}
   const [drilldown, setDrilldown] = useState(null)
@@ -71,6 +73,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
           fetchCrimeByOccupation(10),
           fetchVictimProfile(),
           fetchDemographicRiskProfile(),
+          fetchForecastingSummary(),
         ])
         if (cancelled) return
 
@@ -84,7 +87,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         }
 
         // Extract fulfilled values; failed panels get null
-        const [m, c, s, st, mo, se, aa, cg, co, vp, rp] = results.map((r) =>
+        const [m, c, s, st, mo, se, aa, cg, co, vp, rp, fc] = results.map((r) =>
           r.status === 'fulfilled' ? r.value : null
         )
 
@@ -101,6 +104,7 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
         setCrimeByOccupation(co?.data ?? null)
         setVictimProfile(vp?.data ?? null)
         setRiskProfile(rp?.data ?? null)
+        setForecasting(fc ?? null)
       } catch (err) {
         if (cancelled) return
         // Fallback for unexpected errors not caught by allSettled
@@ -314,6 +318,99 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
               </table>
             ) : (
               <div className="analytics-panel__state">No data available</div>
+            )}
+          </Panel>
+
+          {/* ─── Crime Forecasting / Early Warning ─────────────────── */}
+
+          <Panel title="🔴 Hotspot Alerts" subtitle="Stations with ≥50% crime increase, latest quarter vs previous">
+            {forecasting === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : forecasting.hotspot_alerts.length > 0 ? (
+              <table className="analytics-table">
+                <thead>
+                  <tr>
+                    <th>Station</th>
+                    <th>Recent</th>
+                    <th>Previous</th>
+                    <th>Change %</th>
+                    <th>Level</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {forecasting.hotspot_alerts.slice(0, 20).map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.station}</td>
+                      <td>{row.recent_count}</td>
+                      <td>{row.previous_count}</td>
+                      <td style={{ fontWeight: 600 }}>+{row.change_pct}%</td>
+                      <td>
+                        <span className={`alert-badge alert-badge--${row.alert_level}`}>
+                          {row.alert_level}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="analytics-panel__state">No hotspot alerts — all stations within normal range</div>
+            )}
+          </Panel>
+
+          <Panel title="🔁 Repeat Crime Clusters" subtitle="Crime type + station combos with 3+ cases in last 90 days">
+            {forecasting === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : forecasting.repeat_crime_alerts.length > 0 ? (
+              <table className="analytics-table">
+                <thead>
+                  <tr>
+                    <th>Crime Type</th>
+                    <th>Station</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {forecasting.repeat_crime_alerts.slice(0, 20).map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.crime_type}</td>
+                      <td>{row.station}</td>
+                      <td>{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="analytics-panel__state">No repeat crime clusters detected</div>
+            )}
+          </Panel>
+
+          <Panel title="👥 Gang Activity Alerts" subtitle="Accused in 2+ cases within last 90 days — potential organized crime">
+            {forecasting === null ? (
+              <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
+            ) : forecasting.gang_activity_alerts.length > 0 ? (
+              <table className="analytics-table">
+                <thead>
+                  <tr>
+                    <th>Accused</th>
+                    <th>Cases</th>
+                    <th>Crime Types</th>
+                    <th>Stations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {forecasting.gang_activity_alerts.map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.accused_name}</td>
+                      <td style={{ fontWeight: 600 }}>{row.case_count}</td>
+                      <td>{row.crime_types}</td>
+                      <td>{row.stations}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="analytics-panel__state">No gang activity alerts</div>
             )}
           </Panel>
         </div>
