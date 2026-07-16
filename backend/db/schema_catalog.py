@@ -446,27 +446,47 @@ _FEW_SHOT_BANK: list[dict] = [
 
 
 # CONTRACT
-# takes:  table_names (list[str]) — selected table names to score examples against
+# takes:  q1 (str) — first question string,
+#          q2 (str) — second question string
+# returns: (float) — Jaccard similarity score between 0.0 and 1.0
+# raises:  nothing
+def _question_similarity(q1: str, q2: str) -> float:
+    """Jaccard similarity between two questions' word sets (stop-words removed)."""
+    stop = {"the", "a", "an", "is", "are", "how", "many", "show", "me", "all",
+            "in", "of", "to", "for", "with", "what", "which", "do", "does", "can", "i"}
+    words1 = {w.lower().strip("?.,!") for w in q1.split()} - stop
+    words2 = {w.lower().strip("?.,!") for w in q2.split()} - stop
+    if not words1 or not words2:
+        return 0.0
+    return len(words1 & words2) / len(words1 | words2)
+
+
+# CONTRACT
+# takes:  table_names (list[str]) — selected table names to score examples against,
+#          question (str) — the user’s natural-language question (default "")
 # returns: (str) — formatted string with up to 3 relevant NL->SQL example pairs
 # raises:  nothing
-def get_few_shot_examples(table_names: list[str]) -> str:
+def get_few_shot_examples(table_names: list[str], question: str = "") -> str:
     """
-    Return exactly 3 example NL->SQL pairs relevant to the selected tables.
+    Return exactly 3 example NL->SQL pairs relevant to the selected tables
+    and the user's question.
 
-    Scoring: each example earns +1 for every table it shares with the caller's
-    selected set. Ties broken by example order in the bank (stable).
+    Scoring: combines table overlap (40%) with question similarity (60%).
+    Ties broken by example order in the bank (stable).
     """
     selected = set(table_names) | {"CaseMaster"}
 
     scored = []
     for idx, ex in enumerate(_FEW_SHOT_BANK):
-        score = len(ex["tables"] & selected)
-        # Penalize examples that reference tables NOT selected â€” those would
+        table_score = len(ex["tables"] & selected)
+        # Penalize examples that reference tables NOT selected — those would
         # confuse the LLM into using tables we didn't include in the schema.
         unknown = ex["tables"] - selected
         if unknown:
-            score -= len(unknown)
-        scored.append((score, idx, ex))
+            table_score -= len(unknown)
+        q_score = _question_similarity(question, ex["q"]) if question else 0.0
+        combined = (table_score * 0.4) + (q_score * 5.0 * 0.6)
+        scored.append((combined, idx, ex))
 
     scored.sort(key=lambda x: (-x[0], x[1]))
     chosen = [ex for _score, _idx, ex in scored[:3]]
