@@ -1,6 +1,7 @@
 import { getToken } from './auth'
+import { API_BASE } from '../config.js'
 
-const BASE = '/api/profiling'
+const BASE = `${API_BASE}/api/profiling`
 
 class AuthError extends Error {}
 

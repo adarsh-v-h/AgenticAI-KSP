@@ -13,6 +13,7 @@ The network instance is destroyed on unmount to avoid leaking canvas/listeners.
 import { useEffect, useRef, useState } from 'react'
 import { Network } from 'vis-network/standalone'
 import { getToken } from '../api/auth.js'
+import { API_BASE } from '../config.js'
 
 // Node colors by entity group — coral matches the app primary for accused
 // (the entity an officer most often centers a search on).
@@ -37,8 +38,8 @@ export default function NetworkGraph({ firId, accusedId, onClose }) {
       setError(null)
       try {
         const path = firId
-          ? `/api/graph/fir/${firId}`
-          : `/api/graph/accused/${accusedId}`
+          ? `${API_BASE}/api/graph/fir/${firId}`
+          : `${API_BASE}/api/graph/accused/${accusedId}`
         const res = await fetch(path, {
           headers: { Authorization: `Bearer ${getToken()}` },
         })

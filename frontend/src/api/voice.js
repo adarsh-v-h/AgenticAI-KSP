@@ -4,6 +4,7 @@
 // ever uses the app JWT (Bearer) against our own API.
 
 import { getToken } from './auth.js'
+import { API_BASE } from '../config.js'
 
 // CONTRACT
 // takes:  audioBlob (Blob) — recorded audio in webm format, language ('en'|'kn') — spoken language code
@@ -27,7 +28,7 @@ export async function recordAndTranscribe(audioBlob, language = 'en') {
 
   let res
   try {
-    res = await fetch('/api/voice/transcribe', {
+    res = await fetch(`${API_BASE}/api/voice/transcribe`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -73,7 +74,7 @@ export async function recordAndTranscribe(audioBlob, language = 'en') {
 export async function speakText(text, language = 'en') {
   const token = getToken()
   try {
-    const res = await fetch('/api/voice/speak', {
+    const res = await fetch(`${API_BASE}/api/voice/speak`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

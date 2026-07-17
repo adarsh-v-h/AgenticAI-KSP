@@ -1,4 +1,5 @@
 import { getToken } from './auth'
+import { API_BASE } from '../config.js'
 
 class AuthError extends Error {}
 
@@ -17,7 +18,7 @@ function authHeaders() {
 // throws:  AuthError — when the session token is expired (401)
 //          Error — when the server returns a non-OK response other than 404
 export async function fetchEvidenceTrail(messageId) {
-  const res = await fetch(`/api/chat/messages/${messageId}/evidence-trail`, { headers: authHeaders() })
+  const res = await fetch(`${API_BASE}/api/chat/messages/${messageId}/evidence-trail`, { headers: authHeaders() })
   if (res.status === 401) throw new AuthError('Session expired')
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Evidence trail request failed: ${res.status}`)
