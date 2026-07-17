@@ -2,8 +2,8 @@ import os
 from dotenv import load_dotenv
 
 # Walk up from this file to find .env
-# This file is at: /home/venzz/Work/Dataathon/backend/config/settings.py
-# .env is at:      /home/venzz/Work/Dataathon/.env
+# This file is at: <project_root>/backend/config/settings.py
+# .env is at:      <project_root>/.env
 _this_file = os.path.abspath(__file__)
 _config_dir = os.path.dirname(_this_file)      # backend/config
 _backend_dir = os.path.dirname(_config_dir)    # backend
@@ -42,7 +42,7 @@ OPTIONAL_VARS = [
 # CONTRACT
 # takes:  nothing
 # returns: nothing
-# raises:  ValueError — when any REQUIRED_VARS are missing from the environment
+# raises:  ValueError — when any REQUIRED_VARS are missing (checking the KSP_-prefixed fallback for CATALYST_* vars)
 def validate_settings():
     missing = []
     for var in REQUIRED_VARS:
@@ -60,8 +60,9 @@ def validate_settings():
 
 # CONTRACT
 # takes:  key (str) — name of the environment variable to retrieve
-# returns: (str) — the environment variable's value
-# raises:  ValueError — when the environment variable is not set or empty
+# returns: (str) — the value; for CATALYST_* keys, falls back to the KSP_-prefixed
+#          variant (Catalyst AppSail reserves the CATALYST_ env-var prefix)
+# raises:  ValueError — when the variable (and its KSP_ fallback, if applicable) is unset or empty
 def get(key: str) -> str:
     val = os.getenv(key)
     # Fallback: on Catalyst AppSail, CATALYST_* vars are reserved, so we use

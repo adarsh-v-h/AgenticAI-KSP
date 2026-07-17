@@ -1,4 +1,3 @@
-import sys
 import httpx
 from config.settings import get
 

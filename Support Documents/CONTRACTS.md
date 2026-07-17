@@ -56,13 +56,13 @@
 
 ### get
 - **Takes:** key (str) — name of the environment variable to retrieve
-- **Returns:** (str) — the environment variable's value
-- **Raises:** ValueError — when the environment variable is not set or empty
+- **Returns:** (str) — the environment variable's value. For `CATALYST_*` keys, falls back to the `KSP_`-prefixed variant (e.g. `CATALYST_API_TOKEN` → `KSP_CATALYST_API_TOKEN`) when the plain name is unset — this supports Catalyst AppSail, which reserves the `CATALYST_` env-var prefix.
+- **Raises:** ValueError — when the environment variable (and its `KSP_` fallback, if applicable) is not set or empty
 
 ### validate_settings
 - **Takes:** nothing
 - **Returns:** nothing
-- **Raises:** ValueError — when any REQUIRED_VARS are missing from the environment
+- **Raises:** ValueError — when any REQUIRED_VARS are missing from the environment (checking the `KSP_`-prefixed fallback for `CATALYST_*` vars)
 
 ---
 

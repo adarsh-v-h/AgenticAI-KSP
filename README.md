@@ -26,7 +26,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.11, FastAPI, uvicorn |
+| Backend | Python 3.10 (Catalyst runtime), FastAPI, uvicorn |
 | Frontend | React 18, Vite 5 |
 | Relational DB | AWS RDS MySQL 8.0 (ap-south-1 Mumbai) |
 | LLM | Zoho Catalyst QuickML — GLM-4.7-Flash (`crm-di-glm47b_30b_it`) |
@@ -60,19 +60,34 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 
 ```
 ├── .env.example                 # Environment variable template
-├── .env                         # Runtime config (not committed)
-├── start.sh                     # One-command start (Linux/macOS)
-├── start.bat                    # One-command start (Windows)
-├── contract-lock.md             # Contract format rules
+├── .env                         # Runtime config + secrets (not committed)
+├── start.sh                     # One-command local start (Linux/macOS)
+├── start.bat                    # One-command local start (Windows)
+├── deploy.sh                    # One-command Catalyst deploy (backend/frontend/both)
+├── catalyst.json                # Catalyst project resource map (AppSail + client)
+├── requirements.txt             # Backend deps (also used for local tests)
+├── pytest.ini                   # Test configuration
 ├── LICENSE                      # AGPL v3
+│
+├── scripts/
+│   └── gen_app_config.py        # Generates backend/app-config.json from .env (secrets stay out of git)
+│
+├── client-package/              # Frontend build output for Web Client Hosting (generated)
+│   └── client-package.json      # Web Client Hosting config
 │
 ├── Support Documents/
 │   ├── Docs.md                  # Full technical documentation
-│   └── DESIGN.md                # Frontend design spec
+│   ├── DESIGN.md                # Frontend design spec
+│   ├── DEPLOYMENT.md            # Deployment reference (setup, redeploy, issues)
+│   └── FULL_DEPLOYMENT_WALKTHROUGH.md  # First-time-from-scratch deploy walkthrough
 │
 ├── backend/
 │   ├── main.py                  # FastAPI app, startup lifecycle, health check
-│   ├── Dockerfile               # Container for Catalyst AppSail
+│   ├── app-config.template.json # AppSail config template (no secrets, committed)
+│   ├── app-config.json          # Generated AppSail config (has secrets, gitignored)
+│   ├── requirements.txt         # Deps bundled into the AppSail runtime
+│   ├── .catalystignore          # Files excluded from the deploy bundle
+│   ├── Dockerfile               # Container for Catalyst AppSail (custom-runtime option)
 │   ├── debug_tools.py           # CLI debug utility (env/db/schema/tables/rag)
 │   ├── setup_db.py              # Create tables + seed (any MySQL target)
 │   ├── config/
@@ -127,9 +142,10 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── decision_support.py  # Decision support (similar cases, timeline, summary)
 │   │   └── profiling.py         # Offender risk scores
 │   └── tests/
-│       ├── test_unit.py         # 57 pure unit tests
-│       ├── test_pipeline_and_sessions.py  # 15 pipeline tests
-│       └── test_integration.py  # Live integration tests
+│       ├── test_unit.py         # 68 pure unit tests
+│       ├── test_pipeline_and_sessions.py  # 15 pipeline/session tests
+│       ├── properties/          # 15 property-based tests (hypothesis)
+│       └── test_integration.py  # Live integration script (run directly, not via pytest)
 │
 └── frontend/
     ├── package.json
@@ -367,6 +383,33 @@ Press `Ctrl+C` (Linux) or close the server windows (Windows) to stop.
 
 ---
 
+## Deployment
+
+The app is deployed to Zoho Catalyst — backend on **AppSail**, frontend on
+**Web Client Hosting**. Once your `.env` is populated and the Catalyst CLI is
+logged in (`catalyst login`), deploy with a single command:
+
+```bash
+./deploy.sh            # deploy backend + frontend
+./deploy.sh backend    # backend only
+./deploy.sh frontend   # frontend only
+```
+
+`deploy.sh` generates `backend/app-config.json` from `.env` (so secrets never
+touch git), bundles backend dependencies, builds the frontend with the backend
+URL baked in, and runs `catalyst deploy`.
+
+- **Full reference** (setup, making changes, redeploying, and every issue that
+  can arise): [Support Documents/DEPLOYMENT.md](Support%20Documents/DEPLOYMENT.md)
+- **First-time-from-scratch walkthrough** (installing tools, logging in):
+  [Support Documents/FULL_DEPLOYMENT_WALKTHROUGH.md](Support%20Documents/FULL_DEPLOYMENT_WALKTHROUGH.md)
+
+> **Secrets:** never commit `.env` or `backend/app-config.json` (both
+> gitignored). Only `backend/app-config.template.json` (placeholders) is
+> version-controlled.
+
+---
+
 ## Login Credentials
 
 Password formula: `<KGID>123`
@@ -439,18 +482,26 @@ python backend/debug_tools.py all      # Run all checks
 
 ## Running Tests
 
+Backend — 98 tests total (68 unit + 15 pipeline/session + 15 property-based),
+no network or DB required:
+
 ```bash
-# Unit tests (no network/DB needed) — 83 tests
+# All backend tests (unit + pipeline + property)
+python -m pytest backend/tests/ -q
+
+# A single suite
 python -m pytest backend/tests/test_unit.py -v
-
-# Pipeline + session tests (no network needed)
 python -m pytest backend/tests/test_pipeline_and_sessions.py -v
+python -m pytest backend/tests/properties/ -v
 
-# All tests together
-python -m pytest backend/tests/test_unit.py backend/tests/test_pipeline_and_sessions.py -q
+# Live integration script (needs real tokens + DB; runs standalone, not via pytest)
+python backend/tests/test_integration.py all      # or: llm | rag | pipeline | e2e | role
+```
 
-# Integration tests (needs live tokens + DB)
-python backend/tests/test_integration.py all
+Frontend — property-based component tests (fast-check + vitest):
+
+```bash
+cd frontend && npm test
 ```
 
 ---

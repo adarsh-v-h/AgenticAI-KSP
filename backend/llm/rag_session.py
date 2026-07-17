@@ -18,6 +18,7 @@ empty (the previous bug: a fresh RagSession() was created per-request with
 no history ever passed in).
 """
 import re
+import sys
 
 from llm.rag_client import query_rag, RagResult
 from llm.client import call_llm, LLMError
@@ -164,7 +165,7 @@ class RagSession:
                 if line.strip()
             ][:3]
         except LLMError as e:
-            print(f"follow-up generation failed (non-fatal): {e}")
+            print(f"follow-up generation failed (non-fatal): {e}", file=sys.stderr, flush=True)
             return []
 
     # CONTRACT

@@ -131,12 +131,12 @@ class TestHistoryMigration:
         assert len(migrated) == 1
 
     def test_get_history_returns_stored_from_memory(self, monkeypatch):
-        class _Raising:
-            def __init__(self, *a, **k): pass
-            async def __aenter__(self): raise RuntimeError("NoSQL unavailable")
-            async def __aexit__(self, *exc): return False
+        # Simulate NoSQL being unavailable: get_document raises, so get_history
+        # must fall back to the in-memory store.
+        async def _raise(*a, **k):
+            raise RuntimeError("NoSQL unavailable")
 
-        monkeypatch.setattr(history.httpx, "AsyncClient", _Raising)
+        monkeypatch.setattr(history, "get_document", _raise)
         session_id = "sess-backward-compat"
         stored = [
             {"message_id": "m-1", "role": "user", "content": "stored",
