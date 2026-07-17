@@ -241,3 +241,73 @@ catalyst deploy --only appsail
 npm run build                      # (with VITE_API_BASE_URL set beforehand)
 catalyst deploy --only client
 ```
+
+
+---
+
+## Appendix — Actual Working Configuration (verified live)
+
+This project is already configured and deployed. The live URLs are:
+
+- **Backend (AppSail):** `https://crime-intel-backend-50043099694.development.catalystappsail.in`
+- **Frontend (Web Client):** `https://datathon-60074122671.development.catalystserverless.in`
+
+To redeploy after code changes, just run the automated script from the project root:
+```
+./deploy.sh            # deploy both backend + frontend
+./deploy.sh backend    # backend only
+./deploy.sh frontend   # frontend only
+```
+
+### Key gotchas discovered during setup (so you don't repeat them)
+
+1. **Catalyst reserves `CATALYST_*` env var names.** You cannot set
+   `CATALYST_API_TOKEN` / `CATALYST_ORG_ID` as AppSail env variables — the
+   deploy fails with "environment_variables must not contain reserved
+   keywords". We prefix them `KSP_CATALYST_*` in `backend/app-config.json`, and
+   `backend/config/settings.py` falls back to the `KSP_`-prefixed name when the
+   plain one is empty.
+
+2. **The runtime binary is `python3`, not `python`.** The startup command in
+   `app-config.json` must use `python3 -m uvicorn ...`. Plain `python` gives
+   "exec: python: not found".
+
+3. **Catalyst does NOT auto-install `requirements.txt`.** The managed runtime
+   ships a few packages under `/catalyst/` but not our full set. You must bundle
+   dependencies into the source dir before deploy:
+   ```
+   python3 -m pip install -r requirements.txt -t . --upgrade
+   ```
+   This is wired as the `predeploy` script in `app-config.json`, so a normal
+   `catalyst deploy --only appsail` handles it automatically. The vendored
+   packages are gitignored (regenerated on each deploy).
+
+4. **Binary wheels must match the stack's Python version.** The `stack` is
+   `python_3_10`, so deps must be compiled for cp310. Installing them with a
+   local Python 3.10 produces the correct `.so` files. If you switch the stack
+   to `python_3_12`, re-bundle with a matching interpreter or the
+   `pydantic_core._pydantic_core` import will fail.
+
+5. **`python-multipart` is required** by the file-upload endpoints
+   (`routers/voice.py`, `routers/reports.py`). It is in `requirements.txt`.
+
+6. **AppSail listens on port 9000** by default (Catalyst assigns it via
+   `X_ZOHO_CATALYST_LISTEN_PORT`, which defaults to 9000). The startup command
+   binds `--port 9000`.
+
+7. **Refresh `KSP_CATALYST_API_TOKEN` before deploying.** Catalyst OAuth access
+   tokens expire in ~1 hour. If `/health` reports `"llm_coder":"error"` while
+   `"db":"connected"`, the token has expired — mint a new one (see the refresh
+   snippet in `.env`) and update it in `backend/app-config.json`, then redeploy.
+
+### Verifying the backend
+
+```
+curl https://crime-intel-backend-50043099694.development.catalystappsail.in/health
+```
+A healthy response looks like:
+```
+{"status":"ok","db":"connected","llm_coder":"ok","llm_answer":"ok","env":"production"}
+```
+`"status":"degraded"` with `"db":"connected"` but LLM errors almost always means
+an expired Catalyst API token (gotcha #7).
