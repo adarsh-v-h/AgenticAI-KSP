@@ -1,7 +1,7 @@
 {
-  "command": "python -m uvicorn main:app --host 0.0.0.0 --port 9000",
+  "command": "python3 -m uvicorn main:app --host 0.0.0.0 --port 9000",
   "buildPath": ".",
-  "stack": "python_3_12",
+  "stack": "python_3_10",
   "env_variables": {
     "QUICKML_LLM_URL": "https://api.catalyst.zoho.in/quickml/v1/project/50009000000018001/glm/chat",
     "MODEL_SQL": "crm-di-glm47b_30b_it",
@@ -18,5 +18,8 @@
     "KSP_CATALYST_API_TOKEN": "1000.c9ad56bebeb991867430c976bdb08e72.25c4cf30e83dcc0af93a4c146e26d521",
     "KSP_CATALYST_ORG_ID": "60074122671"
   },
-  "memory": 512
+  "memory": 512,
+  "scripts": {
+    "predeploy": "python3 -m pip install -r requirements.txt -t . --upgrade"
+  }
 }

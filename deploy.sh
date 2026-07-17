@@ -27,24 +27,10 @@ cd "$SCRIPT_DIR"
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Backend AppSail URL — update this after first deploy (Part 2.4 of walkthrough)
-# If VITE_API_BASE_URL is already set in the environment, use that instead.
-BACKEND_URL="${VITE_API_BASE_URL:-}"
-
-if [ -z "$BACKEND_URL" ]; then
-    echo ""
-    echo "ERROR: VITE_API_BASE_URL is not set."
-    echo ""
-    echo "Set it to your deployed backend URL before running this script:"
-    echo "  export VITE_API_BASE_URL=https://crime-intel-backend-XXXXX.development.catalystserverless.in"
-    echo ""
-    echo "Or for first-time backend-only deploy, run:"
-    echo "  ./deploy.sh backend"
-    echo ""
-    if [ "${1:-}" != "backend" ]; then
-        exit 1
-    fi
-fi
+# Backend AppSail URL — the live deployed backend. Override by exporting
+# VITE_API_BASE_URL before running this script if the URL changes.
+DEFAULT_BACKEND_URL="https://crime-intel-backend-50043099694.development.catalystappsail.in"
+BACKEND_URL="${VITE_API_BASE_URL:-$DEFAULT_BACKEND_URL}"
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -81,10 +67,10 @@ build_frontend() {
     
     ok "Frontend built successfully"
     
-    # Copy build output to client-package
+    # Copy build output to client-package, preserving client-package.json.
     cd "$SCRIPT_DIR"
-    rm -rf client-package/*
-    cp -r frontend/dist/* client-package/
+    find client-package -mindepth 1 ! -name 'client-package.json' -delete
+    cp -r frontend/dist/. client-package/
     
     ok "Build output copied to client-package/"
 }
@@ -113,8 +99,8 @@ deploy_backend() {
 deploy_frontend() {
     check_catalyst
     
-    # Check that client-package has real content (not just the placeholder)
-    if [ ! -f "client-package/index.html" ] || grep -q "Build not yet copied" "client-package/index.html" 2>/dev/null; then
+    # Ensure client-package has a real build (index.html referencing assets).
+    if [ ! -f "client-package/index.html" ] || [ ! -d "client-package/assets" ]; then
         log "client-package/ has no build output — building frontend first..."
         build_frontend
     fi
