@@ -1,0 +1,16 @@
+# Files/dirs not needed in AppSail runtime
+__pycache__/
+*.pyc
+*.pyo
+tests/
+.pytest_cache/
+rag_export/
+rag_consolidated/
+Dockerfile
+.env
+.env.example
+debug_tools.py
+export_cases_for_rag.py
+consolidate_cases.py
+kb_sync.py
+setup_db.py

@@ -44,7 +44,14 @@ OPTIONAL_VARS = [
 # returns: nothing
 # raises:  ValueError — when any REQUIRED_VARS are missing from the environment
 def validate_settings():
-    missing = [var for var in REQUIRED_VARS if not os.getenv(var)]
+    missing = []
+    for var in REQUIRED_VARS:
+        val = os.getenv(var)
+        # Fallback for Catalyst-reserved names
+        if not val and var.startswith("CATALYST_"):
+            val = os.getenv(f"KSP_{var}")
+        if not val:
+            missing.append(var)
     if missing:
         raise ValueError(
             "STARTUP FAILED — missing required environment variables:\n"
@@ -57,6 +64,11 @@ def validate_settings():
 # raises:  ValueError — when the environment variable is not set or empty
 def get(key: str) -> str:
     val = os.getenv(key)
+    # Fallback: on Catalyst AppSail, CATALYST_* vars are reserved, so we use
+    # KSP_CATALYST_* prefixed versions. Check the prefixed variant if the
+    # standard name is empty.
+    if not val and key.startswith("CATALYST_"):
+        val = os.getenv(f"KSP_{key}")
     if not val:
         raise ValueError(f"Environment variable {key} is not set.")
     return val
