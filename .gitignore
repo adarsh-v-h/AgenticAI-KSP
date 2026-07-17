@@ -20,3 +20,9 @@ rag_export/
 .codex
 .agents
 .hypothesis
+
+# Catalyst deployment
+.catalystrc
+client-package/*.js
+client-package/*.css
+client-package/assets/*.so

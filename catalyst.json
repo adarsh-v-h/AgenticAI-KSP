@@ -1,0 +1,11 @@
+{
+  "appsail": [
+    {
+      "source": "backend",
+      "name": "crime-intel-backend"
+    }
+  ],
+  "client": {
+    "source": "client-package"
+  }
+}
