@@ -1,5 +1,7 @@
 // Auth API. Token lives in memory only — never localStorage / sessionStorage.
 
+import { API_BASE } from '../config.js'
+
 let _token = null
 let _officer = null
 
@@ -56,7 +58,7 @@ export function isLoggedIn() {
  */
 export async function login(badgeNumber, password) {
   try {
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -99,7 +101,7 @@ export async function logout() {
   clearToken()
   if (!token) return
   try {
-    await fetch('/api/auth/logout', {
+    await fetch(`${API_BASE}/api/auth/logout`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     })

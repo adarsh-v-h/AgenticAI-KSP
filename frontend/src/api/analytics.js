@@ -1,7 +1,8 @@
 import { getToken } from './auth'
 import { AuthError } from './chat'
+import { API_BASE } from '../config.js'
 
-const BASE = '/api/analytics'
+const BASE = `${API_BASE}/api/analytics`
 
 // CONTRACT
 // takes:  nothing

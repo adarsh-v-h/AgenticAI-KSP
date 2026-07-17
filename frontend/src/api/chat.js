@@ -7,6 +7,7 @@
 // case some proxies strip headers from long-lived streams.
 
 import { getToken } from './auth.js'
+import { API_BASE } from '../config.js'
 
 // CONTRACT
 // takes:  question (string) — the user's chat query, sessionId (string) — unique session identifier, callbacks (object) — SSE event handler callbacks
@@ -34,7 +35,7 @@ export function startChatStream(question, sessionId, callbacks = {}) {
   const token = getToken()
 
   const url =
-    `/api/chat/stream?` +
+    `${API_BASE}/api/chat/stream?` +
     `question=${encodeURIComponent(question)}` +
     `&session_id=${encodeURIComponent(sessionId)}` +
     (token ? `&token=${encodeURIComponent(token)}` : '')
@@ -283,7 +284,7 @@ export async function fetchSessions() {
   let response
   try {
     response = await fetchWithRetry(() =>
-      fetch('/api/chat/sessions', {
+      fetch(`${API_BASE}/api/chat/sessions`, {
         method: 'GET',
         headers: authHeaders(),
       }),
@@ -328,7 +329,7 @@ export async function fetchSessions() {
  * @throws {Error} on 404 (session not found), other non-ok, or network failure
  */
 export async function fetchMessages(sessionId) {
-  const url = `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+  const url = `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`
 
   let response
   try {
@@ -388,7 +389,7 @@ export async function exportSession(sessionId) {
   let response
   try {
     response = await fetch(
-      `/api/chat/sessions/${encodeURIComponent(sessionId)}/export`,
+      `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/export`,
       {
         method: 'POST',
         headers: authHeaders(),
