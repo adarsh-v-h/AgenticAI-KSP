@@ -2296,11 +2296,12 @@ Zoho Catalyst (India)          AWS (ap-south-1 Mumbai)
 
 | Old files | New file | Contents |
 |-----------|----------|----------|
-| `test_generate_title.py`, `test_backward_compat.py`, `test_nosql_client.py`, `test_media_resolver.py`, `test_network_graph.py`, `test_export.py`, `test_report_extraction.py`, `test_voice.py` | `backend/tests/test_unit.py` | 57 pure unit tests — title generation, history migration, NoSQL serialization, media resolver, network graph, export HTML, report extraction, voice helpers |
+| `test_generate_title.py`, `test_backward_compat.py`, `test_nosql_client.py`, `test_media_resolver.py`, `test_network_graph.py`, `test_export.py`, `test_report_extraction.py`, `test_voice.py` | `backend/tests/test_unit.py` | 68 pure unit tests — title generation, history migration, NoSQL serialization, media resolver, network graph, export HTML/PDF, report extraction, voice helpers, sociological analytics |
 | `test_intent_routing.py`, `test_session_authz.py`, `test_session_lifecycle.py` | `backend/tests/test_pipeline_and_sessions.py` | 15 tests — intent routing, BOLA/IDOR authorization, session lifecycle |
-| `backend/integration_tests.py` (moved) | `backend/tests/test_integration.py` | Live integration tests (LLM, RAG, pipeline, E2E) — require real tokens/DB |
+| (new) | `backend/tests/properties/` | 15 property-based tests (hypothesis) — session metadata schema, message-id uniqueness, title constraints, message ordering/timestamps |
+| `backend/integration_tests.py` (moved) | `backend/tests/test_integration.py` | Live integration script (LLM, RAG, pipeline, E2E, role auth) — requires real tokens/DB; run directly, excluded from pytest collection |
 
-**Total:** 72 tests pass in ~5s. Test coverage unchanged.
+**Total:** 98 tests pass in ~9s (68 unit + 15 pipeline/session + 15 property). Frontend adds 6 property-based component tests (vitest + fast-check).
 
 ---
 

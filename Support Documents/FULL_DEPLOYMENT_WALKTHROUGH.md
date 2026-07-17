@@ -259,17 +259,33 @@ To redeploy after code changes, just run the automated script from the project r
 ./deploy.sh frontend   # frontend only
 ```
 
+### How secrets are handled (IMPORTANT — read before deploying)
+
+Secrets **never** live in git. The flow is:
+
+1. All real values (DB password, Catalyst API token, `APP_SECRET_KEY`, URLs)
+   live only in the local, gitignored `.env` file.
+2. `backend/app-config.template.json` is committed and contains **no secrets** —
+   just the startup command, stack, memory, and predeploy script. Its
+   `env_variables` object is empty.
+3. `scripts/gen_app_config.py` reads `.env` and writes the real,
+   **gitignored** `backend/app-config.json` (the file `catalyst deploy`
+   actually consumes). `deploy.sh` runs this automatically before deploying.
+
+So the only place secrets exist is `.env` (local) and the Catalyst platform
+(server-side, after deploy). Never commit `backend/app-config.json`.
+
 ### Key gotchas discovered during setup (so you don't repeat them)
 
 1. **Catalyst reserves `CATALYST_*` env var names.** You cannot set
    `CATALYST_API_TOKEN` / `CATALYST_ORG_ID` as AppSail env variables — the
    deploy fails with "environment_variables must not contain reserved
-   keywords". We prefix them `KSP_CATALYST_*` in `backend/app-config.json`, and
+   keywords". The generator renames them to `KSP_CATALYST_*`, and
    `backend/config/settings.py` falls back to the `KSP_`-prefixed name when the
    plain one is empty.
 
 2. **The runtime binary is `python3`, not `python`.** The startup command in
-   `app-config.json` must use `python3 -m uvicorn ...`. Plain `python` gives
+   the template must use `python3 -m uvicorn ...`. Plain `python` gives
    "exec: python: not found".
 
 3. **Catalyst does NOT auto-install `requirements.txt`.** The managed runtime
@@ -278,9 +294,9 @@ To redeploy after code changes, just run the automated script from the project r
    ```
    python3 -m pip install -r requirements.txt -t . --upgrade
    ```
-   This is wired as the `predeploy` script in `app-config.json`, so a normal
-   `catalyst deploy --only appsail` handles it automatically. The vendored
-   packages are gitignored (regenerated on each deploy).
+   This is wired as the `predeploy` script in `app-config.template.json`, so a
+   normal `catalyst deploy --only appsail` handles it automatically. The
+   vendored packages are gitignored (regenerated on each deploy).
 
 4. **Binary wheels must match the stack's Python version.** The `stack` is
    `python_3_10`, so deps must be compiled for cp310. Installing them with a
@@ -295,10 +311,12 @@ To redeploy after code changes, just run the automated script from the project r
    `X_ZOHO_CATALYST_LISTEN_PORT`, which defaults to 9000). The startup command
    binds `--port 9000`.
 
-7. **Refresh `KSP_CATALYST_API_TOKEN` before deploying.** Catalyst OAuth access
+7. **Refresh the Catalyst API token before deploying.** Catalyst OAuth access
    tokens expire in ~1 hour. If `/health` reports `"llm_coder":"error"` while
    `"db":"connected"`, the token has expired — mint a new one (see the refresh
-   snippet in `.env`) and update it in `backend/app-config.json`, then redeploy.
+   snippet at the bottom of `.env`), paste it into `.env` as
+   `CATALYST_API_TOKEN`, then run `./deploy.sh backend` (which regenerates
+   `app-config.json` from `.env` and redeploys).
 
 ### Verifying the backend
 
@@ -311,3 +329,10 @@ A healthy response looks like:
 ```
 `"status":"degraded"` with `"db":"connected"` but LLM errors almost always means
 an expired Catalyst API token (gotcha #7).
+
+> **Note on the walkthrough above (Parts 2–4):** the manual console steps for
+> entering environment variables one-by-one still work, but the automated path
+> (`./deploy.sh`) supersedes them. The generator injects all env variables from
+> `.env` into `app-config.json` at deploy time, so you do not need to type them
+> into the console by hand. The one manual step that remains is refreshing the
+> Catalyst API token in `.env` when it expires.

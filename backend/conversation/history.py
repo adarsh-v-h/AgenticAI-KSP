@@ -17,10 +17,8 @@ import sys
 import json
 import uuid
 import asyncio
-import httpx
 from datetime import datetime, timezone
 
-from config.settings import get
 from conversation.session_store import (
     generate_title,
     get_session,

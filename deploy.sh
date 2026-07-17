@@ -81,11 +81,14 @@ build_frontend() {
 
 deploy_backend() {
     check_catalyst
-    log "Deploying backend (AppSail)..."
-    
+    log "Generating backend/app-config.json from .env (secrets stay out of git)..."
+
     cd "$SCRIPT_DIR"
+    python3 scripts/gen_app_config.py
+
+    log "Deploying backend (AppSail)..."
     catalyst deploy --only appsail
-    
+
     ok "Backend deployed"
     echo ""
     echo "NOTE: Copy the backend URL printed above and set VITE_API_BASE_URL"

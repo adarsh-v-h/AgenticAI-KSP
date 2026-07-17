@@ -1,0 +1,10 @@
+{
+  "command": "python3 -m uvicorn main:app --host 0.0.0.0 --port 9000",
+  "buildPath": ".",
+  "stack": "python_3_10",
+  "env_variables": {},
+  "memory": 512,
+  "scripts": {
+    "predeploy": "python3 -m pip install -r requirements.txt -t . --upgrade"
+  }
+}
