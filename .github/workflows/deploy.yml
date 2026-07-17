@@ -1,0 +1,118 @@
+name: Deploy (Catalyst) with smoke test + auto-revert
+
+# Auto-deploys to the shared Catalyst deployment when main changes.
+#
+# Flow:
+#   1. Run backend + frontend tests (hard gate — no deploy if they fail).
+#   2. Deploy backend (AppSail) and frontend (Web Client) to Catalyst.
+#   3. Run the LIVE smoke test against the deployment (catches env/CORS/auth
+#      bugs that unit tests can't — e.g. the ZIA_TTS_URL voice 502).
+#   4. If the smoke test PASSES: tag this commit as `last-good-deploy`.
+#      If it FAILS: check out the previous `last-good-deploy` tag, redeploy it,
+#      and fail the workflow so the team is alerted. The live deployment ends
+#      up back on the last known-good version automatically.
+#
+# Required GitHub repository secrets (Settings → Secrets and variables → Actions):
+#   CATALYST_TOKEN   — from `catalyst token:generate` (never expires until revoked)
+#   ENV_FILE         — full contents of the backend .env (secrets live here)
+#
+# Manual trigger is also allowed via the "Run workflow" button.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Prevent overlapping deploys racing each other onto the same environment.
+concurrency:
+  group: catalyst-deploy
+  cancel-in-progress: false
+
+env:
+  BACKEND_URL: https://crime-intel-backend-50043099694.development.catalystappsail.in
+  FRONTEND_URL: https://datathon-60074122671.development.catalystserverless.in
+
+jobs:
+  test:
+    name: Test gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install -r requirements.txt
+      - name: Backend tests
+        run: python -m pytest backend/tests/ -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend install + tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+
+  deploy:
+    name: Deploy + smoke test + auto-revert
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history so we can revert to a tag)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Catalyst CLI
+        run: npm install -g zcatalyst-cli
+
+      - name: Restore .env from secret
+        run: printf '%s' "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Deploy current commit
+        env:
+          CATALYST_TOKEN: ${{ secrets.CATALYST_TOKEN }}
+        run: bash .github/scripts/ci_deploy.sh
+
+      - name: Smoke test the live deployment
+        id: smoke
+        continue-on-error: true
+        run: python3 scripts/smoke_test.py --base "$BACKEND_URL"
+
+      # ── Success path: record this commit as the last known-good deploy ──
+      - name: Tag last-good-deploy
+        if: steps.smoke.outcome == 'success'
+        run: |
+          git tag -f last-good-deploy
+          git push -f origin last-good-deploy
+
+      # ── Failure path: roll the live deployment back to last-good-deploy ──
+      - name: Roll back to last known-good deploy
+        if: steps.smoke.outcome == 'failure'
+        env:
+          CATALYST_TOKEN: ${{ secrets.CATALYST_TOKEN }}
+        run: |
+          echo "::error::Smoke test failed — rolling back to last-good-deploy."
+          if git rev-parse last-good-deploy >/dev/null 2>&1; then
+            git checkout last-good-deploy -- .
+            bash .github/scripts/ci_deploy.sh
+            echo "Rolled back and redeployed the last known-good version."
+          else
+            echo "::warning::No last-good-deploy tag exists yet — cannot auto-revert."
+          fi
+
+      - name: Fail the run if smoke test failed
+        if: steps.smoke.outcome == 'failure'
+        run: exit 1

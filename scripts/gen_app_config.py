@@ -34,10 +34,11 @@ _OUTPUT_PATH = os.path.join(_ROOT, "backend", "app-config.json")
 # Default production frontend origin used for CORS (ALLOWED_ORIGINS).
 _DEFAULT_ALLOWED_ORIGINS = "https://datathon-60074122671.development.catalystserverless.in"
 
-# AppSail env variable  ->  .env key it is sourced from.
+# REQUIRED AppSail env variable  ->  .env key it is sourced from.
+# Deploy fails if any of these are missing from .env.
 # CATALYST_* are renamed to KSP_CATALYST_* because Catalyst reserves the
 # CATALYST_ prefix for its own injected variables.
-_ENV_VAR_SOURCES = {
+_REQUIRED_ENV_VAR_SOURCES = {
     "QUICKML_LLM_URL": "QUICKML_LLM_URL",
     "MODEL_SQL": "MODEL_SQL",
     "MODEL_ANSWER": "MODEL_ANSWER",
@@ -50,6 +51,22 @@ _ENV_VAR_SOURCES = {
     "APP_SECRET_KEY": "APP_SECRET_KEY",
     "KSP_CATALYST_API_TOKEN": "CATALYST_API_TOKEN",
     "KSP_CATALYST_ORG_ID": "CATALYST_ORG_ID",
+}
+
+# OPTIONAL AppSail env variable  ->  .env key it is sourced from.
+# Injected when present in .env; skipped silently when absent (they back
+# not-yet-critical integrations: Zia voice, Stratus media, SmartBrowz export,
+# vision model). The voice feature (STT/TTS/translate) needs the ZIA_* URLs.
+_OPTIONAL_ENV_VAR_SOURCES = {
+    "ZIA_STT_URL": "ZIA_STT_URL",
+    "ZIA_TTS_URL": "ZIA_TTS_URL",
+    "ZIA_TRANSLATE_URL": "ZIA_TRANSLATE_URL",
+    "STRATUS_BASE_URL": "STRATUS_BASE_URL",
+    "SMARTBROWZ_URL": "SMARTBROWZ_URL",
+    "CACHE_BASE_URL": "CACHE_BASE_URL",
+    "MODEL_VISION": "MODEL_VISION",
+    "KSP_CATALYST_PROJECT_ID": "CATALYST_PROJECT_ID",
+    "KSP_CATALYST_BASE_URL": "CATALYST_BASE_URL",
 }
 
 
@@ -89,8 +106,9 @@ def main() -> None:
         "ALLOWED_ORIGINS": os.getenv("ALLOWED_ORIGINS_OVERRIDE", _DEFAULT_ALLOWED_ORIGINS),
     }
 
+    # Required vars — fail the deploy if any are missing.
     missing = []
-    for appsail_key, env_key in _ENV_VAR_SOURCES.items():
+    for appsail_key, env_key in _REQUIRED_ENV_VAR_SOURCES.items():
         value = env.get(env_key)
         if not value:
             missing.append(env_key)
@@ -103,6 +121,15 @@ def main() -> None:
             + "\n".join(f"  - {k}" for k in missing)
         )
 
+    # Optional vars — inject when present, skip silently when absent.
+    skipped_optional = []
+    for appsail_key, env_key in _OPTIONAL_ENV_VAR_SOURCES.items():
+        value = env.get(env_key)
+        if value:
+            env_variables[appsail_key] = value
+        else:
+            skipped_optional.append(env_key)
+
     config["env_variables"] = env_variables
 
     with open(_OUTPUT_PATH, "w", encoding="utf-8") as fh:
@@ -110,6 +137,8 @@ def main() -> None:
         fh.write("\n")
 
     print(f"Generated {_OUTPUT_PATH} with {len(env_variables)} env variables (secrets from .env).")
+    if skipped_optional:
+        print(f"  Optional keys not set in .env (skipped): {', '.join(skipped_optional)}")
 
 
 if __name__ == "__main__":

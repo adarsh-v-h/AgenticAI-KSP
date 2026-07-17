@@ -201,6 +201,36 @@ class TestSessionAuthz:
 
         asyncio.run(scenario())
 
+    def test_create_session_registers_mysql_row(self, monkeypatch):
+        """
+        Regression: POST /api/chat/sessions must register the session in MySQL
+        `chat_sessions` (not just NoSQL), otherwise ownership verification for a
+        freshly created, still-empty session fails and
+        GET /api/chat/sessions/{id}/messages returns 404. Caught by the live
+        smoke test; locked in here.
+        """
+        async def scenario():
+            created_rows = []
+
+            async def fake_nosql_create(document):
+                return document
+
+            async def fake_mysql_create(session_id, officer_id, title):
+                created_rows.append((session_id, officer_id, title))
+                return True
+
+            monkeypatch.setattr(chat_mod, "create_session", fake_nosql_create)
+            monkeypatch.setattr(chat_mod, "create_chat_session_row", fake_mysql_create)
+
+            result = await chat_mod.create_chat_session(officer={"officer_id": OWNER_ID})
+
+            # The MySQL row must have been written for the same session_id.
+            assert len(created_rows) == 1
+            assert created_rows[0][0] == result.session_id
+            assert created_rows[0][1] == OWNER_ID
+
+        asyncio.run(scenario())
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION: Session Lifecycle

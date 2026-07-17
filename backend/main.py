@@ -71,14 +71,31 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS â€” only allow origin from env, never wildcard
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[get("ALLOWED_ORIGINS")],
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
-)
+# CORS — only allow the origin from env, never wildcard.
+#
+# On Catalyst AppSail, the platform proxy injects its own origin-aware
+# Access-Control-Allow-Origin header for the linked web-client origin. If we
+# ALSO add CORSMiddleware there, the browser receives TWO
+# Access-Control-Allow-Origin headers and rejects the response (surfacing as
+# "Cannot reach the server" in the UI). So in production we rely on Catalyst's
+# proxy for CORS and do NOT add our own middleware.
+#
+# In local/dev the browser talks to the backend through Vite's dev proxy
+# (same-origin), so CORS is not strictly needed either — but we keep the
+# middleware for anyone hitting the backend directly during development.
+try:
+    _app_env = get("APP_ENV")
+except Exception:
+    _app_env = "development"
+
+if _app_env != "production":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[get("ALLOWED_ORIGINS")],
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
 
 # Security response headers — defense-in-depth for clickjacking, MIME sniffing, referrer leaks

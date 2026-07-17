@@ -263,6 +263,12 @@ async def create_chat_session(
     first and then attempts the NoSQL POST — it never raises, so this endpoint
     always succeeds once the officer is authenticated.
 
+    The session is persisted to BOTH stores: NoSQL session_metadata (the
+    sidebar's source of truth) AND MySQL chat_sessions. The MySQL row is
+    required because ownership checks (verify_session_owner) read from MySQL;
+    without it, a freshly created but still-empty session would 404 on
+    GET /api/chat/sessions/{id}/messages.
+
     The stored document uses `id` as the session_id key; we map it to
     `session_id` in the response.
     """
@@ -281,6 +287,13 @@ async def create_chat_session(
     }
 
     stored = await create_session(document)
+
+    # Also register the session row in MySQL `chat_sessions`. Ownership checks
+    # (verify_session_owner) read from MySQL, so without this row a freshly
+    # created — but still empty — session would 404 on
+    # GET /api/chat/sessions/{id}/messages. Non-fatal if it fails: the NoSQL
+    # metadata above is the source of truth for the sidebar.
+    await create_chat_session_row(session_id, officer_id, "New chat")
 
     return SessionMetadata(
         session_id=stored.get("id", session_id),

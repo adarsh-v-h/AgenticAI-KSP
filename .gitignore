@@ -1,4 +1,9 @@
-.env
+# NOTE: .env IS committed to this repo intentionally. The repository is PRIVATE
+# with a small set of trusted contributors, and a single shared deployment means
+# everyone works against the same backend/DB/Catalyst project. This is a
+# deliberate tradeoff — if the repo is ever made public, remove the .env files
+# from tracking and rotate every secret immediately. Generated per-deploy
+# artifacts that also contain secrets (backend/app-config.json) stay ignored.
 __pycache__/
 *.pyc
 *.pyo
