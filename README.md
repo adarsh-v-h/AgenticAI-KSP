@@ -69,8 +69,16 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 ├── pytest.ini                   # Test configuration
 ├── LICENSE                      # AGPL v3
 │
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml               # Tests + build on every push/PR
+│   │   └── deploy.yml           # Auto deploy → smoke test → auto-revert on main
+│   └── scripts/
+│       └── ci_deploy.sh         # Non-interactive Catalyst deploy used by CI
+│
 ├── scripts/
-│   └── gen_app_config.py        # Generates backend/app-config.json from .env (secrets stay out of git)
+│   ├── gen_app_config.py        # Generates backend/app-config.json from .env
+│   └── smoke_test.py            # Live post-deploy smoke test (also the CI gate)
 │
 ├── client-package/              # Frontend build output for Web Client Hosting (generated)
 │   └── client-package.json      # Web Client Hosting config
@@ -143,13 +151,14 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   └── profiling.py         # Offender risk scores
 │   └── tests/
 │       ├── test_unit.py         # 68 pure unit tests
-│       ├── test_pipeline_and_sessions.py  # 15 pipeline/session tests
+│       ├── test_pipeline_and_sessions.py  # 16 pipeline/session tests
 │       ├── properties/          # 15 property-based tests (hypothesis)
 │       └── test_integration.py  # Live integration script (run directly, not via pytest)
 │
 └── frontend/
     ├── package.json
-    ├── vite.config.js
+    ├── vite.config.js           # base: './' for /app/ hosting; Vitest config
+    ├── .env                     # VITE_API_BASE_URL (shared backend URL)
     └── src/
         ├── App.jsx, main.jsx
         ├── api/ (auth.js, chat.js, voice.js)
@@ -399,14 +408,31 @@ logged in (`catalyst login`), deploy with a single command:
 touch git), bundles backend dependencies, builds the frontend with the backend
 URL baked in, and runs `catalyst deploy`.
 
-- **Full reference** (setup, making changes, redeploying, and every issue that
-  can arise): [Support Documents/DEPLOYMENT.md](Support%20Documents/DEPLOYMENT.md)
+### Automated CI/CD
+
+Pushing to `main` triggers GitHub Actions to **test → deploy → smoke-test the
+live deployment → auto-revert on failure**:
+
+- `.github/workflows/ci.yml` — tests + build check on every push/PR.
+- `.github/workflows/deploy.yml` — on `main`: runs tests, deploys backend +
+  frontend to Catalyst, runs `scripts/smoke_test.py` against the live URL, tags
+  `last-good-deploy` on success, or rolls back to the last-good tag on failure.
+
+One-time setup: add repo secrets `CATALYST_TOKEN` (from `catalyst
+token:generate`) and `ENV_FILE` (contents of `.env`). See DEPLOYMENT.md §8.
+
+Run the smoke test manually anytime: `python3 scripts/smoke_test.py`
+
+- **Full reference** (setup, making changes, redeploying, CI/CD, and every issue
+  that can arise): [Support Documents/DEPLOYMENT.md](Support%20Documents/DEPLOYMENT.md)
 - **First-time-from-scratch walkthrough** (installing tools, logging in):
   [Support Documents/FULL_DEPLOYMENT_WALKTHROUGH.md](Support%20Documents/FULL_DEPLOYMENT_WALKTHROUGH.md)
 
-> **Secrets:** never commit `.env` or `backend/app-config.json` (both
-> gitignored). Only `backend/app-config.template.json` (placeholders) is
-> version-controlled.
+> **Secrets:** `.env` and `frontend/.env` ARE committed here **on purpose** —
+> this is a private repo with a single shared deployment for a small trusted
+> team. `backend/app-config.json` (generated, also secret-bearing) stays
+> gitignored. If this repo is ever made public, remove the `.env` files from
+> tracking and rotate every secret. See DEPLOYMENT.md §7.
 
 ---
 
@@ -482,7 +508,7 @@ python backend/debug_tools.py all      # Run all checks
 
 ## Running Tests
 
-Backend — 98 tests total (68 unit + 15 pipeline/session + 15 property-based),
+Backend — 99 tests total (68 unit + 16 pipeline/session + 15 property-based),
 no network or DB required:
 
 ```bash
