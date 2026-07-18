@@ -1,6 +1,7 @@
 import sys
 import httpx
 from config.settings import get
+from config.catalyst_token import get_access_token
 
 
 class LLMError(Exception):
@@ -11,11 +12,12 @@ class LLMError(Exception):
 # CONTRACT
 # takes:  nothing
 # returns: (dict) — authorization and content-type headers for Catalyst QuickML API calls
-# raises:  ValueError — when required env vars (CATALYST_API_TOKEN, CATALYST_ORG_ID) are not set
-def _llm_headers() -> dict:
+# raises:  ValueError — when CATALYST_ORG_ID is not set,
+#           RuntimeError — when no Catalyst access token can be obtained
+async def _llm_headers() -> dict:
     """Build the auth + org headers required by every Catalyst QuickML call."""
     return {
-        "Authorization": f"Zoho-oauthtoken {get('CATALYST_API_TOKEN')}",
+        "Authorization": f"Zoho-oauthtoken {await get_access_token()}",
         "Content-Type": "application/json",
         "CATALYST-ORG": get("CATALYST_ORG_ID"),
     }
@@ -75,7 +77,7 @@ async def ping_model(model_key: str) -> bool:
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url, json=payload, headers=_llm_headers(), timeout=30.0
+                url, json=payload, headers=await _llm_headers(), timeout=30.0
             )
             data = response.json()
             if response.status_code == 200 and _extract_response_text(data):
@@ -140,7 +142,7 @@ async def call_llm(
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url, json=payload, headers=_llm_headers(), timeout=180.0
+                url, json=payload, headers=await _llm_headers(), timeout=180.0
             )
     except httpx.TimeoutException as e:
         raise LLMError(f"LLM call timed out after 180s: {e}") from e

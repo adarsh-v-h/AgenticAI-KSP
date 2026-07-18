@@ -21,11 +21,13 @@ import re
 import httpx
 from dotenv import load_dotenv
 
+from config.catalyst_token import get_access_token
+
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _dotenv_path = os.path.join(_project_root, ".env")
 _loaded = load_dotenv(dotenv_path=_dotenv_path)
 
-CATALYST_ORG = os.getenv("CATALYST_ORG_ID", "")
+CATALYST_ORG = os.getenv("CATALYST_ORG_ID", "") or os.getenv("KSP_CATALYST_ORG_ID", "")
 CATALYST_PROJECT_ID = os.getenv("CATALYST_PROJECT_ID")
 RAG_URL = f"https://api.catalyst.zoho.in/quickml/v1/project/{CATALYST_PROJECT_ID}/rag/answer"
 
@@ -112,15 +114,10 @@ def normalize_query(query: str) -> str:
 # takes:  query (str) — the search query to send to the RAG endpoint,
 #          document_ids (list[str]) — document IDs to scope the retrieval
 # returns: (RagResult) — grounding status, response text, and filtered source references
-# raises:  RuntimeError — when CATALYST_API_TOKEN env var is not set,
+# raises:  RuntimeError — when no Catalyst access token can be obtained,
 #           httpx.HTTPStatusError — when the RAG API returns a non-2xx status
 async def _query_rag_once(query: str, document_ids: list[str]) -> RagResult:
-    access_token = os.getenv("CATALYST_API_TOKEN")
-    if not access_token:
-        raise RuntimeError(
-            f"CATALYST_API_TOKEN not set. .env path tried: {_dotenv_path} "
-            f"(exists: {os.path.exists(_dotenv_path)}, load_dotenv returned: {_loaded})"
-        )
+    access_token = await get_access_token()
 
     headers = {
         "CATALYST-ORG": CATALYST_ORG,
@@ -163,7 +160,7 @@ async def _query_rag_once(query: str, document_ids: list[str]) -> RagResult:
 # takes:  query (str) — the user's search query,
 #          document_ids (list[str]) — document IDs to scope the retrieval
 # returns: (RagResult) — grounding status, response text, and filtered source references
-# raises:  RuntimeError — when CATALYST_API_TOKEN env var is not set,
+# raises:  RuntimeError — when no Catalyst access token can be obtained,
 #           httpx.HTTPStatusError — when the RAG API returns a non-2xx status
 async def query_rag(query: str, document_ids: list[str]) -> RagResult:
     result = await _query_rag_once(query, document_ids)

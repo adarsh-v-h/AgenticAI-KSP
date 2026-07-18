@@ -352,17 +352,25 @@ Add these in **GitHub → Settings → Secrets and variables → Actions**:
 
 | Secret | How to get it |
 |---|---|
-| `CATALYST_TOKEN` | On a logged-in machine run `catalyst token:generate`, complete the browser verification, copy the token. It does not expire until revoked. |
-| `ENV_FILE` | Paste the **entire contents** of the backend `.env`. The workflow writes it back to `.env` before deploying so the config generator has all secrets. |
+| `CATALYST_CLI_TOKEN` | On a logged-in machine run `catalyst token:generate`, complete the browser verification, copy the token. It does not expire until revoked. This is the **CLI deploy token** — distinct from the runtime OAuth access token. |
+| `ENV_FILE` | Paste the **entire contents** of the backend `.env`. The workflow writes it back to `.env` before deploying so the config generator has all secrets. Must include the OAuth refresh credentials (`CATALYST_CLIENT_ID` / `CATALYST_CLIENT_SECRET` / `CATALYST_REFRESH_TOKEN`) so the deployed backend can auto-refresh its access token. |
 
-That's it. Push to `main` and the pipeline deploys, verifies, and self-heals on
-failure.
+That's it. Push to `main` and the pipeline deploys **both backend and
+frontend**, verifies, and self-heals on failure.
+
+> **Two different "tokens" — don't confuse them:**
+> - `CATALYST_CLI_TOKEN` (GitHub secret) authenticates the `catalyst deploy`
+>   command in CI. Long-lived until revoked.
+> - The **runtime** Catalyst access token (used by the backend to call LLM /
+>   NoSQL / Cache / RAG / voice) is short-lived (~1h) and is now **auto-refreshed
+>   in-app** from the refresh credentials in `.env` (see
+>   `backend/config/catalyst_token.py`). You no longer rotate it by hand.
 
 ### Notes / limits
 - The auto-revert redeploys the previous **git-tagged** build, not a Catalyst
   platform snapshot — this is deterministic and needs no Catalyst-native
   rollback feature.
-- The `CATALYST_TOKEN` maps to the user who generated it; keep it in GitHub
+- The `CATALYST_CLI_TOKEN` maps to the user who generated it; keep it in GitHub
   secrets only. Revoke with `catalyst token:revoke` if leaked.
 - The first successful deploy creates the `last-good-deploy` tag; until then,
   a smoke failure can't auto-revert (it warns instead).

@@ -38,6 +38,11 @@ OPTIONAL_VARS = [
     "ZIA_STT_URL", "ZIA_TTS_URL", "ZIA_TRANSLATE_URL",
     "SMARTBROWZ_URL",
     "CACHE_BASE_URL", "CACHE_SEGMENT_ID",
+    # OAuth refresh credentials — enable runtime auto-refresh of the Catalyst
+    # access token (see config/catalyst_token.py). Optional so envs without them
+    # fall back to the static CATALYST_API_TOKEN.
+    "CATALYST_CLIENT_ID", "CATALYST_CLIENT_SECRET", "CATALYST_REFRESH_TOKEN",
+    "CATALYST_ACCOUNTS_URL",
 ]
 
 # CONTRACT

@@ -1,23 +1,27 @@
-name: Deploy backend + smoke test (auto-revert on failure)
+name: Deploy backend + frontend + smoke test (auto-revert on failure)
 
-# Deploys the BACKEND (AppSail) to Catalyst on push to main.
+# Deploys BOTH components to Catalyst on push to main:
+#   - Backend  → AppSail            (catalyst deploy --only appsail)
+#   - Frontend → Web Client Hosting (catalyst deploy --only client)
 #
-# The FRONTEND is NOT auto-deployed here. It is served from Catalyst Web Client
-# Hosting (Slate was abandoned earlier because its *.onslate.in origin can't get
-# a CORS header from the AppSail proxy). After a frontend change you must rebuild
-# and republish the web client manually — see DEPLOYMENT.md ("Web Client
-# Hosting") for the client-package/ steps.
+# The frontend is served from Catalyst Web Client Hosting (Slate was abandoned
+# earlier because its *.onslate.in origin can't get a CORS header from the
+# AppSail proxy). Both deploys go through the Catalyst CLI with the same token.
 #
 # Pipeline:
 #   1. Test gate  — backend pytest + frontend vitest must pass.
-#   2. Deploy     — AppSail via Catalyst CLI (token auth).
+#   2. Deploy     — AppSail + Web Client via Catalyst CLI (token auth).
 #   3. Smoke test — scripts/smoke_test.py against the live backend URL.
 #   4. Promote    — tag last-good-deploy on success.
 #      Revert     — check out last-good-deploy tag and redeploy on failure.
 #
 # Required GitHub repository secrets (Settings → Secrets → Actions):
-#   CATALYST_TOKEN  — from `catalyst token:generate` (never expires until revoked)
-#   ENV_FILE        — full contents of the backend .env
+#   CATALYST_CLI_TOKEN  — from `catalyst token:generate`. This is the CLI DEPLOY
+#                         token (long-lived until revoked). It is NOT the runtime
+#                         OAuth access token the backend uses to call Catalyst
+#                         APIs — that one is auto-refreshed in-app from the
+#                         refresh credentials in .env (see catalyst_token.py).
+#   ENV_FILE            — full contents of the backend .env
 
 on:
   push:
@@ -57,8 +61,8 @@ jobs:
           npm test
           VITE_API_BASE_URL=${{ env.BACKEND_URL }} npm run build
 
-  deploy-backend:
-    name: Deploy backend + smoke test
+  deploy:
+    name: Deploy backend + frontend + smoke test
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -71,19 +75,35 @@ jobs:
         with:
           python-version: "3.10"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Install Catalyst CLI
         run: npm install -g zcatalyst-cli
 
       - name: Restore .env from secret
         run: printf '%s' "${{ secrets.ENV_FILE }}" > .env
 
-      - name: Generate app-config.json + bundle deps + deploy
+      - name: Build frontend into client-package/
+        run: |
+          cd frontend
+          npm ci
+          VITE_API_BASE_URL="$BACKEND_URL" npm run build
+          cd ..
+          # Refresh client-package/ contents, keeping its client-package.json.
+          find client-package -mindepth 1 ! -name 'client-package.json' -delete
+          cp -r frontend/dist/. client-package/
+
+      - name: Generate app-config.json + bundle deps + deploy (backend + client)
         env:
-          CATALYST_TOKEN: ${{ secrets.CATALYST_TOKEN }}
+          CATALYST_CLI_TOKEN: ${{ secrets.CATALYST_CLI_TOKEN }}
         run: |
           python3 scripts/gen_app_config.py
           python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
-          catalyst deploy --only appsail --ignore-scripts --token "$CATALYST_TOKEN"
+          catalyst deploy --only appsail,client --ignore-scripts --token "$CATALYST_CLI_TOKEN"
 
       - name: Wait for AppSail to come up
         run: sleep 45
@@ -102,14 +122,17 @@ jobs:
       - name: Auto-revert to last-good-deploy on failure
         if: steps.smoke.outcome == 'failure'
         env:
-          CATALYST_TOKEN: ${{ secrets.CATALYST_TOKEN }}
+          CATALYST_CLI_TOKEN: ${{ secrets.CATALYST_CLI_TOKEN }}
         run: |
           echo "::error::Smoke test failed — rolling back to last-good-deploy."
           if git rev-parse last-good-deploy >/dev/null 2>&1; then
-            git checkout last-good-deploy -- backend/ scripts/ requirements.txt .env 2>/dev/null || true
+            git checkout last-good-deploy -- backend/ frontend/ client-package/ scripts/ requirements.txt .env 2>/dev/null || true
+            cd frontend && npm ci && VITE_API_BASE_URL="$BACKEND_URL" npm run build && cd ..
+            find client-package -mindepth 1 ! -name 'client-package.json' -delete
+            cp -r frontend/dist/. client-package/
             python3 scripts/gen_app_config.py
             python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
-            catalyst deploy --only appsail --ignore-scripts --token "$CATALYST_TOKEN"
+            catalyst deploy --only appsail,client --ignore-scripts --token "$CATALYST_CLI_TOKEN"
             echo "Rolled back successfully."
           else
             echo "::warning::No last-good-deploy tag yet — cannot auto-revert."
