@@ -193,6 +193,23 @@ reinstalls into `backend/` on the next deploy.
 > generator's mapping dicts, or it won't exist on AppSail. The smoke test now
 > guards this.
 
+### Station rate limiter — Cache segment
+
+The station-wide rate limiter (see README → Rate Limiting) uses a Catalyst
+**Cache** segment to converge request counts across AppSail instances. One-time
+setup:
+
+1. In the Catalyst console, go to **Cache → Segments** and create a segment
+   (any name). Copy its numeric **Segment ID**.
+2. Put it in `.env` as `CACHE_SEGMENT_ID=<id>` (and `CACHE_BASE_URL` is already
+   set). Both are mapped in `_OPTIONAL_ENV_VAR_SOURCES`.
+3. `./deploy.sh backend`.
+
+If `CACHE_SEGMENT_ID` is left blank the limiter still enforces caps
+**per-instance** (in-memory) and fails OPEN — it just won't share counts across
+instances. With a single live instance that's still correct; configure the
+segment before scaling out.
+
 ### Changing the frontend↔backend URL
 - If the **backend URL** changes: update `DEFAULT_BACKEND_URL` in `deploy.sh`
   (or export `VITE_API_BASE_URL`), rebuild + redeploy the frontend, and update

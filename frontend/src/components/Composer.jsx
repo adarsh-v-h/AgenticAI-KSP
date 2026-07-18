@@ -47,9 +47,12 @@ export default function Composer({
   onStop,
   disabled,
   statusText,
+  rateLimitInfo,
 }) {
   const textareaRef = useRef(null)
-  const canSend = !disabled && value.trim()
+  const isRateLimited = Boolean(rateLimitInfo)
+  const inputDisabled = disabled || isRateLimited
+  const canSend = !inputDisabled && value.trim()
   const { lang } = useLang()
 
   // Append a voice transcript into the composer instead of auto-sending, so the
@@ -81,6 +84,22 @@ export default function Composer({
   return (
     <div className="composer-area">
       <div className="composer-inner">
+        {/* Station-wide rate limit reached — tell the officer what happened */}
+        {isRateLimited && (
+          <p
+            role="alert"
+            style={{
+              fontSize: 12,
+              color: 'var(--text-danger, #c0392b)',
+              marginBottom: 6,
+              paddingLeft: 4,
+            }}
+          >
+            {rateLimitInfo.detail ||
+              'Your station has reached its shared request limit for this 6-hour window.'}
+          </p>
+        )}
+
         {/* Status text while the pipeline runs */}
         {statusText && (
           <p
@@ -99,11 +118,15 @@ export default function Composer({
           <textarea
             ref={textareaRef}
             className="composer-textarea"
-            placeholder="Ask about cases, accused, officers, evidence..."
+            placeholder={
+              isRateLimited
+                ? 'Station request limit reached — try again after the window resets.'
+                : 'Ask about cases, accused, officers, evidence...'
+            }
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={disabled}
+            disabled={inputDisabled}
             rows={1}
           />
 
@@ -114,7 +137,7 @@ export default function Composer({
                 className="composer-action-btn not-yet"
                 title="Attach report (coming soon)"
                 onClick={() => {}}
-                disabled={disabled}
+                disabled={inputDisabled}
                 type="button"
               >
                 <IconPaperclip size={18} />
@@ -124,7 +147,7 @@ export default function Composer({
               <VoiceInput
                 onTranscript={handleVoiceTranscript}
                 language={lang}
-                disabled={disabled}
+                disabled={inputDisabled}
               />
             </div>
 

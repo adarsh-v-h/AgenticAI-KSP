@@ -22,6 +22,7 @@ from routers.analytics import router as analytics_router
 from routers.decision_support import router as decision_support_router
 from routers.profiling import router as profiling_router
 from conversation.history import init_nosql_table
+from pipeline.rate_limiter import start_rate_limiter, stop_rate_limiter
 
 # CONTRACT
 # takes:  app (FastAPI) — the FastAPI application instance
@@ -53,12 +54,25 @@ async def lifespan(app: FastAPI):
         await init_nosql_table()
     except Exception as e:
         print(f"WARNING: NoSQL init failed (history will use in-memory store): {e}", file=sys.stderr)
+
+    # 5. Start the station rate-limiter background sync loop. It flushes local
+    # request counts to Catalyst Cache and refreshes per-station caps from
+    # MySQL every ~30s. Failure here must not crash startup — the limiter fails
+    # OPEN if it can't run.
+    try:
+        start_rate_limiter()
+    except Exception as e:
+        print(f"WARNING: rate limiter failed to start (rate limiting disabled): {e}", file=sys.stderr)
     # This is the dividing line between startup and shutdown.
     # Everything before yield runs when the app starts.
     yield
     # Everything after yield runs when the app stops.
 
     # â”€â”€ SHUTDOWN â”€â”€
+    try:
+        await stop_rate_limiter()
+    except Exception as e:
+        print(f"WARNING: rate limiter shutdown error: {e}", file=sys.stderr)
     await close_pool()
 
 
@@ -129,6 +143,83 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(_SecurityHeadersMiddleware)
+
+
+# Station-wide rate limiting.
+#
+# Scoped per police-station (Unit.UnitID), NOT per-officer. The station id is
+# read from the signed JWT — never from the request body/params — so a crafted
+# request can't drain another station's budget. The check itself is a pure
+# in-memory dict lookup (zero network I/O on the request path); a background
+# task (see pipeline/rate_limiter) periodically converges counts across
+# instances via Catalyst Cache and refreshes caps from MySQL.
+#
+# Applies to /api/* only, and skips the endpoints an officer must reach to get
+# or refresh a token / check health.
+from starlette.responses import JSONResponse
+from pipeline.rate_limiter import check_and_increment, WINDOW_SECONDS
+from auth.simple_auth import ALGORITHM
+from jose import jwt, JWTError
+
+# Paths under /api that must never be rate limited (auth + health).
+_RATE_LIMIT_EXEMPT = {"/api/auth/login", "/api/health"}
+
+
+# CONTRACT
+# takes:  request (Request) — the incoming HTTP request
+# returns: (tuple[int | None, str | None]) — (unit_id, unit_name) from the JWT, or
+#          (None, None) when there is no valid token / no unit claim
+# raises:  nothing (any decode failure → (None, None); auth layer enforces real auth)
+def _station_from_request(request) -> tuple:
+    token = None
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth and auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    if not token:
+        token = request.query_params.get("token")  # SSE EventSource fallback
+    if not token:
+        return None, None
+    try:
+        payload = jwt.decode(token, get("APP_SECRET_KEY"), algorithms=[ALGORITHM])
+    except (JWTError, Exception):  # noqa: BLE001 — bad token → not our job to 401 here
+        return None, None
+    return payload.get("unit_id"), payload.get("unit_name")
+
+
+class _StationRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if not path.startswith("/api/") or path in _RATE_LIMIT_EXEMPT:
+            return await call_next(request)
+
+        unit_id, unit_name = _station_from_request(request)
+        result = check_and_increment(unit_id)
+        if not result.allowed:
+            body = {
+                "error": "rate_limit_exceeded",
+                "station": unit_name or f"Unit {result.unit_id}",
+                "detail": (
+                    f"Your station ({unit_name or 'your unit'}) has reached its shared "
+                    f"request limit of {result.cap} for the current 6-hour window "
+                    f"({result.used} used). Access resumes automatically when the "
+                    "window resets."
+                ),
+                "unit_id": result.unit_id,
+                "limit": result.cap,
+                "used": result.used,
+                "window_seconds": WINDOW_SECONDS,
+                "window_reset_at": result.reset_at,
+                "retry_after_seconds": result.retry_after,
+            }
+            return JSONResponse(
+                status_code=429,
+                content=body,
+                headers={"Retry-After": str(result.retry_after)},
+            )
+        return await call_next(request)
+
+
+app.add_middleware(_StationRateLimitMiddleware)
 
 app.include_router(auth_router)
 app.include_router(chat_router)
