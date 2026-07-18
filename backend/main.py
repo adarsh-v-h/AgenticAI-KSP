@@ -71,31 +71,31 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS — only allow the origin from env, never wildcard.
+# CORS — always-on, never wildcard.
 #
-# On Catalyst AppSail, the platform proxy injects its own origin-aware
-# Access-Control-Allow-Origin header for the linked web-client origin. If we
-# ALSO add CORSMiddleware there, the browser receives TWO
-# Access-Control-Allow-Origin headers and rejects the response (surfacing as
-# "Cannot reach the server" in the UI). So in production we rely on Catalyst's
-# proxy for CORS and do NOT add our own middleware.
+# We use our own CORSMiddleware unconditionally. Catalyst's AppSail proxy may
+# also inject Access-Control-Allow-Origin for origins it recognises (the old
+# Web Client Hosting domain), which would cause a duplicate header and a browser
+# block. The fix is to tell FastAPI to allow BOTH the current ALLOWED_ORIGINS
+# value AND the old Web Client domain so our middleware owns the header and the
+# proxy either matches or stays silent.
 #
-# In local/dev the browser talks to the backend through Vite's dev proxy
-# (same-origin), so CORS is not strictly needed either — but we keep the
-# middleware for anyone hitting the backend directly during development.
+# For the Slate frontend (https://agenticai-ksp-qxpvwopj.onslate.in) Catalyst's
+# proxy adds nothing — our middleware is the only CORS source, so there's no
+# duplication problem.
+_allowed_origins = []
 try:
-    _app_env = get("APP_ENV")
+    _allowed_origins.append(get("ALLOWED_ORIGINS"))
 except Exception:
-    _app_env = "development"
+    pass
 
-if _app_env != "production":
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[get("ALLOWED_ORIGINS")],
-        allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 # Security response headers — defense-in-depth for clickjacking, MIME sniffing, referrer leaks

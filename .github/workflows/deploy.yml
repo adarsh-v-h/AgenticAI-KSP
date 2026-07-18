@@ -1,36 +1,31 @@
-name: Deploy (Catalyst) with smoke test + auto-revert
+name: Deploy backend + smoke test (auto-revert on failure)
 
-# Auto-deploys to the shared Catalyst deployment when main changes.
+# Deploys the backend (AppSail) to Catalyst on push to main.
+# The FRONTEND is handled automatically by Catalyst Slate (GitHub Auto Deploy
+# is ON — Slate rebuilds and redeploys on every push to main with no CLI needed).
 #
-# Flow:
-#   1. Run backend + frontend tests (hard gate — no deploy if they fail).
-#   2. Deploy backend (AppSail) and frontend (Web Client) to Catalyst.
-#   3. Run the LIVE smoke test against the deployment (catches env/CORS/auth
-#      bugs that unit tests can't — e.g. the ZIA_TTS_URL voice 502).
-#   4. If the smoke test PASSES: tag this commit as `last-good-deploy`.
-#      If it FAILS: check out the previous `last-good-deploy` tag, redeploy it,
-#      and fail the workflow so the team is alerted. The live deployment ends
-#      up back on the last known-good version automatically.
+# Pipeline:
+#   1. Test gate  — backend pytest + frontend vitest must pass.
+#   2. Deploy     — AppSail via Catalyst CLI (token auth).
+#   3. Smoke test — scripts/smoke_test.py against the live backend URL.
+#   4. Promote    — tag last-good-deploy on success.
+#      Revert     — check out last-good-deploy tag and redeploy on failure.
 #
-# Required GitHub repository secrets (Settings → Secrets and variables → Actions):
-#   CATALYST_TOKEN   — from `catalyst token:generate` (never expires until revoked)
-#   ENV_FILE         — full contents of the backend .env (secrets live here)
-#
-# Manual trigger is also allowed via the "Run workflow" button.
+# Required GitHub repository secrets (Settings → Secrets → Actions):
+#   CATALYST_TOKEN  — from `catalyst token:generate` (never expires until revoked)
+#   ENV_FILE        — full contents of the backend .env
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Prevent overlapping deploys racing each other onto the same environment.
 concurrency:
   group: catalyst-deploy
   cancel-in-progress: false
 
 env:
   BACKEND_URL: https://crime-intel-backend-50043099694.development.catalystappsail.in
-  FRONTEND_URL: https://datathon-60074122671.development.catalystserverless.in
 
 jobs:
   test:
@@ -51,18 +46,19 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Frontend install + tests
+      - name: Frontend tests + build verification
         working-directory: frontend
         run: |
           npm ci
           npm test
+          VITE_API_BASE_URL=${{ env.BACKEND_URL }} npm run build
 
-  deploy:
-    name: Deploy + smoke test + auto-revert
+  deploy-backend:
+    name: Deploy backend + smoke test
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (full history so we can revert to a tag)
+      - name: Checkout (full history for revert)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -71,48 +67,50 @@ jobs:
         with:
           python-version: "3.10"
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install Catalyst CLI
         run: npm install -g zcatalyst-cli
 
       - name: Restore .env from secret
         run: printf '%s' "${{ secrets.ENV_FILE }}" > .env
 
-      - name: Deploy current commit
+      - name: Generate app-config.json + bundle deps + deploy
         env:
           CATALYST_TOKEN: ${{ secrets.CATALYST_TOKEN }}
-        run: bash .github/scripts/ci_deploy.sh
+        run: |
+          python3 scripts/gen_app_config.py
+          python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
+          catalyst deploy --only appsail --ignore-scripts --token "$CATALYST_TOKEN"
 
-      - name: Smoke test the live deployment
+      - name: Wait for AppSail to come up
+        run: sleep 45
+
+      - name: Smoke test live deployment
         id: smoke
         continue-on-error: true
         run: python3 scripts/smoke_test.py --base "$BACKEND_URL"
 
-      # ── Success path: record this commit as the last known-good deploy ──
-      - name: Tag last-good-deploy
+      - name: Tag last-good-deploy on success
         if: steps.smoke.outcome == 'success'
         run: |
           git tag -f last-good-deploy
           git push -f origin last-good-deploy
 
-      # ── Failure path: roll the live deployment back to last-good-deploy ──
-      - name: Roll back to last known-good deploy
+      - name: Auto-revert to last-good-deploy on failure
         if: steps.smoke.outcome == 'failure'
         env:
           CATALYST_TOKEN: ${{ secrets.CATALYST_TOKEN }}
         run: |
           echo "::error::Smoke test failed — rolling back to last-good-deploy."
           if git rev-parse last-good-deploy >/dev/null 2>&1; then
-            git checkout last-good-deploy -- .
-            bash .github/scripts/ci_deploy.sh
-            echo "Rolled back and redeployed the last known-good version."
+            git checkout last-good-deploy -- backend/ scripts/ requirements.txt .env 2>/dev/null || true
+            python3 scripts/gen_app_config.py
+            python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
+            catalyst deploy --only appsail --ignore-scripts --token "$CATALYST_TOKEN"
+            echo "Rolled back successfully."
           else
-            echo "::warning::No last-good-deploy tag exists yet — cannot auto-revert."
+            echo "::warning::No last-good-deploy tag yet — cannot auto-revert."
           fi
 
-      - name: Fail the run if smoke test failed
+      - name: Fail run if smoke test failed
         if: steps.smoke.outcome == 'failure'
         run: exit 1
