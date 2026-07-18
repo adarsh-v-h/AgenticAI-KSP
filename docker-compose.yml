@@ -1,0 +1,48 @@
+# Local development environment.
+# Run: docker compose up
+# Tests: docker compose run --rm backend-test
+#
+# This does NOT affect the Catalyst deployment (AppSail + Slate handle that).
+# This is purely for local dev so every contributor has the same Python/Node
+# versions and deps without installing anything except Docker.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - ALLOWED_ORIGINS=http://localhost:5173
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+  # One-shot test runner. Usage: docker compose run --rm backend-test
+  backend-test:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - ./requirements.txt:/requirements-test.txt
+    command: sh -c "pip install -q hypothesis && python -m pytest /app/tests/ -q"
+    profiles:
+      - test
