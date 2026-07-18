@@ -3,7 +3,6 @@ import os
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 # Ensure the backend directory is in the import path
 backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -71,31 +70,48 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS — always-on, never wildcard.
+# CORS — allow the configured frontend origin(s), never wildcard.
 #
-# We use our own CORSMiddleware unconditionally. Catalyst's AppSail proxy may
-# also inject Access-Control-Allow-Origin for origins it recognises (the old
-# Web Client Hosting domain), which would cause a duplicate header and a browser
-# block. The fix is to tell FastAPI to allow BOTH the current ALLOWED_ORIGINS
-# value AND the old Web Client domain so our middleware owns the header and the
-# proxy either matches or stays silent.
+# IMPORTANT: Catalyst's AppSail proxy (ZGS) answers CORS preflight OPTIONS
+# requests itself and injects Access-Control-Allow-Origin ONLY for the project's
+# own Web Client Hosting domain (*.catalystserverless.in). It does NOT do this
+# for external domains like Catalyst Slate (*.onslate.in), and it intercepts
+# OPTIONS before our app sees them — so app-level CORS cannot help a Slate
+# frontend. The frontend must therefore be served from this project's Web Client
+# Hosting so the proxy handles CORS natively.
 #
-# For the Slate frontend (https://agenticai-ksp-qxpvwopj.onslate.in) Catalyst's
-# proxy adds nothing — our middleware is the only CORS source, so there's no
-# duplication problem.
-_allowed_origins = []
+# We still register CORSMiddleware for local dev (Vite dev server hitting the
+# backend directly) and as a belt-and-braces layer for the actual (non-OPTIONS)
+# responses.
+from fastapi.middleware.cors import CORSMiddleware
+
+_allowed_origins = ["http://localhost:5173"]
 try:
-    _allowed_origins.append(get("ALLOWED_ORIGINS"))
+    extra = get("ALLOWED_ORIGINS")
+    for o in extra.split(","):
+        o = o.strip()
+        if o and o not in _allowed_origins:
+            _allowed_origins.append(o)
 except Exception:
     pass
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
-)
+# In production on Catalyst, the proxy already adds the CORS header for the Web
+# Client Hosting origin. Adding our own CORSMiddleware there would emit a SECOND
+# Access-Control-Allow-Origin header and the browser would reject the response.
+# So enable CORSMiddleware only outside production (local dev / direct access).
+try:
+    _is_production = get("APP_ENV") == "production"
+except Exception:
+    _is_production = False
+
+if not _is_production:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
 
 # Security response headers — defense-in-depth for clickjacking, MIME sniffing, referrer leaks
