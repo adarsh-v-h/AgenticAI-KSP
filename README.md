@@ -60,25 +60,30 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 
 ```
 ├── .env.example                 # Environment variable template
-├── .env                         # Runtime config + secrets (not committed)
-├── start.sh                     # One-command local start (Linux/macOS)
-├── start.bat                    # One-command local start (Windows)
-├── deploy.sh                    # One-command Catalyst deploy (backend/frontend/both)
+├── .env                         # Runtime config + secrets (private repo, committed)
+├── docker-compose.yml           # Local dev: backend + frontend + test runner
+├── start.sh                     # One-command local start (Linux/macOS, no Docker)
+├── start.bat                    # One-command local start (Windows, no Docker)
+├── deploy.sh                    # One-command Catalyst deploy (backend only now)
 ├── catalyst.json                # Catalyst project resource map (AppSail + client)
 ├── requirements.txt             # Backend deps (also used for local tests)
 ├── pytest.ini                   # Test configuration
 ├── LICENSE                      # AGPL v3
 │
+├── docker/
+│   ├── backend.Dockerfile       # Python 3.10 dev container (matches AppSail)
+│   └── frontend.Dockerfile      # Node 20 dev container (matches Slate/CI)
+│
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml               # Tests + build on every push/PR
-│   │   └── deploy.yml           # Auto deploy → smoke test → auto-revert on main
+│   │   └── deploy.yml           # Auto deploy backend → smoke test → auto-revert
 │   └── scripts/
 │       └── ci_deploy.sh         # Non-interactive Catalyst deploy used by CI
 │
 ├── scripts/
 │   ├── gen_app_config.py        # Generates backend/app-config.json from .env
-│   └── smoke_test.py            # Live post-deploy smoke test (also the CI gate)
+│   └── smoke_test.py            # Live post-deploy smoke test (29 endpoints)
 │
 ├── client-package/              # Frontend build output for Web Client Hosting (generated)
 │   └── client-package.json      # Web Client Hosting config
@@ -361,7 +366,25 @@ npm run dev
 
 Frontend at `http://localhost:5173`. Vite proxies `/api/*` to the backend.
 
-### Quick Start (One Command)
+### Quick Start — Docker (recommended for teammates)
+
+No Python/Node install needed. Just Docker:
+
+```bash
+docker compose up
+```
+
+Backend at `http://localhost:8000`, frontend at `http://localhost:5173`.  
+Both have hot-reload — edit code, save, see changes.
+
+Run tests:
+```bash
+docker compose run --rm backend-test
+```
+
+Uses Python 3.10 + Node 20 (same versions as Catalyst deployment).
+
+### Quick Start — Native (without Docker)
 
 Instead of steps 9-10 separately, use the provided start scripts that run tests, verify DB, and launch both servers:
 
