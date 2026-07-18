@@ -1,8 +1,12 @@
 name: Deploy backend + smoke test (auto-revert on failure)
 
-# Deploys the backend (AppSail) to Catalyst on push to main.
-# The FRONTEND is handled automatically by Catalyst Slate (GitHub Auto Deploy
-# is ON — Slate rebuilds and redeploys on every push to main with no CLI needed).
+# Deploys the BACKEND (AppSail) to Catalyst on push to main.
+#
+# The FRONTEND is NOT auto-deployed here. It is served from Catalyst Web Client
+# Hosting (Slate was abandoned earlier because its *.onslate.in origin can't get
+# a CORS header from the AppSail proxy). After a frontend change you must rebuild
+# and republish the web client manually — see DEPLOYMENT.md ("Web Client
+# Hosting") for the client-package/ steps.
 #
 # Pipeline:
 #   1. Test gate  — backend pytest + frontend vitest must pass.
