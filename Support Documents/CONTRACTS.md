@@ -1,6 +1,6 @@
 # Function Contracts
 
-241 functions across 54 files.
+247 functions across 63 backend files + 35 frontend files.
 
 ---
 
@@ -355,6 +355,11 @@
 ### _format_table
 - **Takes:** name (str) — table name to format,; meta (dict) — table metadata with description and columns,; max_col_chars (int | None) — optional max length to truncate column descriptions
 - **Returns:** (str) — formatted multi-line table block for LLM prompt injection
+- **Raises:** nothing
+
+### _question_similarity
+- **Takes:** q1 (str) — first question string, q2 (str) — second question string
+- **Returns:** (float) — Jaccard similarity score between 0.0 and 1.0
 - **Raises:** nothing
 
 ### get_few_shot_examples
@@ -938,15 +943,20 @@
 - **Returns:** (bool) — True if session exists and is owned by this officer, False if session does not exist yet
 - **Raises:** HTTPException — when session exists but belongs to another officer (404)
 
+### create_chat_session
+- **Takes:** officer (dict) — authenticated officer from JWT (via get_current_officer dependency)
+- **Returns:** (SessionMetadata) — newly created session metadata with session_id, title, created_at, updated_at, message_count, is_active
+- **Raises:** never (writes to both NoSQL and MySQL; NoSQL write failures are logged but do not fail the request)
+
 ### _log
 - **Takes:** msg (str) — message to log
 - **Returns:** nothing
 - **Raises:** nothing
 
 ### _persist_turn
-- **Takes:** session_id (str) — session to persist turn to, officer (dict) — authenticated officer, question (str) — user question, result (PipelineResponse) — pipeline output, session_exists (bool) — whether session row already exists
+- **Takes:** session_id (str) — session to persist turn to, officer (dict) — authenticated officer, question (str) — user question, result (PipelineResponse) — pipeline output, session_exists (bool) — whether session row already exists in MySQL
 - **Returns:** nothing
-- **Raises:** nothing (never raises, failures are logged)
+- **Raises:** nothing (never raises; writes to both MySQL chat_sessions and NoSQL session_metadata on first turn, failures are logged)
 
 ### _sse
 - **Takes:** event (dict) — SSE event payload to serialize
@@ -1450,15 +1460,6 @@
 ### state_to_prompt_block
 - **Takes:** state (dict) — structured state dict from extract_state()
 - **Returns:** (str) — compact multi-line context block for LLM prompt injection, empty string if no state
-- **Raises:** nothing
-
----
-
-## backend/db/schema_catalog.py (additions)
-
-### _question_similarity
-- **Takes:** q1 (str) — first question string, q2 (str) — second question string
-- **Returns:** (float) — Jaccard similarity score between 0.0 and 1.0
 - **Raises:** nothing
 
 ---
