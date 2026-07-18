@@ -68,6 +68,14 @@ _OPTIONAL_ENV_VAR_SOURCES = {
     "MODEL_VISION": "MODEL_VISION",
     "KSP_CATALYST_PROJECT_ID": "CATALYST_PROJECT_ID",
     "KSP_CATALYST_BASE_URL": "CATALYST_BASE_URL",
+    # OAuth refresh credentials so the deployed backend can auto-refresh its
+    # own Catalyst access token (no more ~1h token death). CATALYST_* is renamed
+    # to KSP_CATALYST_* because Catalyst reserves the CATALYST_ env prefix; the
+    # settings.get() helper resolves the KSP_ fallback.
+    "KSP_CATALYST_CLIENT_ID": "CATALYST_CLIENT_ID",
+    "KSP_CATALYST_CLIENT_SECRET": "CATALYST_CLIENT_SECRET",
+    "KSP_CATALYST_REFRESH_TOKEN": "CATALYST_REFRESH_TOKEN",
+    "KSP_CATALYST_ACCOUNTS_URL": "CATALYST_ACCOUNTS_URL",
 }
 
 

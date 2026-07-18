@@ -437,12 +437,15 @@ Pushing to `main` triggers GitHub Actions to **test → deploy → smoke-test th
 live deployment → auto-revert on failure**:
 
 - `.github/workflows/ci.yml` — tests + build check on every push/PR.
-- `.github/workflows/deploy.yml` — on `main`: runs tests, deploys backend +
-  frontend to Catalyst, runs `scripts/smoke_test.py` against the live URL, tags
-  `last-good-deploy` on success, or rolls back to the last-good tag on failure.
+- `.github/workflows/deploy.yml` — on `main`: runs tests, deploys **backend
+  (AppSail) + frontend (Web Client Hosting)** to Catalyst, runs
+  `scripts/smoke_test.py` against the live URL, tags `last-good-deploy` on
+  success, or rolls back to the last-good tag on failure.
 
-One-time setup: add repo secrets `CATALYST_TOKEN` (from `catalyst
-token:generate`) and `ENV_FILE` (contents of `.env`). See DEPLOYMENT.md §8.
+One-time setup: add repo secrets `CATALYST_CLI_TOKEN` (the CLI deploy token from
+`catalyst token:generate` — distinct from the runtime OAuth token, which the
+backend now auto-refreshes itself) and `ENV_FILE` (contents of `.env`). See
+DEPLOYMENT.md §8.
 
 Run the smoke test manually anytime: `python3 scripts/smoke_test.py`
 

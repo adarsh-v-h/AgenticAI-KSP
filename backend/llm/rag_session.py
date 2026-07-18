@@ -171,7 +171,7 @@ class RagSession:
     # CONTRACT
     # takes:  query (str) — the user's raw question
     # returns: (dict) — response dict with grounded, response, sources, resolved_query, suggested_follow_ups
-    # raises:  RuntimeError — when CATALYST_API_TOKEN is not set,
+    # raises:  RuntimeError — when no Catalyst access token can be obtained,
     #           httpx.HTTPStatusError — when the RAG API returns a non-2xx status
     async def ask(self, query: str) -> dict:
         resolved_query = self._resolve_references(query)

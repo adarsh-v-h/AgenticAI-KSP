@@ -23,6 +23,7 @@ from routers.decision_support import router as decision_support_router
 from routers.profiling import router as profiling_router
 from conversation.history import init_nosql_table
 from pipeline.rate_limiter import start_rate_limiter, stop_rate_limiter
+from config.catalyst_token import get_access_token
 
 # CONTRACT
 # takes:  app (FastAPI) — the FastAPI application instance
@@ -33,6 +34,15 @@ async def lifespan(app: FastAPI):
     # â”€â”€ STARTUP â”€â”€
     # 1. Validate all env vars â€” crash loudly if anything missing
     validate_settings()
+
+    # 1b. Warm up the Catalyst OAuth token so the first real request doesn't pay
+    # the refresh latency, and so a bad refresh config surfaces at startup. The
+    # token manager auto-refreshes thereafter (tokens live ~1h). Non-fatal:
+    # falls back to the static CATALYST_API_TOKEN.
+    try:
+        await get_access_token()
+    except Exception as e:
+        print(f"WARNING: Catalyst token warm-up failed (will retry on demand): {e}", file=sys.stderr)
 
     # 2. Create DB connection pool
     await create_pool()

@@ -205,7 +205,13 @@ class TestNoSQLURLConstruction:
         assert _get_base_project_url() == "https://api.catalyst.zoho.in/baas/v1/project/123"
 
     def test_headers(self, nosql_env):
-        headers = _nosql_headers()
+        # _nosql_headers() is async now (it awaits the token manager). Force
+        # static-only mode (no refresh creds) so it uses CATALYST_API_TOKEN.
+        from unittest.mock import patch
+        import config.catalyst_token as ct
+        ct._reset_for_tests()
+        with patch.object(ct, "_refresh_credentials", return_value=None):
+            headers = asyncio.run(_nosql_headers())
         assert headers["Authorization"] == "Zoho-oauthtoken test-token-abc"
         assert headers["CATALYST-ORG"] == "org-789"
 

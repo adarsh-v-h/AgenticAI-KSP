@@ -52,6 +52,22 @@
 
 ---
 
+## backend/config/catalyst_token.py
+
+Catalyst OAuth access-token manager. All Catalyst clients (LLM, NoSQL, Cache, RAG, voice) get their bearer token from here instead of reading the static `CATALYST_API_TOKEN`. Auto-refreshes the ~1h access token from the (non-expiring) refresh token; caches it in memory; fails safe to the cached/static token.
+
+### get_access_token
+- **Takes:** nothing
+- **Returns:** (str) — a valid Catalyst OAuth access token, refreshing transparently when the cached one is near expiry
+- **Raises:** RuntimeError — only when there is no cached token, no refresh credentials, AND no static `CATALYST_API_TOKEN`
+
+### invalidate
+- **Takes:** nothing
+- **Returns:** nothing (drops the cached token so the next `get_access_token()` re-mints one; call on a 401 from Catalyst)
+- **Raises:** nothing
+
+---
+
 ## backend/config/settings.py
 
 ### get

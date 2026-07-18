@@ -1,5 +1,6 @@
 import httpx
 from config.settings import get
+from config.catalyst_token import get_access_token
 
 class NoSQLError(Exception):
     """Raised when an operation on Catalyst NoSQL fails."""
@@ -18,10 +19,11 @@ def _get_base_project_url() -> str:
 # CONTRACT
 # takes:  nothing
 # returns: (dict) — authorization and content-type headers for Catalyst NoSQL API calls
-# raises:  ValueError — when required env vars are not set
-def _nosql_headers() -> dict:
+# raises:  ValueError — when required env vars are not set,
+#           RuntimeError — when no Catalyst access token can be obtained
+async def _nosql_headers() -> dict:
     return {
-        "Authorization": f"Zoho-oauthtoken {get('CATALYST_API_TOKEN')}",
+        "Authorization": f"Zoho-oauthtoken {await get_access_token()}",
         "Content-Type": "application/json",
         "CATALYST-ORG": get("CATALYST_ORG_ID"),
     }
@@ -97,7 +99,7 @@ async def get_document(table_name: str, document_id: str, timeout: float = 5.0, 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             url,
-            headers=_nosql_headers(),
+            headers=await _nosql_headers(),
             json=payload,
             timeout=timeout
         )
@@ -142,7 +144,7 @@ async def insert_document(table_name: str, document_id: str, document_data: dict
     async with httpx.AsyncClient() as client:
         response = await client.post(
             url,
-            headers=_nosql_headers(),
+            headers=await _nosql_headers(),
             json=payload,
             timeout=timeout
         )
@@ -179,7 +181,7 @@ async def update_document(table_name: str, document_id: str, updates: dict, time
     async with httpx.AsyncClient() as client:
         response = await client.put(
             url,
-            headers=_nosql_headers(),
+            headers=await _nosql_headers(),
             json=payload,
             timeout=timeout
         )
@@ -206,7 +208,7 @@ async def delete_document(table_name: str, document_id: str, timeout: float = 5.
         response = await client.request(
             "DELETE",
             url,
-            headers=_nosql_headers(),
+            headers=await _nosql_headers(),
             json=payload,
             timeout=timeout
         )
@@ -227,7 +229,7 @@ async def list_documents(table_name: str, timeout: float = 5.0) -> list[dict]:
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
-            headers=_nosql_headers(),
+            headers=await _nosql_headers(),
             timeout=timeout
         )
         if response.status_code == 200:

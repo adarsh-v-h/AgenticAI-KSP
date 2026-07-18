@@ -23,6 +23,7 @@ import sys
 import httpx
 
 from config.settings import get
+from config.catalyst_token import get_access_token
 
 
 class VoiceError(Exception):
@@ -46,10 +47,10 @@ def _log(msg: str) -> None:
 # CONTRACT
 # takes:  extra (dict | None) — additional headers to merge
 # returns: (dict) — HTTP headers with Catalyst OAuth token and org ID
-# raises:  nothing
-def _zia_headers(extra: dict | None = None) -> dict:
+# raises:  RuntimeError — when no Catalyst access token can be obtained
+async def _zia_headers(extra: dict | None = None) -> dict:
     headers = {
-        "Authorization": f"Zoho-oauthtoken {get('CATALYST_API_TOKEN')}",
+        "Authorization": f"Zoho-oauthtoken {await get_access_token()}",
         "CATALYST-ORG": get("CATALYST_ORG_ID"),
     }
     if extra:
@@ -121,7 +122,7 @@ async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                url, headers=_zia_headers(), files=files, data=data, timeout=20.0
+                url, headers=await _zia_headers(), files=files, data=data, timeout=20.0
             )
     except httpx.HTTPError as e:
         raise VoiceError(f"STT request failed: {e}") from e
@@ -179,7 +180,7 @@ async def translate_to_english(text: str, source_language: str = "kn") -> str:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
-                headers=_zia_headers({"Content-Type": "application/json"}),
+                headers=await _zia_headers({"Content-Type": "application/json"}),
                 json=payload,
                 timeout=10.0,
             )
@@ -300,7 +301,7 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
-                headers=_zia_headers({"Content-Type": "application/json"}),
+                headers=await _zia_headers({"Content-Type": "application/json"}),
                 json=payload,
                 timeout=20.0,
             )
