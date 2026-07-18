@@ -98,6 +98,55 @@ catalyst deploy --only client
 
 ---
 
+## 3a. Local development with Docker Compose
+
+For contributors who want a **local-only dev environment** without installing
+Python/Node directly, Docker Compose provides an isolated stack that mirrors
+production dependencies.
+
+### Quick start
+From the project root:
+```bash
+docker compose up --build
+```
+- **Backend** runs on `http://localhost:8000` (uvicorn `--reload` watches for changes)
+- **Frontend** runs on `http://localhost:5173` (Vite dev server with HMR)
+
+Both services read the shared `.env` directly, so they connect to the same RDS
+database and Catalyst project as the production deployment. Changes to code
+under `backend/` or `frontend/src/` are reflected live via volume mounts.
+
+### Running tests in-container
+```bash
+docker compose run --rm backend-test
+```
+This spins up a throwaway container with the backend code and runs the full
+pytest suite. Useful for validating changes before deploying.
+
+### Important notes
+- **Local-only.** Running `docker compose up` does NOT deploy or affect the
+  live AppSail/Web Client Hosting services. It's a parallel local dev
+  environment.
+- **Shares the `.env`.** The containers use the same RDS DB, Catalyst project,
+  and secrets as production — no separate local DB. Be mindful of writes if
+  multiple contributors run this simultaneously against a shared dev project.
+- **Rebuild after pulling changes.** If someone adds a Python or npm dependency,
+  rebuild the images to pick it up:
+  ```bash
+  docker compose up -d --build
+  ```
+
+### What's configured
+- **Services:** `backend` (FastAPI on port 8000), `frontend` (Vite dev server
+  on port 5173), `backend-test` (one-shot pytest runner, profile-gated).
+- **Dockerfiles:** `docker/backend.Dockerfile` (Python 3.10, installs
+  `requirements.txt`), `docker/frontend.Dockerfile` (Node 18, installs npm deps).
+- **No DB container.** The backend connects to the real RDS instance specified
+  in `.env`. This is deliberate — the production DB schema and seed data are
+  the source of truth.
+
+---
+
 ## 4. Making changes to the codebase and redeploying
 
 ### Backend code change (Python)
