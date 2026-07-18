@@ -91,6 +91,9 @@ export default function ChatWindow({ officer, onLogout }) {
   const [sessionError, setSessionError] = useState(null)
   const [sessionsError, setSessionsError] = useState(null)
   const [messagesError, setMessagesError] = useState(null)
+  // Station-wide rate limit. When set, the composer is disabled until the
+  // window resets (rateLimit.window_reset_at is epoch seconds).
+  const [rateLimit, setRateLimit] = useState(null)
 
   const [sessions, setSessions] = useState([])
   const [isLoadingSessions, setIsLoadingSessions] = useState(false)
@@ -195,6 +198,18 @@ export default function ChatWindow({ officer, onLogout }) {
     const timer = setTimeout(() => setSessionError(null), 5000)
     return () => clearTimeout(timer)
   }, [sessionError])
+
+  // Auto-clear the rate-limit block once the station's 6-hour window resets.
+  useEffect(() => {
+    if (!rateLimit?.window_reset_at) return
+    const msUntilReset = rateLimit.window_reset_at * 1000 - Date.now()
+    if (msUntilReset <= 0) {
+      setRateLimit(null)
+      return
+    }
+    const timer = setTimeout(() => setRateLimit(null), msUntilReset)
+    return () => clearTimeout(timer)
+  }, [rateLimit])
 
   useEffect(() => {
     if (!scrollRef.current) return
@@ -305,6 +320,9 @@ export default function ChatWindow({ officer, onLogout }) {
         onAuthExpired: () => {
           if (cancelRef.current) cancelRef.current()
           onLogout()
+        },
+        onRateLimited: (info) => {
+          setRateLimit(info || {})
         },
         onDone: () => {
           updateLastAssistant(() => ({ isStreaming: false }))
@@ -562,7 +580,9 @@ export default function ChatWindow({ officer, onLogout }) {
               onChange={setInputValue}
               onSend={handleSend}
               disabled={isStreaming}
-              statusText={statusText}            />
+              statusText={statusText}
+              rateLimitInfo={rateLimit}
+            />
           </div>
         ) : (
           <div className="chat-area">
@@ -625,7 +645,9 @@ export default function ChatWindow({ officer, onLogout }) {
               onChange={setInputValue}
               onSend={handleSend}
               disabled={isStreaming}
-              statusText={statusText}            />
+              statusText={statusText}
+              rateLimitInfo={rateLimit}
+            />
           </div>
         )}
       </main>

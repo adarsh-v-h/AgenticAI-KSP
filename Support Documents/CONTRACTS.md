@@ -26,8 +26,8 @@
 - **Raises:** nothing
 
 ### create_access_token
-- **Takes:** officer_id (int) — EmployeeID, badge_number (str) — KGID identifier, role (str) — employee role
-- **Returns:** (str) — signed JWT token with 24-hour expiry
+- **Takes:** officer_id (int) — EmployeeID, badge_number (str) — KGID identifier, role (str) — employee role, unit_id (int | None) — the officer's station Unit.UnitID, unit_name (str | None) — station display name
+- **Returns:** (str) — signed JWT token with 24-hour expiry, carrying unit_id/unit_name so the station rate limiter can derive the station from the signed token (never from client input)
 - **Raises:** nothing
 
 ### get_current_officer
@@ -259,6 +259,22 @@
 - **Takes:** message_id (int) — message row ID to look up, officer_id (int) — EmployeeID of the requesting officer
 - **Returns:** (dict | None) — evidence trail row scoped to the requesting officer, or None if not found/not owned/no trail
 - **Raises:** nothing (catches all exceptions, returns None on failure)
+
+---
+
+## backend/db/cache_client.py
+
+Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limiter's cross-instance count convergence. All calls are best-effort — callers fail OPEN on `CacheError`.
+
+### get_value
+- **Takes:** key (str) — cache key to read, timeout (float) — HTTP request timeout in seconds
+- **Returns:** (str | None) — the stored string value, or None if the key is absent
+- **Raises:** CacheError — on a non-success, non-empty HTTP response
+
+### put_value
+- **Takes:** key (str) — cache key, value (str) — value to store, expiry_in_hours (int) — TTL in hours (1..48), timeout (float) — HTTP timeout
+- **Returns:** (bool) — True on success
+- **Raises:** CacheError — on a non-success HTTP response
 
 ---
 
@@ -1463,3 +1479,32 @@
 - **Raises:** nothing
 
 ---
+
+---
+
+## backend/pipeline/rate_limiter.py
+
+Station-wide request rate limiting, scoped per police-station (`Unit.UnitID`), not per-officer. Cap = 25 × active officer headcount, over a fixed 6-hour tumbling window. The hot path is a pure in-memory check (zero I/O); a background async loop converges counts across AppSail instances via Catalyst Cache and refreshes caps from MySQL. Fails OPEN on any Cache/DB error.
+
+### check_and_increment
+- **Takes:** unit_id (int | None) — the officer's station id from the JWT
+- **Returns:** (RateLimitResult) — allow/deny plus counters (cap, used, window_start) for the response
+- **Raises:** nothing (pure in-memory; missing/unknown unit_id fails OPEN → allowed)
+
+### start_rate_limiter
+- **Takes:** nothing
+- **Returns:** nothing (spawns the background sync task; call once from the FastAPI lifespan)
+- **Raises:** nothing
+
+### stop_rate_limiter
+- **Takes:** nothing
+- **Returns:** nothing (signals the loop to stop, does a final flush, awaits shutdown)
+- **Raises:** nothing
+
+### RateLimitResult.reset_at
+- **Takes:** nothing
+- **Returns:** (int) — epoch seconds when the current window resets
+
+### RateLimitResult.retry_after
+- **Takes:** nothing
+- **Returns:** (int) — seconds until the window resets (>= 1), used for the Retry-After header

@@ -65,6 +65,24 @@ export function startChatStream(question, sessionId, callbacks = {}) {
       return
     }
 
+    if (response.status === 429) {
+      // Station-wide rate limit hit. Parse the informative body so the UI can
+      // tell the officer what happened and disable the composer until reset.
+      let info = {}
+      try {
+        info = await response.json()
+      } catch {
+        info = {}
+      }
+      callbacks.onRateLimited?.(info)
+      callbacks.onError?.(
+        info.detail ||
+          'Your station has reached its shared request limit. Please try again later.',
+      )
+      callbacks.onDone?.()
+      return
+    }
+
     if (!response.ok || !response.body) {
       callbacks.onError?.(
         `Server returned an unexpected error (HTTP ${response.status}).`,

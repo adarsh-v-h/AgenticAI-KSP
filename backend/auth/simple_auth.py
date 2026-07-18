@@ -24,12 +24,26 @@ _security = HTTPBearer(auto_error=False)
 
 
 # CONTRACT
-# takes:  officer_id (int) — EmployeeID, badge_number (str) — KGID identifier, role (str) — employee role
+# takes:  officer_id (int) — EmployeeID, badge_number (str) — KGID identifier, role (str) — employee role,
+#          unit_id (int | None) — the officer's station Unit.UnitID, unit_name (str | None) — station display name
 # returns: (str) — signed JWT token with 24-hour expiry
 # raises:  nothing
-def create_access_token(officer_id: int, badge_number: str, role: str) -> str:
+def create_access_token(
+    officer_id: int,
+    badge_number: str,
+    role: str,
+    unit_id: int | None = None,
+    unit_name: str | None = None,
+) -> str:
     """
-    Sign a JWT carrying EmployeeID (as officer_id), KGID (as badge_number), role, and a 24-hour expiry.
+    Sign a JWT carrying EmployeeID (as officer_id), KGID (as badge_number), role,
+    the officer's station (unit_id / unit_name), and a 24-hour expiry.
+
+    unit_id / unit_name are embedded here — and ONLY here — so the station-wide
+    rate limiter can derive the officer's station from the signed token rather
+    than trusting anything the client sends. Never read the station from the
+    request body/params.
+
     badge_number param name kept for compatibility with existing call sites -
     it now holds the value from Employee.KGID, not officers.badge_number.
     """
@@ -38,6 +52,8 @@ def create_access_token(officer_id: int, badge_number: str, role: str) -> str:
         "officer_id": officer_id,
         "badge_number": badge_number,
         "role": role,
+        "unit_id": unit_id,
+        "unit_name": unit_name,
         "exp": expire,
     }
     return jwt.encode(payload, get("APP_SECRET_KEY"), algorithm=ALGORITHM)
@@ -131,9 +147,11 @@ async def login(badge_number: str, password: str) -> dict:
         raise _unauthorized("Invalid badge number or password.")
 
     rows = await execute_query(
-        "SELECT e.EmployeeID, e.KGID, e.FirstName, e.role, r.RankName AS `rank` "
+        "SELECT e.EmployeeID, e.KGID, e.FirstName, e.role, e.UnitID, "
+        "       r.RankName AS `rank`, u.UnitName "
         "FROM Employee AS e "
         "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID "
+        "LEFT JOIN Unit AS u ON u.UnitID = e.UnitID "
         "WHERE e.KGID = %s AND e.is_active = TRUE",
         (badge_number,),
     )
@@ -145,7 +163,13 @@ async def login(badge_number: str, password: str) -> dict:
     if password != expected:
         raise _unauthorized("Invalid badge number or password.")
 
-    token = create_access_token(employee["EmployeeID"], employee["KGID"], employee["role"])
+    token = create_access_token(
+        employee["EmployeeID"],
+        employee["KGID"],
+        employee["role"],
+        unit_id=employee.get("UnitID"),
+        unit_name=employee.get("UnitName"),
+    )
     return {
         "access_token": token,
         "officer": {
@@ -153,6 +177,8 @@ async def login(badge_number: str, password: str) -> dict:
             "badge_number": employee["KGID"],
             "full_name": employee["FirstName"],
             "rank": employee["rank"] or "",
+            "unit_id": employee.get("UnitID"),
+            "unit_name": employee.get("UnitName") or "",
         },
     }
 

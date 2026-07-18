@@ -516,6 +516,52 @@ Password formula: `<KGID>123`
 
 ---
 
+## Rate Limiting
+
+Requests to `/api/*` are rate limited **per police-station**, not per-officer.
+Officers at the same station (`Unit.UnitID`) share one pool, so a busy station
+gets a proportionally bigger budget.
+
+- **Cap** = `25 × active officer headcount` at the station
+  (`SELECT COUNT(*) FROM Employee WHERE UnitID = ? AND is_active = TRUE`).
+- **Window** = fixed 6-hour tumbling window; the counter resets automatically at
+  the next window.
+- **Trust boundary** — the station is read from the signed JWT (`unit_id`
+  claim, embedded at login), **never** from the request body/params. A crafted
+  `unit_id` cannot drain another station's budget.
+- **Hot path** — a pure in-memory check (zero network I/O per request). A
+  background async task (~30s cadence) converges counts across AppSail instances
+  via Catalyst Cache and refreshes caps from MySQL.
+- **Fail-open** — if Catalyst Cache/MySQL is unreachable, the limiter keeps
+  serving off last-known state rather than blocking officers.
+- **When exceeded** — the API returns **HTTP 429** with a `Retry-After` header
+  and a JSON body telling the officer their station name, limit, used count, and
+  `window_reset_at`. The frontend disables the composer until the window resets.
+
+Exempt paths: `/api/auth/login`, `/api/health`, and any non-`/api/*` route.
+
+Setup: create a Cache segment in the Catalyst console (**Cache → Segments**) and
+put its numeric ID in `CACHE_SEGMENT_ID` in `.env`. Without it the limiter still
+works per-instance (in-memory) but won't converge counts across instances.
+
+429 response body shape:
+
+```json
+{
+  "error": "rate_limit_exceeded",
+  "station": "Koramangala PS",
+  "detail": "Your station (Koramangala PS) has reached its shared request limit of 250 for the current 6-hour window (250 used). Access resumes automatically when the window resets.",
+  "unit_id": 42,
+  "limit": 250,
+  "used": 250,
+  "window_seconds": 21600,
+  "window_reset_at": 1737369600,
+  "retry_after_seconds": 5400
+}
+```
+
+---
+
 ## Debug Tools
 
 ```bash
@@ -531,7 +577,7 @@ python backend/debug_tools.py all      # Run all checks
 
 ## Running Tests
 
-Backend — 99 tests total (68 unit + 16 pipeline/session + 15 property-based),
+Backend — 111 tests total (68 unit + 16 pipeline/session + 12 rate-limiter + 15 property-based),
 no network or DB required:
 
 ```bash
