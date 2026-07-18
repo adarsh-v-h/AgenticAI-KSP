@@ -32,7 +32,7 @@ _TEMPLATE_PATH = os.path.join(_ROOT, "backend", "app-config.template.json")
 _OUTPUT_PATH = os.path.join(_ROOT, "backend", "app-config.json")
 
 # Default production frontend origin used for CORS (ALLOWED_ORIGINS).
-_DEFAULT_ALLOWED_ORIGINS = "https://agenticai-ksp-qxpvwopj.onslate.in"
+_DEFAULT_ALLOWED_ORIGINS = "https://datathon-60074122671.development.catalystserverless.in"
 
 # REQUIRED AppSail env variable  ->  .env key it is sourced from.
 # Deploy fails if any of these are missing from .env.
