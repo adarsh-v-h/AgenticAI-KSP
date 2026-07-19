@@ -217,7 +217,7 @@ backend/
 
 | Table | Purpose | Key columns |
 |-------|---------|-------------|
-| `Employee` | Station employees / officers (replaces `officers`) | `EmployeeID` (PK), `KGID` (UNIQUE badge number), `FirstName`, `RankID` (FK→`Rank`), `role` (ENUM), `is_active` |
+| `Employee` | Station employees / officers (replaces `officers`) | `EmployeeID` (PK), `KGID` (UNIQUE badge number), `FirstName`, `RankID` (FK→`Rank`), `role` (ENUM), `is_active`, `password_hash` (bcrypt, added [10.25](#1025-password-hashing--login-brute-force-protection)) |
 | `CaseMaster` | Central case/FIR registry (replaces `fir_master`) | `CaseMasterID` (PK), `CrimeNo` (UNIQUE), `CrimeRegisteredDate`, `PolicePersonID` (FK→Employee), `PoliceStationID` (FK→Unit), `CaseStatusID` (FK→CaseStatusMaster), `CrimeMinorHeadID` (FK→CrimeSubHead), `BriefFacts` (TEXT) |
 | `ComplainantDetails` | Complainants who filed cases | `ComplainantID` (PK), `CaseMasterID` (FK→CaseMaster), `ComplainantName`, `GenderID` |
 | `Victim` | Victims linked to cases (replaces `victims`) | `VictimMasterID` (PK), `CaseMasterID` (FK→CaseMaster), `VictimName`, `AgeYear`, `GenderID`, `VictimPolice` (BIT) |
@@ -658,7 +658,7 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 | `verify_token(token) -> dict` | Decodes and verifies JWT. Returns payload dict. Raises HTTP 401 on any failure (expired, invalid signature, missing). |
 | `get_current_officer(credentials) -> dict` | **FastAPI dependency for header-based auth.** Extracts Bearer token from `Authorization` header. Returns decoded payload. Raises 401 if missing. |
 | `get_current_officer_sse(request, credentials, token) -> dict` | **FastAPI dependency for SSE auth.** Accepts token from: (1) `Authorization: Bearer` header, OR (2) `?token=` query parameter. Needed because browser `EventSource` can't set custom headers. |
-| `login(badge_number, password) -> dict` | Queries `Employee` table by `KGID` (badge number), joining `Rank` for the rank name. Validates password = `KGID + "123"`. Returns `{access_token, officer: {officer_id, badge_number, full_name, rank}}`. The `role` field is embedded in the JWT payload (used by `role_guard.py`). Raises HTTP 401 on failure. |
+| `login(badge_number, password) -> dict` | Queries `Employee` table by `KGID` (badge number), joining `Rank` for the rank name. Verifies the submitted password against `Employee.password_hash` via `bcrypt.checkpw()` (every officer's actual password is still `KGID + "123"` — see [10.25](#1025-password-hashing--login-brute-force-protection) — but it's no longer compared as a plaintext formula). Returns `{access_token, officer: {officer_id, badge_number, full_name, rank}}`. The `role` field is embedded in the JWT payload (used by `role_guard.py`). Raises HTTP 401 on failure. |
 
 ---
 
@@ -728,7 +728,7 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 
 | Function | Description |
 |----------|-------------|
-| `login_route(request)` | `POST /api/auth/login` — calls `login()` from auth layer. Returns `LoginResponse` with token + officer info. HTTP 401 on bad credentials, HTTP 503 on infrastructure error. |
+| `login_route(request)` | `POST /api/auth/login` — checks `auth/login_rate_limiter.check_login_attempt(badge_number)` first (10 attempts / 15 min per badge number, HTTP 429 with `Retry-After` if exceeded — see [10.25](#1025-password-hashing--login-brute-force-protection)), then calls `login()` from the auth layer. On success, calls `reset_login_attempts()` so a legitimate officer's earlier typos don't linger. Returns `LoginResponse` with token + officer info. HTTP 401 on bad credentials, HTTP 503 on infrastructure error. |
 | `logout_route()` | `POST /api/auth/logout` — stateless, returns `{"message": "Logged out successfully."}`. Frontend drops the token. |
 
 ---
@@ -2589,3 +2589,27 @@ The following files at the project root are one-time local MySQL migration artif
 **Not changed:** the frontend's provisional-new-chat flow (§9.5) is unchanged and still correct — this fix makes the backend enforce the same guarantee structurally instead of relying on the frontend never calling `POST /api/chat/sessions`.
 
 **Tests:** existing `tests/test_pipeline_and_sessions.py` suite (16 tests) re-run and passing; no new tests added for this fix (targeted bug fix, not new behavior).
+
+---
+
+### 10.25 Password Hashing & Login Brute-Force Protection
+
+**Date:** July 19, 2026
+**What:** Fixed two auth issues surfaced by a security audit ([Cleanup And Imp/WorkInPrg.md](../Cleanup%20And%20Imp/WorkInPrg.md)): passwords were compared as a plaintext, badge-number-derived formula, and `/api/auth/login` had no rate limiting.
+
+**Root cause:** `auth/simple_auth.py::login()` computed `expected = badge_number + "123"` at request time and compared it directly against the submitted password. Since the badge number (`KGID`) is not secret — it's visible in the JWT payload and the UI — every officer's password was reconstructable by anyone who knew (or guessed) their badge number. Compounding this, `main.py`'s station-wide rate limiter explicitly exempts `/api/auth/login` (`_RATE_LIMIT_EXEMPT`) because it reads `unit_id` from the JWT, which doesn't exist yet at login time — leaving the login endpoint with no attempt cap at all.
+
+**Fix (backend only, no frontend changes, no change to officer-facing behavior):**
+1. Added `Employee.password_hash VARCHAR(255)` (`db/schema.sql`).
+2. One-time migration (`backend/migrate_password_hash.py`, not part of the running app — run once, safe to re-run) added the column to the live AWS RDS DB and backfilled all existing officers with `bcrypt(badge_number + "123")`. Guarded the same way as the earlier `migrate.py` schema-drift fix ([10.13](#1013-nosql-root-cause-fix--session-id-column-width----2026-07-10-continued)): checks `information_schema.COLUMNS` scoped to `TABLE_SCHEMA = DATABASE()` before altering.
+3. `auth/simple_auth.py::login()` now calls `bcrypt.checkpw(password, employee["password_hash"])` instead of the string comparison.
+4. `db/seed.py::seed_employees()` now generates a bcrypt hash of `badge + "123"` per officer at seed time, so a fresh clone's seeded data works against the same verification path as migrated production data (no separate migration step needed after a fresh seed).
+5. New `auth/login_rate_limiter.py` — a login-specific limiter (separate from `pipeline/rate_limiter.py`'s station-wide one, since there's no JWT/unit_id at login time to key off). Fixed window, in-memory, keyed by the **badge number being attempted** (not IP — the threat is "guess this officer's password," which doesn't change with source IP). Caps at 10 attempts per badge number per 15-minute window; both failed and successful attempts count toward the cap; a successful login resets the counter via `reset_login_attempts()` so an officer's own earlier typos don't leave them near the limit.
+6. `routers/auth.py::login_route` calls `check_login_attempt()` before `login()` runs, returning HTTP 429 with a `Retry-After` header when exceeded.
+7. Added `bcrypt==4.2.0` (exact-pinned, matching the project's existing dependency discipline) to both `requirements.txt` and `backend/requirements.txt`.
+
+**What did NOT change:** every officer's actual password is still `badge_number + "123"` — this was a deliberate scoping decision, not an oversight. Officer-chosen/stronger passwords are a separate future step. The JWT payload, `get_current_officer`, `create_access_token`, and every other route's authorization model are untouched.
+
+**Verified:** ran the migration against the live RDS instance (10 officers backfilled successfully); confirmed end-to-end against the real DB that correct credentials still log in, wrong passwords return 401, and unknown badge numbers return 401; confirmed the rate limiter allows exactly 10 attempts then denies, and resets cleanly on a successful login. Full backend test suite (125 tests) passes.
+
+**Deferred to later (tracked in `Cleanup And Imp/WorkInPrg.md`, not yet actioned):** the remaining findings from the same security audit — a UNION/tautology bypass gap in the LLM-generated SQL validator, `.env`/`app-config.json` being committed to git with live secrets (DB password, JWT signing key, Catalyst OAuth credentials), missing magic-byte validation on file uploads, `/docs` (Swagger) being reachable in production, and frontend dependency versions not being exact-pinned.

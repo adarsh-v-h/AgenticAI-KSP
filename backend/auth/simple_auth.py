@@ -8,6 +8,7 @@ the implementation here requires zero route changes.
 
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from fastapi import Depends, HTTPException, status, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
@@ -130,14 +131,17 @@ async def get_current_officer_sse(
 
 
 # CONTRACT
-# takes:  badge_number (str) — employee KGID, password (str) — expected to be KGID+"123"
+# takes:  badge_number (str) — employee KGID, password (str) — plaintext password to verify
 # returns: (dict) — {"access_token": str, "officer": {...}} with JWT and officer info
 # raises:  HTTPException — when credentials are invalid or employee not found (401)
 async def login(badge_number: str, password: str) -> dict:
     """
     Authenticate an employee.
-    Lookup is by `KGID` against the `Employee` table.
-    Password rule (Step 3): password must equal `KGID + "123"`.
+    Lookup is by `KGID` against the `Employee` table. Password is verified
+    against the bcrypt hash in `Employee.password_hash` (see
+    backend/migrate_password_hash.py — every officer's password is currently
+    KGID+"123", now stored hashed instead of re-derived from the formula on
+    every login; officer-chosen passwords are a future step).
     Returns: {"access_token": str, "officer": {...}} on success.
     Raises HTTP 401 on bad credentials.
     """
@@ -147,7 +151,7 @@ async def login(badge_number: str, password: str) -> dict:
         raise _unauthorized("Invalid badge number or password.")
 
     rows = await execute_query(
-        "SELECT e.EmployeeID, e.KGID, e.FirstName, e.role, e.UnitID, "
+        "SELECT e.EmployeeID, e.KGID, e.FirstName, e.role, e.UnitID, e.password_hash, "
         "       r.RankName AS `rank`, u.UnitName "
         "FROM Employee AS e "
         "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID "
@@ -159,8 +163,10 @@ async def login(badge_number: str, password: str) -> dict:
         raise _unauthorized("Invalid badge number or password.")
 
     employee = rows[0]
-    expected = badge_number + "123"
-    if password != expected:
+    stored_hash = employee.get("password_hash")
+    if not stored_hash or not bcrypt.checkpw(
+        password.encode("utf-8"), stored_hash.encode("utf-8")
+    ):
         raise _unauthorized("Invalid badge number or password.")
 
     token = create_access_token(
