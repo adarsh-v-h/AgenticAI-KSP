@@ -606,7 +606,7 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 |----------|-------------|
 | `create_session(session_id, officer_id, title) -> bool` | `INSERT IGNORE` a new `chat_sessions` row (title clipped to 60 chars). Returns `True`/`False`. |
 | `update_session_timestamp(session_id, increment_count=True)` | Touches `updated_at` and (by default) bumps `message_count` by 2 (one user + one assistant turn). Called after every successful pipeline run. |
-| `get_sessions_for_officer(officer_id, limit=30) -> list[dict]` | Loads the officer's active sessions newest-first (`ORDER BY updated_at DESC`), datetimes serialized to ISO strings. Backs the sidebar. Returns `[]` on error. |
+| `get_sessions_for_officer(officer_id, limit=30) -> list[dict]` | Loads the officer's active sessions **with `message_count > 0`** newest-first (`ORDER BY updated_at DESC`). Datetimes are passed through `_utc_iso()` (attaches an explicit UTC offset to the naive MySQL datetime before `.isoformat()`) so the frontend doesn't misread them as local time. Backs the sidebar. Returns `[]` on error. See [10.24](#1024-empty-chat-sessions--utc-timestamp-fix). |
 | `verify_session_owner(session_id, officer_id) -> bool` | **Read authorization:** checks that `session_id` exists and belongs to `officer_id`. Used before loading messages (`GET .../messages`) or exporting. Returns `False` if not found or owned by another officer. Enables BOLA/IDOR mitigation on read paths. |
 | `save_message_pair(session_id, question, answer_text, sql_generated, has_table, has_media, graph_available, table_data, media_attachments) -> int \| None` | Inserts the user row + assistant row. When `has_table` is True, serializes `table_data` directly into the `table_data_json` MEDIUMTEXT column (replacing the old NoSQL `save_rich_data` pattern). Returns the assistant `message_id`. |
 | `get_messages_for_session(session_id) -> list[dict]` | Loads all messages oldest-first (cap 100); deserializes `table_data` from the `table_data_json` column for assistant messages. |
@@ -684,7 +684,7 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 |----------|-------------|
 | `_sse(event) -> str` | Formats a dict as an SSE `data:` line with `\n\n` terminator |
 | `_authorize_session_write(session_id, officer_id) -> bool` | **Authorization gate for write paths.** Mitigates BOLA/IDOR (OWASP API1:2023) by verifying that `session_id` either (a) doesn't exist yet (create-or-append: officer will own it), or (b) exists and belongs to `officer_id`. Raises HTTP 404 (not 403) if owned by another officer. Returns the existence flag (True if session exists) so `_persist_turn` avoids a duplicate query. Single indexed PK lookup — negligible cost. |
-| `_persist_turn(session_id, officer, question, result, session_exists)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message (when `session_exists=False`), saves the user+assistant pair via `chat_store.save_message_pair` (table data serialized to MySQL `table_data_json` column), calls `save_evidence_trail(message_id, sql_generated, table_data)` to record SQL provenance in `chat_evidence_trail` (Step 3), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. Called after `save_turn` in both chat endpoints. |
+| `_persist_turn(session_id, officer, question, result, session_exists)` | **Step 4 persistence helper.** Creates the `chat_sessions` row on a session's first message (when `session_exists=False`), saves the user+assistant pair via `chat_store.save_message_pair` (table data serialized to MySQL `table_data_json` column), calls `save_evidence_trail(message_id, sql_generated, table_data)` to record SQL provenance in `chat_evidence_trail` (Step 3), then bumps `updated_at`/`message_count`. Never raises — logs and continues on failure. **Wrapped in `asyncio.shield()` at both call sites** (see [10.24](#1024-empty-chat-sessions--utc-timestamp-fix)) so a client disconnect mid-call can't interrupt it between creating the row and saving the message, which used to leave permanent empty sessions behind. Called after `save_turn` in both chat endpoints. |
 | `list_chat_sessions(officer)` | `GET /api/chat/sessions` — lists the officer's sessions newest-first **from MySQL** (`chat_store.get_sessions_for_officer`). Always HTTP 200 (returns `[]` on DB error). |
 | `create_chat_session(officer)` | `POST /api/chat/sessions` — creates a NoSQL `session_metadata` doc and returns `SessionMetadata` (HTTP 201). **Currently unused by the UI** (see [9.5](#95-backend-created-sessions-on-new-chat--deprecated-flow-change)). |
 | `get_session_messages(session_id, officer)` | `GET /api/chat/sessions/{id}/messages` — **read authorization:** verifies ownership via `chat_store.verify_session_owner` (404 on mismatch/not-found), then returns all messages oldest-first from MySQL with `table_data` deserialized from the `table_data_json` column. **No pagination** (the prior `limit`/`before_message_id` cursor flow was removed — see [9.9](#99-message-pagination--removed)). |
@@ -1021,14 +1021,17 @@ Sessions and messages survive page reloads via MySQL (Step 4):
 ```
 After a successful pipeline run (POST /api/chat or GET /api/chat/stream):
   → save_turn(...)                         # conversation history → NoSQL + in-memory
-  → _persist_turn(session_id, officer, question, result)
+  → asyncio.shield( _persist_turn(session_id, officer, question, result) )
+      # shielded so a client disconnect can't interrupt the row-create /
+      # message-save sequence below and leave an empty session (see 10.24)
       → if first message of session: chat_store.create_session(...)   # chat_sessions row
       → chat_store.save_message_pair(...)  # user row + assistant row → chat_messages (MySQL)
           → if has_table/has_media: save_rich_data(...)               # → NoSQL message_rich_data
       → chat_store.update_session_timestamp(...)                      # bump updated_at + message_count
 
 On login / sidebar load:
-  → GET /api/chat/sessions      → chat_store.get_sessions_for_officer(officer_id)   # MySQL, newest-first
+  → GET /api/chat/sessions      → chat_store.get_sessions_for_officer(officer_id)
+      # MySQL, newest-first, WHERE message_count > 0 (excludes empty/abandoned sessions)
 
 On opening a past session:
   → GET /api/chat/sessions/{id}/messages
@@ -1755,6 +1758,17 @@ this document only describes the live system.
   message) once a prompt actually runs. Server-side persistence of these
   provisional sessions is intentionally deferred — it will be revisited when the
   storage layer is finalized.
+- **Caveat (found 2026-07-19):** this client-side no-op only stops *new* clicks
+  from hitting the backend — it was never backed by a server-side guarantee.
+  `_persist_turn` still creates the `chat_sessions` row (`message_count=0`)
+  *before* saving the message pair, and a client disconnect mid-call (e.g.
+  clicking New chat while a previous SSE stream was still finishing) could
+  interrupt persistence in between, leaving a permanent empty session that
+  `GET /api/chat/sessions` returned unfiltered. This is what actually caused
+  ~20 "New chat" rows to accumulate and become visible in Recents. Fixed in
+  [10.24](#1024-empty-chat-sessions--utc-timestamp-fix): the list query now
+  filters `message_count > 0`, and the persistence calls are shielded from
+  cancellation.
 
 ### 9.6 Old welcome / empty-state markup (`.chat-empty`) — SUPERSEDED
 
@@ -2554,3 +2568,24 @@ The following files at the project root are one-time local MySQL migration artif
 - Additive: raw history still preserved for SQL clause continuity
 
 **No breaking changes.** All 83 tests pass. Frontend builds clean.
+
+---
+
+### 10.24 Empty Chat Sessions & UTC Timestamp Fix
+
+**Date:** July 19, 2026
+**What:** Fixed empty "New chat" sessions (`message_count=0`) accumulating in MySQL and leaking into the "Recents" sidebar, plus a timestamp bug that made session times display in the wrong (misread-as-local) hour.
+
+**Root cause (session leak):** [§9.5](#95-backend-created-sessions-on-new-chat--deprecated-flow-change) documents that new chats became provisional/client-side to stop empty sessions from reaching the sidebar — but that was only a *client* behavior change. `_persist_turn` (`routers/chat.py`) and `_persist_report_turn` (`routers/reports.py`) still create the `chat_sessions` row first and save the message pair second. Their `except Exception` handlers don't catch `asyncio.CancelledError` (not an `Exception` subclass since Python 3.8), so a client disconnect between those two steps — e.g. an officer clicking "New chat" while a previous SSE stream was still resolving — left a permanently empty row behind. `get_sessions_for_officer` had no filter to exclude these, so all of them surfaced in "Recents" as blank "New chat" entries with "0 messages". 20 such rows had accumulated in production before this fix; they were soft-deleted (`is_active = FALSE`) as part of the cleanup.
+
+**Root cause (timestamp bug):** MySQL's `chat_sessions.created_at`/`updated_at` are `TIMESTAMP` columns in a server with `time_zone=UTC`, but `aiomysql` returns them as naive `datetime` objects (no `tzinfo`). Calling `.isoformat()` directly produced strings like `"2026-07-19T05:23:19"` with no offset — which JS's `new Date(iso)` parses as **local** time, not UTC. A session created at 05:23 UTC (10:53 AM IST) rendered in the sidebar as "5:23" with no AM/PM, because the browser treated the raw UTC clock digits as if they were already local.
+
+**Fix (4 changes, `backend/` only):**
+1. `db/chat_store.py::get_sessions_for_officer` — added `AND message_count > 0` to the `WHERE` clause, so no zero-message session can appear in "Recents" regardless of how it was created.
+2. `db/chat_store.py` — added `_utc_iso(dt)` helper that attaches `timezone.utc` to the naive datetime before calling `.isoformat()`; used in `get_sessions_for_officer` and `get_messages_for_session`.
+3. `routers/chat.py` (`/api/chat` and `/api/chat/stream`) and `routers/reports.py` (`/api/reports/analyze`) — wrapped the `_persist_turn` / `_persist_report_turn` calls (and the paired `save_turn` calls) in `asyncio.shield()`, so a client disconnect can no longer interrupt persistence mid-write.
+4. One-time cleanup script (not committed) deactivated the 20 existing zombie rows via `UPDATE chat_sessions SET is_active = FALSE WHERE message_count <= 0`.
+
+**Not changed:** the frontend's provisional-new-chat flow (§9.5) is unchanged and still correct — this fix makes the backend enforce the same guarantee structurally instead of relying on the frontend never calling `POST /api/chat/sessions`.
+
+**Tests:** existing `tests/test_pipeline_and_sessions.py` suite (16 tests) re-run and passing; no new tests added for this fix (targeted bug fix, not new behavior).

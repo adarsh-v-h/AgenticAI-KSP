@@ -26,6 +26,12 @@ name: Deploy backend + frontend + smoke test (auto-revert on failure)
 on:
   push:
     branches: [main]
+    # Skip the whole run when every changed file is doc-only. GitHub only
+    # skips if ALL changed files match these patterns — a push that touches
+    # e.g. backend/ AND Docs.md still runs normally.
+    paths-ignore:
+      - "Support Documents/**"
+      - "Cleanup And Imp/**"
   workflow_dispatch:
 
 concurrency:
