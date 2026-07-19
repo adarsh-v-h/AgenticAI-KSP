@@ -7,7 +7,7 @@ Used by:
 """
 
 # Maximum compact-schema size (chars) injected into the LLM SQL prompt.
-# Keep modest â€” Qwen Coder 7B context is finite and prompt cost == latency.
+# Keep modest â€” GLM-4.7-Flash context is finite and prompt cost == latency.
 _MAX_SCHEMA_CHARS = 3000
 
 SCHEMA_CATALOG = {

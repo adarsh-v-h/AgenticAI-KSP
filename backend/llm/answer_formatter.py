@@ -1,5 +1,5 @@
 """
-Answer formatter — runs the raw query results through Qwen 14B Instruct to
+Answer formatter — runs the raw query results through GLM-4.7-Flash to
 produce a clean natural-language reply for the officer.
 """
 
