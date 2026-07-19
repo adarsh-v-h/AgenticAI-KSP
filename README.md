@@ -1,6 +1,6 @@
 # KSP Crime Intelligence Chatbot
 
-A natural language crime intelligence platform for Karnataka State Police. Officers type a question in plain English, the system converts it to a MySQL query using an LLM, runs it against the crime database, and streams back a formatted answer with tabular results.
+A natural language crime intelligence platform for Karnataka State Police. Officers type a question in plain English or Kannada, the system converts it to a MySQL query using an LLM, runs it against the crime database, and streams back a formatted answer with tabular results.
 
 > See [Support Documents/Docs.md](Support%20Documents/Docs.md) for full technical documentation — every file, function, and data flow.
 
@@ -9,12 +9,12 @@ A natural language crime intelligence platform for Karnataka State Police. Offic
 ## What It Does
 
 1. Officer types a question like *"How many theft cases are open in Koramangala?"*
-2. A **schema linker** selects the relevant database tables
-3. **GLM-4.7-Flash** (LLM) converts the question into a MySQL SELECT query
-4. A **SQL validator** checks the query is safe (SELECT-only, valid tables, no injection)
-5. The query runs against the crime database (AWS RDS MySQL)
-6. **GLM-4.7-Flash** (same LLM) formats the raw results into a natural-language answer
-7. The answer streams back token-by-token via Server-Sent Events (SSE)
+2. A **schema linker** selects the relevant database tables.
+3. **GLM-4.7-Flash** (LLM) converts the question into a MySQL SELECT query.
+4. A **SQL validator** checks the query is safe (SELECT-only, valid tables, no injection).
+5. The query runs against the crime database (MySQL).
+6. **GLM-4.7-Flash** (the same LLM as used for query generator) formats the raw results into a natural-language answer
+7. The answer streams back token-by-token via Server-Sent Events (SSE).
 8. If the query returns tabular data, it renders as an interactive table in the UI
 9. 3 follow-up question suggestions are generated for the officer
 
@@ -28,8 +28,8 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 |-------|-----------|
 | Backend | Python 3.10 (Catalyst runtime), FastAPI, uvicorn |
 | Frontend | React 18, Vite 5 |
-| Relational DB | AWS RDS MySQL 8.0 (ap-south-1 Mumbai) |
-| LLM | Zoho Catalyst QuickML — GLM-4.7-Flash (`crm-di-glm47b_30b_it`) |
+| Relational DB | AWS RDS MySQL 8.0 (ap-south-1 Mumbai) since Catalyst has no right support for it |
+| LLM | Zoho Catalyst QuickML — GLM-4.7-Flash (`crm-di-glm47b_30b_it` and `qwen2.5-7b-vl`) |
 | Conversation History | Zoho Catalyst NoSQL |
 | RAG Knowledge Base | Zoho Catalyst QuickML KB |
 | Auth | JWT (dev) / Catalyst Authentication (production) |
@@ -64,7 +64,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 ├── docker-compose.yml           # Local dev: backend + frontend + test runner
 ├── start.sh                     # One-command local start (Linux/macOS, no Docker)
 ├── start.bat                    # One-command local start (Windows, no Docker)
-├── deploy.sh                    # One-command Catalyst deploy (backend only now)
+├── deploy.sh                    # One-command Catalyst deploy (backend only)
 ├── catalyst.json                # Catalyst project resource map (AppSail + client)
 ├── requirements.txt             # Backend deps (also used for local tests)
 ├── pytest.ini                   # Test configuration
@@ -439,13 +439,9 @@ live deployment → auto-revert on failure**:
 - `.github/workflows/ci.yml` — tests + build check on every push/PR.
 - `.github/workflows/deploy.yml` — on `main`: runs tests, deploys **backend
   (AppSail) + frontend (Web Client Hosting)** to Catalyst, runs
-  `scripts/smoke_test.py` against the live URL, tags `last-good-deploy` on
-  success, or rolls back to the last-good tag on failure.
+  `scripts/smoke_test.py` against the live URL, tags `last-good-deploy` on success, or rolls back to the last-good tag on failure.
 
-One-time setup: add repo secrets `CATALYST_CLI_TOKEN` (the CLI deploy token from
-`catalyst token:generate` — distinct from the runtime OAuth token, which the
-backend now auto-refreshes itself) and `ENV_FILE` (contents of `.env`). See
-DEPLOYMENT.md §8.
+One-time setup: add repo secrets `CATALYST_CLI_TOKEN` (the CLI deploy token from`catalyst token:generate` — distinct from the runtime OAuth token, which the backend now auto-refreshes itself) and `ENV_FILE` (contents of `.env`). See DEPLOYMENT.md §8.
 
 Run the smoke test manually anytime: `python3 scripts/smoke_test.py`
 
@@ -454,11 +450,7 @@ Run the smoke test manually anytime: `python3 scripts/smoke_test.py`
 - **First-time-from-scratch walkthrough** (installing tools, logging in):
   [Support Documents/FULL_DEPLOYMENT_WALKTHROUGH.md](Support%20Documents/FULL_DEPLOYMENT_WALKTHROUGH.md)
 
-> **Secrets:** `.env` and `frontend/.env` ARE committed here **on purpose** —
-> this is a private repo with a single shared deployment for a small trusted
-> team. `backend/app-config.json` (generated, also secret-bearing) stays
-> gitignored. If this repo is ever made public, remove the `.env` files from
-> tracking and rotate every secret. See DEPLOYMENT.md §7.
+> **Secrets:** `.env` and `frontend/.env` ARE committed here **on purpose** — this is a private repo with a single shared deployment for a small trusted team. `backend/app-config.json` (generated, also secret-bearing) stays gitignored. If this repo is ever made public, remove the `.env` files from tracking and rotate every secret. See DEPLOYMENT.md §7.
 
 ---
 
