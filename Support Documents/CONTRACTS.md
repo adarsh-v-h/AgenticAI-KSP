@@ -158,11 +158,6 @@ Catalyst OAuth access-token manager. All Catalyst clients (LLM, NoSQL, Cache, RA
 - **Returns:** nothing
 - **Raises:** nothing (never raises, logs failures internally)
 
-### clear_history
-- **Takes:** session_id (str) — session identifier to delete history for
-- **Returns:** nothing
-- **Raises:** nothing (never raises)
-
 ### get_history
 - **Takes:** session_id (str) — session identifier to fetch history for
 - **Returns:** (list[dict]) — last MAX_TURNS messages with message_id and timestamp fields
@@ -484,6 +479,11 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Takes:** question (str) — the user's natural-language question,; results (list[dict]) — raw rows from the DB query,; media_attachments (list[dict]) — resolved media references for the response,; history (list[dict] | None) — prior conversation turns for context
 - **Returns:** (str) — natural-language answer formatted from the query results
 - **Raises:** LLMError — when the LLM call fails (non-payload-size errors)
+
+### generate_follow_ups
+- **Takes:** context_block (str) — the case/answer context suggestions build on,; history_block (str) — pre-formatted "Conversation so far: ..." block (may be empty)
+- **Returns:** (list[str]) — up to 3 short follow-up question strings (single source of truth shared by the SQL pipeline and the RAG path)
+- **Raises:** nothing (best-effort — returns [] on any LLM/parsing failure)
 
 ### generate_direct_answer
 - **Takes:** question (str) — the user's natural-language question,; history (list[dict] | None) — prior conversation turns for context,; recent_table (list[dict] | None) — most recent query result rows for grounding

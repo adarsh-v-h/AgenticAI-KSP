@@ -31,8 +31,8 @@ from llm.sql_generator import (
 )
 from db.connection import execute_query
 from pipeline.media_resolver import resolve_media, collect_case_master_ids
-from llm.answer_formatter import format_answer, route_intent, generate_direct_answer
-from llm.client import LLMError, call_llm
+from llm.answer_formatter import format_answer, route_intent, generate_direct_answer, generate_follow_ups
+from llm.client import LLMError
 
 
 
@@ -434,37 +434,18 @@ async def run_pipeline(
         )
 
     # 7. Suggested follow-ups -- best-effort; never fails the pipeline.
-    try:
-        recent_turns = history[-5:] if history else []
-        history_block = ""
-        if recent_turns:
-            history_lines = "\n".join(
-                f"{t.get('role', '?')}: {t.get('content', '')}" for t in recent_turns
-            )
-            history_block = f"Conversation so far:\n{history_lines}\n\n"
+    recent_turns = history[-5:] if history else []
+    history_block = ""
+    if recent_turns:
+        history_lines = "\n".join(
+            f"{t.get('role', '?')}: {t.get('content', '')}" for t in recent_turns
+        )
+        history_block = f"Conversation so far:\n{history_lines}\n\n"
 
-        follow_up_prompt = (
-            f"{history_block}"
-            f"Question: {question}\n"
-            f"Answer: {response.answer_text}\n\n"
-            f"Suggest exactly 3 short follow-up questions an investigator "
-            f"might ask next to deepen this line of inquiry. "
-            f"Return only the 3 questions, one per line, no extra text."
-        )
-        follow_up_raw = await call_llm(
-            model_key="MODEL_ANSWER",
-            prompt=follow_up_prompt,
-            system_prompt="You are an investigative assistant helping a police officer analyse case data.",
-            max_tokens=1024,
-        )
-        response.suggested_follow_ups = [
-            line.strip("- ").strip()
-            for line in follow_up_raw.split("\n")
-            if line.strip()
-        ][:3]
-    except Exception as e:
-        _log(f"follow-up generation failed (non-fatal): {e}")
-        response.suggested_follow_ups = []
+    response.suggested_follow_ups = await generate_follow_ups(
+        context_block=f"Question: {question}\nAnswer: {response.answer_text}",
+        history_block=history_block,
+    )
 
     elapsed = time.monotonic() - start
     _log(

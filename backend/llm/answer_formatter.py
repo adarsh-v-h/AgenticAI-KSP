@@ -5,7 +5,7 @@ produce a clean natural-language reply for the officer.
 
 import sys
 
-from llm.client import call_llm
+from llm.client import call_llm, LLMError
 from llm.prompts import (
     build_answer_prompt,
     build_router_prompt,
@@ -15,6 +15,10 @@ from llm.prompts import (
 _RETRY_ROWS = 15
 _RETRY_FIELD_CHARS = 80
 
+_FOLLOW_UP_SYSTEM_PROMPT = (
+    "You are an investigative assistant helping a police officer analyse case data."
+)
+
 
 # CONTRACT
 # takes:  msg (str) — message to log
@@ -22,6 +26,41 @@ _RETRY_FIELD_CHARS = 80
 # raises:  nothing
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+# CONTRACT
+# takes:  context_block (str) — the case/answer context the suggestions build on,
+#          history_block (str) — pre-formatted "Conversation so far: ..." block (may be empty)
+# returns: (list[str]) — up to 3 short follow-up question strings (empty list on any failure)
+# raises:  nothing (best-effort — callers rely on it never breaking their flow)
+async def generate_follow_ups(context_block: str, history_block: str = "") -> list[str]:
+    """
+    Single source of truth for "suggest 3 follow-up questions" generation, used
+    by both the SQL pipeline (query_pipeline) and the RAG path (rag_session).
+    Builds one consistent prompt, calls MODEL_ANSWER, and parses exactly 3
+    lines. Never raises — returns [] if the LLM call or parsing fails.
+    """
+    try:
+        prompt = (
+            f"{history_block}"
+            f"{context_block}\n\n"
+            f"Suggest exactly 3 short follow-up questions an investigator "
+            f"might ask next to deepen this line of inquiry. "
+            f"Return only the 3 questions, one per line, no extra text."
+        )
+        raw = await call_llm(
+            model_key="MODEL_ANSWER",
+            prompt=prompt,
+            system_prompt=_FOLLOW_UP_SYSTEM_PROMPT,
+            max_tokens=1024,
+        )
+        return [line.strip("- ").strip() for line in raw.split("\n") if line.strip()][:3]
+    except LLMError as e:
+        _log(f"follow-up generation failed (non-fatal): {e}")
+        return []
+    except Exception as e:  # noqa: BLE001 — best-effort, never break the caller
+        _log(f"follow-up generation unexpected error (non-fatal): {e}")
+        return []
 
 
 # CONTRACT

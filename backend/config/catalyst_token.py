@@ -154,8 +154,8 @@ async def get_access_token() -> str:
       3. Refresh failed but a cached token exists        → reuse it (warn).
       4. No refresh creds                                → static env token.
     """
-    global _cached_token, _expires_at
-
+    # Note: this function only READS the module-level cache; the actual
+    # assignment happens inside _refresh_access_token(), so no `global` needed.
     now = time.time()
     if _cached_token and now < _expires_at:
         return _cached_token

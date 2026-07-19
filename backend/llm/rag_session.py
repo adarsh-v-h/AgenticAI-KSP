@@ -18,10 +18,9 @@ empty (the previous bug: a fresh RagSession() was created per-request with
 no history ever passed in).
 """
 import re
-import sys
 
 from llm.rag_client import query_rag, RagResult
-from llm.client import call_llm, LLMError
+from llm.answer_formatter import generate_follow_ups
 
 
 _REFERENCE_PATTERNS = [
@@ -116,57 +115,29 @@ class RagSession:
     # CONTRACT
     # takes:  case_context (str) — latest RAG response text to generate follow-ups from
     # returns: (list[str]) — up to 3 suggested follow-up questions for the investigator
-    # raises:  nothing (catches LLMError internally)
+    # raises:  nothing (delegates to answer_formatter.generate_follow_ups, which never raises)
     async def _generate_follow_ups(self, case_context: str) -> list[str]:
         """
-        Generate 3 follow-up questions via a direct call_llm() call, NOT
-        query_rag(). The previous implementation asked query_rag() to
-        "ground" an instruction prompt ("suggest 3 questions") -- a
-        meta-request with no matching case-document content to retrieve,
-        so it frequently came back ungrounded and silently produced [],
-        with no error or log line. call_llm() has no such gating.
+        Generate 3 follow-up questions via the shared
+        answer_formatter.generate_follow_ups() helper (a direct call_llm()
+        under the hood — NOT query_rag(), which would try to "ground" a
+        meta-instruction against case documents and silently return []).
 
-        Includes the full conversation arc (self.history), not just the
-        latest answer, so suggestions can be genuinely recommendation-style
-        ("given everything discussed, consider looking into X next") rather
-        than reacting only to the single most recent response.
+        Includes the full conversation arc (self.history), not just the latest
+        answer, so suggestions can reference earlier turns.
         """
-        try:
-            history_block = ""
-            if self.history:
-                lines = []
-                for turn in self.history[-5:]:
-                    lines.append(f"Q: {turn['query']}")
-                    lines.append(f"A: {turn['response']}")
-                history_block = (
-                    "Conversation so far:\n" + "\n".join(lines) + "\n\n"
-                )
+        history_block = ""
+        if self.history:
+            lines = []
+            for turn in self.history[-5:]:
+                lines.append(f"Q: {turn['query']}")
+                lines.append(f"A: {turn['response']}")
+            history_block = "Conversation so far:\n" + "\n".join(lines) + "\n\n"
 
-            prompt = (
-                f"{history_block}"
-                f"Latest case information: {case_context}\n"
-                f"Considering the whole conversation above (not just the latest "
-                f"answer), suggest exactly 3 short follow-up questions an "
-                f"investigator might ask next to deepen this line of inquiry. "
-                f"Where relevant, connect the suggestion back to something "
-                f"already discussed (e.g. 'given the pattern in station X, "
-                f"check whether...'). Return only the 3 questions, one per "
-                f"line, no extra text."
-            )
-            raw = await call_llm(
-                model_key="MODEL_ANSWER",
-                prompt=prompt,
-                system_prompt="You are an investigative assistant helping a police officer analyse case data.",
-                max_tokens=1024,
-            )
-            return [
-                line.strip("- ").strip()
-                for line in raw.split("\n")
-                if line.strip()
-            ][:3]
-        except LLMError as e:
-            print(f"follow-up generation failed (non-fatal): {e}", file=sys.stderr, flush=True)
-            return []
+        return await generate_follow_ups(
+            context_block=f"Latest case information: {case_context}",
+            history_block=history_block,
+        )
 
     # CONTRACT
     # takes:  query (str) — the user's raw question

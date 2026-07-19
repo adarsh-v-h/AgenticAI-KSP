@@ -209,3 +209,45 @@ After the AI has addressed all findings above, do a final pass:
 ---
 
 *This document should be version-controlled alongside your codebase and updated whenever your stack or architectural patterns evolve.*
+
+## Audit Log — 2026-07-19 (rate limiting + token auto-refresh session)
+
+Full pass run after the station rate-limiter, runtime Catalyst token
+auto-refresh, and CI frontend-deploy work. Scope: our own source only
+(`backend/{auth,config,conversation,db,graph,llm,pipeline,routers,voice}`,
+`backend/main.py`, `frontend/src/`) — vendored deps and `__pycache__` excluded.
+Tooling: `pyflakes` (Python), manual import-graph verification, `vite build`,
+full pytest suite.
+
+**Findings addressed:**
+- **Dead code removed:** `conversation/history.py::clear_history()` — no caller
+  in prod or tests; deleted along with its now-unused `delete_document` import.
+- **Duplication consolidated:** follow-up-question generation was duplicated in
+  `pipeline/query_pipeline.py` and `llm/rag_session.py`. Extracted a single
+  `llm/answer_formatter.generate_follow_ups()` (one prompt, one parse, never
+  raises); both call sites now delegate to it. Removed the resulting unused
+  `call_llm`/`LLMError`/`sys` imports.
+- **Half-built feature completed:** `auth/role_guard.log_action()` existed but
+  was never wired in (audit_log table only populated by tests). Wired it into
+  the two most sensitive endpoints — session export (`export_session`, action
+  `export_session`) and individual risk-profile access (`get_risk_score`,
+  action `view_risk_profile`). The `/api/audit-log` read endpoint now surfaces
+  real activity.
+- **Config docs fixed:** added `KB_DOCUMENT_IDS` to `.env.example` (was
+  referenced by RAG fallback but undocumented → silent zero-doc RAG on fresh
+  clones); reconciled the `ZIA_*` URL divergence between `.env` and
+  `.env.example` (example now matches the real QuickML Zia endpoints).
+- **CI test-gate fix:** added `python-multipart` to root `requirements.txt`
+  (routers/voice imports it at load time; the gate installs root requirements).
+
+**Deliberately kept (not dead):**
+- `conversation/session_store.list_sessions()` — the documented NoSQL/in-memory
+  fallback layer, exercised by tests; the MySQL path supersedes it in prod but
+  it remains the graceful-degradation path.
+- `backend/debug_tools.py`, `backend/kb_sync.py` — standalone operational
+  scripts, run manually, intentionally not imported.
+- OPTIONAL reserved env vars (`STRATUS_BASE_URL`, `SMARTBROWZ_URL`,
+  `MODEL_VISION`, etc.) — documented placeholders for unimplemented integrations.
+
+**Verification:** `pyflakes` clean across all in-scope source; 125 backend tests
+pass; `vite build` succeeds; no circular imports introduced.
