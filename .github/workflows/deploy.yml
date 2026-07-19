@@ -32,6 +32,12 @@ concurrency:
   group: catalyst-deploy
   cancel-in-progress: false
 
+# The deploy job pushes the `last-good-deploy` git tag on success, which needs
+# write access to the repo contents. The default GITHUB_TOKEN is read-only
+# unless we request it here.
+permissions:
+  contents: write
+
 env:
   BACKEND_URL: https://crime-intel-backend-50043099694.development.catalystappsail.in
 
@@ -115,6 +121,9 @@ jobs:
 
       - name: Tag last-good-deploy on success
         if: steps.smoke.outcome == 'success'
+        # Non-fatal: the deploy already succeeded and smoke passed. A tag-push
+        # hiccup (e.g. transient perms) must not mark a healthy deploy as failed.
+        continue-on-error: true
         run: |
           git tag -f last-good-deploy
           git push -f origin last-good-deploy
