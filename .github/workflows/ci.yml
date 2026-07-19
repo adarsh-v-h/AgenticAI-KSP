@@ -6,8 +6,14 @@ name: CI
 on:
   push:
     branches: ["**"]
+    paths-ignore:
+      - "Support Documents/**"
+      - "Cleanup And Imp/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "Support Documents/**"
+      - "Cleanup And Imp/**"
 
 jobs:
   backend-tests:
