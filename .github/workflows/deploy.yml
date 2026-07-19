@@ -94,7 +94,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Catalyst CLI
-        run: npm install -g zcatalyst-cli
+        # Pinned to the version verified working for this project's deploys
+        # (2026-07-19). Leaving it unpinned means every CI run could pull a
+        # different CLI build, which is one of the variables that made the
+        # deploy failures on 2026-07-19 hard to pin down.
+        run: npm install -g zcatalyst-cli@1.27.0
 
       - name: Restore .env from secret
         run: printf '%s' "${{ secrets.ENV_FILE }}" > .env
@@ -129,9 +133,16 @@ jobs:
           # smoke test just re-validates the OLD still-running deployment and
           # the whole pipeline "passes" while shipping nothing (this is
           # exactly what happened on 2026-07-19 — see git history).
+          # --dc in is REQUIRED in CI: this project lives in Zoho's India
+          # datacenter (CATALYST_BASE_URL=api.catalyst.zoho.in). A local CLI
+          # works without it because it has stored login state pinned to the
+          # IN DC, but a fresh CI install with token-only auth defaults to a
+          # different DC and the IN-scoped token fails with "unable to refresh
+          # access token" — which is exactly what silently broke deploys on
+          # 2026-07-19.
           set +e
           DEPLOY_OUTPUT=$(catalyst deploy --only appsail,client --ignore-scripts \
-            -p "$CATALYST_PROJECT_ID" --org "$CATALYST_ORG_ID" \
+            --dc in -p "$CATALYST_PROJECT_ID" --org "$CATALYST_ORG_ID" \
             --token "$CATALYST_CLI_TOKEN" 2>&1)
           DEPLOY_EXIT=$?
           set -e
@@ -174,7 +185,7 @@ jobs:
             python3 scripts/gen_app_config.py
             python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
             catalyst deploy --only appsail,client --ignore-scripts \
-              -p "$CATALYST_PROJECT_ID" --org "$CATALYST_ORG_ID" \
+              --dc in -p "$CATALYST_PROJECT_ID" --org "$CATALYST_ORG_ID" \
               --token "$CATALYST_CLI_TOKEN"
             echo "Rolled back successfully."
           else
