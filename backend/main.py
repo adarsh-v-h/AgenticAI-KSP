@@ -231,6 +231,44 @@ class _StationRateLimitMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_StationRateLimitMiddleware)
 
+
+# Response compression (gzip).
+#
+# Starlette's GZipMiddleware only kicks in when the client's Accept-Encoding
+# header includes "gzip" (every browser sends this automatically) — there is
+# NO frontend code needed; fetch()/XMLHttpRequest decompress transparently via
+# the standard Content-Encoding response header.
+#
+# Excluded: /api/chat/stream. GZipMiddleware treats any streaming response
+# (more_body=True on each chunk, which SSE always is) as a "streaming gzip"
+# response and wraps EVERY chunk through gzip regardless of size — that would
+# buffer each token event through compression, fighting the
+# `X-Accel-Buffering: no` header and the token-by-token flush this endpoint
+# depends on for its real-time feel. Every other endpoint returns a normal
+# (non-streaming) JSON body and benefits from compression with no downside.
+#
+# Subclassing (rather than wrapping a separately-constructed GZipMiddleware
+# instance) matters here: Starlette wires each middleware's `self.app` to the
+# correct next-inner-app when it builds the stack (`cls(app=app, **kwargs)` in
+# Starlette.build_middleware_stack) — constructing a GZipMiddleware(app, ...)
+# ourselves at decoration time would bind it to the wrong app reference and
+# create a parallel, incorrectly-ordered branch instead of a link in the chain.
+from fastapi.middleware.gzip import GZipMiddleware
+
+_SSE_EXCLUDED_PATHS = {"/api/chat/stream"}
+
+
+class _ConditionalGZipMiddleware(GZipMiddleware):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] in _SSE_EXCLUDED_PATHS:
+            await self.app(scope, receive, send)
+        else:
+            await super().__call__(scope, receive, send)
+
+
+app.add_middleware(_ConditionalGZipMiddleware, minimum_size=1000)
+
+
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(export_router)
