@@ -21,6 +21,7 @@ from routers.governance import router as governance_router
 from routers.analytics import router as analytics_router
 from routers.decision_support import router as decision_support_router
 from routers.profiling import router as profiling_router
+from routers.diagnostics import router as diagnostics_router  # TEMPORARY — see routers/diagnostics.py
 from conversation.history import init_nosql_table
 from pipeline.rate_limiter import start_rate_limiter, stop_rate_limiter
 from config.catalyst_token import get_access_token
@@ -278,6 +279,7 @@ app.include_router(governance_router)
 app.include_router(analytics_router)
 app.include_router(decision_support_router)
 app.include_router(profiling_router)
+app.include_router(diagnostics_router)  # TEMPORARY — see routers/diagnostics.py
 
 
 @app.get("/health")
