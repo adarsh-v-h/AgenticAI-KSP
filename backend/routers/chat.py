@@ -412,15 +412,25 @@ async def chat(
 
     if not result.error:
         # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
-        await _persist_turn(request.session_id, officer, question, result, session_exists)
+        # Shielded: if the client disconnects while this is running, a plain
+        # `await` would raise CancelledError mid-write (e.g. right after the
+        # chat_sessions row is created but before the message pair is saved
+        # and the counter is bumped), leaving a permanent zombie session with
+        # message_count=0. asyncio.shield lets the write finish regardless of
+        # what happens to the caller's task.
+        await asyncio.shield(
+            _persist_turn(request.session_id, officer, question, result, session_exists)
+        )
 
         try:
-            await save_turn(
-                request.session_id,
-                question,
-                result.answer_text,
-                assistant_sql=result.sql_generated,
-                assistant_table=result.table_data,
+            await asyncio.shield(
+                save_turn(
+                    request.session_id,
+                    question,
+                    result.answer_text,
+                    assistant_sql=result.sql_generated,
+                    assistant_table=result.table_data,
+                )
             )
         except Exception as e:
             _log(f"save_turn failed (non-fatal): {e}")
@@ -534,15 +544,26 @@ async def chat_stream(
                 yield _sse({"type": "suggested_follow_ups", "items": result.suggested_follow_ups})
 
             # Step 4: persist session + message pair to MySQL (NoSQL for rich data).
-            await _persist_turn(session_id, officer, q, result, session_exists)
+            # Shielded for the same reason as the non-streaming /api/chat path:
+            # an SSE client disconnect (e.g. the officer clicks "New chat"
+            # while a previous turn is still finishing) delivers
+            # CancelledError to this coroutine. Without shielding, that could
+            # interrupt _persist_turn between creating the chat_sessions row
+            # and saving the message pair / bumping message_count, leaving a
+            # permanent empty ("zombie") session behind.
+            await asyncio.shield(
+                _persist_turn(session_id, officer, q, result, session_exists)
+            )
 
             try:
-                await save_turn(
-                    session_id,
-                    q,
-                    result.answer_text,
-                    assistant_sql=result.sql_generated,
-                    assistant_table=result.table_data,
+                await asyncio.shield(
+                    save_turn(
+                        session_id,
+                        q,
+                        result.answer_text,
+                        assistant_sql=result.sql_generated,
+                        assistant_table=result.table_data,
+                    )
                 )
             except Exception as e:
                 _log(f"save_turn failed in stream (non-fatal): {e}")

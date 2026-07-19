@@ -5,6 +5,7 @@ Accepts a small uploaded report as base64 JSON, extracts readable text, and
 asks the answer model for recurring themes and case relevance.
 """
 
+import asyncio
 import base64
 import binascii
 import io
@@ -322,8 +323,15 @@ async def analyze_report(
         )
     except Exception as e:
         _log(f"report analysis history save failed (non-fatal): {e}")
-    await _persist_report_turn(
-        request.session_id, officer, question, answer, session_exists
+    # Shielded: a client disconnect mid-request would otherwise deliver
+    # CancelledError partway through _persist_report_turn (e.g. after the
+    # chat_sessions row is created but before the message pair is saved),
+    # leaving a permanent empty ("zombie") session. See chat.py for the same
+    # pattern on the main chat path.
+    await asyncio.shield(
+        _persist_report_turn(
+            request.session_id, officer, question, answer, session_exists
+        )
     )
 
     warning = None
