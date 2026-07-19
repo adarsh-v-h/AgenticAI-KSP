@@ -1,5 +1,5 @@
 """
-SQL generation chain — runs the schema-aware SQL prompt through Qwen Coder
+SQL generation chain — runs the schema-aware SQL prompt through GLM-4.7-Flash
 with a self-correction budget shared across the whole SQL chain.
 
 Total LLM calls per turn are capped at MAX_ATTEMPTS=2 (initial + at most one

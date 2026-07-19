@@ -572,7 +572,7 @@ python backend/debug_tools.py all      # Run all checks
 
 ## Running Tests
 
-Backend — 119 tests total (68 unit + 19 pipeline/session + 17 rate-limiter + 15 property-based),
+Backend — 128 tests total (71 unit + 8 token + 17 pipeline/session + 17 rate-limiter + 15 property-based),
 no network or DB required:
 
 ```bash
