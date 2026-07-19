@@ -1,6 +1,7 @@
 import httpx
 from config.settings import get
 from config.catalyst_token import get_access_token
+from http_client import get_http_client
 
 class NoSQLError(Exception):
     """Raised when an operation on Catalyst NoSQL fails."""
@@ -96,33 +97,33 @@ async def get_document(table_name: str, document_id: str, timeout: float = 5.0, 
     payload = {
         "keys": [{key_name: {"S": document_id}}]
     }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url,
-            headers=await _nosql_headers(),
-            json=payload,
-            timeout=timeout
-        )
-        if response.status_code == 200:
-            res_json = response.json()
-            data = res_json.get("data")
-            if isinstance(data, dict) and isinstance(data.get("get"), list) and len(data["get"]) > 0:
-                item_data = data["get"][0].get("item")
-                if item_data:
-                    return deserialize_item(item_data)
-            elif isinstance(data, list) and len(data) > 0:
-                item_data = data[0].get("item")
-                if item_data:
-                    return deserialize_item(item_data)
-            elif isinstance(data, dict) and "item" in data:
-                item_data = data.get("item")
-                if item_data:
-                    return deserialize_item(item_data)
-            return None
-        elif response.status_code == 404:
-            return None
-        else:
-            raise NoSQLError(f"Fetch item {document_id} failed with status {response.status_code}: {response.text}")
+    client = get_http_client()
+    response = await client.post(
+        url,
+        headers=await _nosql_headers(),
+        json=payload,
+        timeout=timeout
+    )
+    if response.status_code == 200:
+        res_json = response.json()
+        data = res_json.get("data")
+        if isinstance(data, dict) and isinstance(data.get("get"), list) and len(data["get"]) > 0:
+            item_data = data["get"][0].get("item")
+            if item_data:
+                return deserialize_item(item_data)
+        elif isinstance(data, list) and len(data) > 0:
+            item_data = data[0].get("item")
+            if item_data:
+                return deserialize_item(item_data)
+        elif isinstance(data, dict) and "item" in data:
+            item_data = data.get("item")
+            if item_data:
+                return deserialize_item(item_data)
+        return None
+    elif response.status_code == 404:
+        return None
+    else:
+        raise NoSQLError(f"Fetch item {document_id} failed with status {response.status_code}: {response.text}")
 
 # CONTRACT
 # takes:  table_name (str) — NoSQL table to insert into,
@@ -141,16 +142,16 @@ async def insert_document(table_name: str, document_id: str, document_data: dict
     doc_copy[key_name] = document_id
     serialized = {k: serialize_to_catalyst(v) for k, v in doc_copy.items()}
     payload = [{"item": serialized}]
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url,
-            headers=await _nosql_headers(),
-            json=payload,
-            timeout=timeout
-        )
-        if response.status_code in (200, 201, 204):
-            return True
-        raise NoSQLError(f"Insert item {document_id} failed with status {response.status_code}: {response.text}")
+    client = get_http_client()
+    response = await client.post(
+        url,
+        headers=await _nosql_headers(),
+        json=payload,
+        timeout=timeout
+    )
+    if response.status_code in (200, 201, 204):
+        return True
+    raise NoSQLError(f"Insert item {document_id} failed with status {response.status_code}: {response.text}")
 
 # CONTRACT
 # takes:  table_name (str) — NoSQL table containing the document,
@@ -178,16 +179,16 @@ async def update_document(table_name: str, document_id: str, updates: dict, time
         "keys": {key_name: {"S": document_id}},
         "update_attributes": update_attrs
     }]
-    async with httpx.AsyncClient() as client:
-        response = await client.put(
-            url,
-            headers=await _nosql_headers(),
-            json=payload,
-            timeout=timeout
-        )
-        if response.status_code in (200, 201, 204):
-            return True
-        raise NoSQLError(f"Update item {document_id} failed with status {response.status_code}: {response.text}")
+    client = get_http_client()
+    response = await client.put(
+        url,
+        headers=await _nosql_headers(),
+        json=payload,
+        timeout=timeout
+    )
+    if response.status_code in (200, 201, 204):
+        return True
+    raise NoSQLError(f"Update item {document_id} failed with status {response.status_code}: {response.text}")
 
 # CONTRACT
 # takes:  table_name (str) — NoSQL table containing the document,
@@ -204,17 +205,17 @@ async def delete_document(table_name: str, document_id: str, timeout: float = 5.
     payload = [{
         "keys": {key_name: {"S": document_id}}
     }]
-    async with httpx.AsyncClient() as client:
-        response = await client.request(
-            "DELETE",
-            url,
-            headers=await _nosql_headers(),
-            json=payload,
-            timeout=timeout
-        )
-        if response.status_code in (200, 201, 204):
-            return True
-        raise NoSQLError(f"Delete item {document_id} failed with status {response.status_code}: {response.text}")
+    client = get_http_client()
+    response = await client.request(
+        "DELETE",
+        url,
+        headers=await _nosql_headers(),
+        json=payload,
+        timeout=timeout
+    )
+    if response.status_code in (200, 201, 204):
+        return True
+    raise NoSQLError(f"Delete item {document_id} failed with status {response.status_code}: {response.text}")
 
 # CONTRACT
 # takes:  table_name (str) — NoSQL table to list documents from,
@@ -226,22 +227,22 @@ async def list_documents(table_name: str, timeout: float = 5.0) -> list[dict]:
     List all documents in a table using GET /item.
     """
     url = f"{_get_base_project_url()}/nosqltable/{table_name}/item"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            url,
-            headers=await _nosql_headers(),
-            timeout=timeout
-        )
-        if response.status_code == 200:
-            payload = response.json()
-            raw = payload.get("data")
-            if isinstance(raw, list):
-                return [deserialize_item(item.get("item", item)) for item in raw]
-            elif isinstance(raw, dict):
-                item_data = raw.get("item")
-                return [deserialize_item(item_data)] if item_data else []
-            return []
-        elif response.status_code == 404:
-            return []
-        else:
-            raise NoSQLError(f"List items for {table_name} failed with status {response.status_code}: {response.text}")
+    client = get_http_client()
+    response = await client.get(
+        url,
+        headers=await _nosql_headers(),
+        timeout=timeout
+    )
+    if response.status_code == 200:
+        payload = response.json()
+        raw = payload.get("data")
+        if isinstance(raw, list):
+            return [deserialize_item(item.get("item", item)) for item in raw]
+        elif isinstance(raw, dict):
+            item_data = raw.get("item")
+            return [deserialize_item(item_data)] if item_data else []
+        return []
+    elif response.status_code == 404:
+        return []
+    else:
+        raise NoSQLError(f"List items for {table_name} failed with status {response.status_code}: {response.text}")

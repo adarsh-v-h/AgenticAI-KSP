@@ -714,12 +714,12 @@ textarea {
   color: var(--text-secondary);
 }
 
-.composer-action-btn.not-yet {
+.composer-action-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.composer-action-btn.not-yet:hover {
+.composer-action-btn:disabled:hover {
   background: transparent;
   color: var(--text-tertiary);
 }

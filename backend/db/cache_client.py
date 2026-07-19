@@ -25,6 +25,7 @@ import httpx
 
 from config.settings import get
 from config.catalyst_token import get_access_token
+from http_client import get_http_client
 
 
 class CacheError(Exception):
@@ -82,10 +83,10 @@ def _segment_id() -> str:
 async def get_value(key: str, timeout: float = 5.0) -> str | None:
     """Fetch a cache value by key. Returns None if the key does not exist."""
     url = f"{_cache_base_url()}/segment/{_segment_id()}/cache"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            url, headers=await _cache_headers(), params={"cacheKey": key}, timeout=timeout
-        )
+    client = get_http_client()
+    resp = await client.get(
+        url, headers=await _cache_headers(), params={"cacheKey": key}, timeout=timeout
+    )
     if resp.status_code == 200:
         data = (resp.json() or {}).get("data") or {}
         val = data.get("cache_value")
@@ -108,12 +109,12 @@ async def put_value(key: str, value: str, expiry_in_hours: int = 7, timeout: flo
     """
     url = f"{_cache_base_url()}/segment/{_segment_id()}/cache"
     payload = {"cache_name": key, "cache_value": str(value), "expiry_in_hours": expiry_in_hours}
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(url, headers=await _cache_headers(), json=payload, timeout=timeout)
-        if resp.status_code in (200, 201):
-            return True
-        # Key already present (or POST not idempotent) — update instead.
-        resp = await client.put(url, headers=await _cache_headers(), json=payload, timeout=timeout)
-        if resp.status_code in (200, 201):
-            return True
+    client = get_http_client()
+    resp = await client.post(url, headers=await _cache_headers(), json=payload, timeout=timeout)
+    if resp.status_code in (200, 201):
+        return True
+    # Key already present (or POST not idempotent) — update instead.
+    resp = await client.put(url, headers=await _cache_headers(), json=payload, timeout=timeout)
+    if resp.status_code in (200, 201):
+        return True
     raise CacheError(f"Cache PUT {key} failed: {resp.status_code} {resp.text[:200]}")

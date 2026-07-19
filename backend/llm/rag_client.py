@@ -22,6 +22,7 @@ import httpx
 from dotenv import load_dotenv
 
 from config.catalyst_token import get_access_token
+from http_client import get_http_client
 
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _dotenv_path = os.path.join(_project_root, ".env")
@@ -126,10 +127,10 @@ async def _query_rag_once(query: str, document_ids: list[str]) -> RagResult:
     }
     body = {"query": query, "documents": document_ids}
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(RAG_URL, headers=headers, json=body)
-        resp.raise_for_status()
-        data = resp.json()
+    client = get_http_client()
+    resp = await client.post(RAG_URL, headers=headers, json=body, timeout=30.0)
+    resp.raise_for_status()
+    data = resp.json()
 
     retrieved = data.get("retrieved_nodes", [])
 

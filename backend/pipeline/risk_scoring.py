@@ -15,7 +15,7 @@ official KSP schema -- both are derived live:
   - at-large status  = TRUE if NO row exists for this accused in
     ArrestSurrender
 """
-import json
+import orjson
 from datetime import date
 from db.connection import execute_query, execute_write
 
@@ -138,8 +138,8 @@ async def save_risk_score(result: dict):
              risk_score = %s, risk_tier = %s, contributing_factors = %s, computed_at = NOW()""",
         (
             result["accused_id"], result["risk_score"], result["risk_tier"],
-            json.dumps(result["contributing_factors"]),
-            result["risk_score"], result["risk_tier"], json.dumps(result["contributing_factors"]),
+            orjson.dumps(result["contributing_factors"]).decode(),
+            result["risk_score"], result["risk_tier"], orjson.dumps(result["contributing_factors"]).decode(),
         )
     )
 
@@ -160,7 +160,7 @@ async def get_cached_risk_score(accused_id: int) -> dict | None:
         "accused_id": row["AccusedMasterID"],
         "risk_score": float(row["risk_score"]),
         "risk_tier": row["risk_tier"],
-        "contributing_factors": json.loads(row["contributing_factors"]) if row["contributing_factors"] else [],
+        "contributing_factors": orjson.loads(row["contributing_factors"]) if row["contributing_factors"] else [],
     }
 
 

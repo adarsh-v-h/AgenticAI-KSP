@@ -230,10 +230,9 @@ class _MockResponse:
 
 
 class _FakeAsyncClient:
+    """Stands in for the shared http_client.get_http_client() singleton."""
     def __init__(self, handler):
         self._handler = handler
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
     async def post(self, url, **kw): return self._handler("POST", url, **kw)
     async def put(self, url, **kw): return self._handler("PUT", url, **kw)
     async def get(self, url, **kw): return self._handler("GET", url, **kw)
@@ -244,30 +243,30 @@ class TestNoSQLCRUD:
     def test_get_document(self, monkeypatch, nosql_env):
         def handler(method, url, **kw):
             return _MockResponse(200, {"data": [{"item": {"id": {"S": "doc-1"}, "name": {"S": "Alice"}}}]})
-        import httpx
-        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeAsyncClient(handler))
+        import db.nosql_client as nosql_mod
+        monkeypatch.setattr(nosql_mod, "get_http_client", lambda: _FakeAsyncClient(handler))
         result = asyncio.run(get_document("my_table", "doc-1"))
         assert result == {"id": "doc-1", "name": "Alice"}
 
     def test_get_document_404(self, monkeypatch, nosql_env):
         def handler(method, url, **kw):
             return _MockResponse(404)
-        import httpx
-        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeAsyncClient(handler))
+        import db.nosql_client as nosql_mod
+        monkeypatch.setattr(nosql_mod, "get_http_client", lambda: _FakeAsyncClient(handler))
         assert asyncio.run(get_document("my_table", "x")) is None
 
     def test_insert_document(self, monkeypatch, nosql_env):
         def handler(method, url, **kw):
             return _MockResponse(201)
-        import httpx
-        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeAsyncClient(handler))
+        import db.nosql_client as nosql_mod
+        monkeypatch.setattr(nosql_mod, "get_http_client", lambda: _FakeAsyncClient(handler))
         assert asyncio.run(insert_document("my_table", "doc-1", {"name": "Bob"})) is True
 
     def test_delete_document(self, monkeypatch, nosql_env):
         def handler(method, url, **kw):
             return _MockResponse(204)
-        import httpx
-        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeAsyncClient(handler))
+        import db.nosql_client as nosql_mod
+        monkeypatch.setattr(nosql_mod, "get_http_client", lambda: _FakeAsyncClient(handler))
         assert asyncio.run(delete_document("my_table", "doc-1")) is True
 
 
@@ -440,14 +439,12 @@ class TestVoiceTranscribe:
     class _FakeClient:
         def __init__(self, resp):
             self._resp = resp
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
         async def post(self, *a, **kw): return self._resp
 
     def test_transcribe_returns_transcript(self, monkeypatch):
         monkeypatch.setattr(zv, "get", lambda key: f"http://fake/{key}")
-        monkeypatch.setattr(zv.httpx, "AsyncClient",
-                          lambda *a, **k: self._FakeClient(
+        monkeypatch.setattr(zv, "get_http_client",
+                          lambda: self._FakeClient(
                               self._FakeResp(200, {"data": {"transcript": "how many thefts"}})))
         result = asyncio.run(zv.transcribe_audio(b"audio", "en"))
         assert result == "how many thefts"

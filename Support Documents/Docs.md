@@ -754,6 +754,10 @@ To handle Zoho Catalyst NoSQL credential limitations in local development enviro
 
 **Purpose:** Handles analysis and intelligence extraction from uploaded report files. Extracts text from base64 data payloads, classifies themes/entities, relates them to existing case/chat context using `MODEL_ANSWER`, and persists the interaction to both conversation history (NoSQL) and database (MySQL).
 
+**Status: wired into the UI.** The composer's attach button (`frontend/src/components/Composer.jsx`) opens a native file picker, uploads via `frontend/src/api/reports.js::analyzeReport()`, and the result renders as a normal user+assistant turn in the transcript (`ChatWindow.jsx::handleReportAnalyzed`). This was previously backend-only with the frontend button disabled ("coming soon") — see [10.26](#1026-report-upload-wired-end-to-end) for the change.
+
+**How the file actually reaches the LLM** (no filesystem I/O, no low-level `read()`/`open()` syscalls anywhere in this path — see the module docstring in `reports.py` for the full breakdown): the browser base64-encodes the file client-side via `FileReader`, POSTs it as one JSON field, `_decode_file()` runs a pure in-memory `base64.b64decode()`, `extract_report_text()` turns the bytes into a plain string, and that string is spliced into a prompt sent to Catalyst QuickML over HTTPS. The raw bytes are never written to disk and are discarded once text extraction finishes.
+
 **Pydantic models:**
 - `ReportAnalysisRequest`: Fields: `session_id`, `prompt`, `file_name`, `mime_type`, `data_base64`.
 - `ReportAnalysisResponse`: Fields: `answer_text`, `extracted_chars`, `file_name`, `warning`.
@@ -1449,13 +1453,15 @@ registration numbers", "Who are the top 5 repeat offenders?".
 **Purpose:** The message input box. Used in both the welcome state (directly below
 the suggestions) and during an active chat (pinned at the bottom).
 
-**Props:** `{ value, onChange, onSend, disabled, statusText }`
+**Props:** `{ value, onChange, onSend, disabled, statusText, rateLimitInfo, sessionId, onReportAnalyzed, onAuthExpired }`
 
 **Behavior:**
 - Auto-growing textarea: a `useEffect` resizes it on every `value` change, capped at 160px (then scrolls).
 - Enter sends, Shift+Enter inserts a newline. Send is suppressed while `disabled` or when the trimmed value is empty.
 - `statusText` (pipeline progress) renders in small text above the box while streaming.
-- Left actions: **Attach** (paperclip) and **Voice** (mic) buttons are placeholders — visually present but disabled with `.not-yet` styling and "coming soon" tooltips.
+- Left actions:
+  - **Attach** (paperclip) — opens a native file picker (`accept=".docx,.txt,.md,.markdown,.csv,.log,.json,.html,.htm"`), pre-validates the file client-side via `validateReportFile()` (size/extension), then uploads through `api/reports.js::analyzeReport()` to `POST /api/reports/analyze`. Any text currently typed in the composer is sent along as the analysis prompt. On success, `onReportAnalyzed(result, fileName)` is called so the parent (`ChatWindow.jsx`) can append the analysis to the transcript; on failure an inline error message renders above the composer; a 401 calls `onAuthExpired`. The button shows a spinner while the upload is in flight.
+  - **Voice** (mic) — `VoiceInput.jsx`, records audio and sends it to Zia STT (unrelated to file upload).
 - Send button: coral circle with an up-arrow icon; disabled while streaming or when input is empty.
 
 ---
@@ -2613,3 +2619,30 @@ The following files at the project root are one-time local MySQL migration artif
 **Verified:** ran the migration against the live RDS instance (10 officers backfilled successfully); confirmed end-to-end against the real DB that correct credentials still log in, wrong passwords return 401, and unknown badge numbers return 401; confirmed the rate limiter allows exactly 10 attempts then denies, and resets cleanly on a successful login. Full backend test suite (125 tests) passes.
 
 **Deferred to later (tracked in `Cleanup And Imp/WorkInPrg.md`, not yet actioned):** the remaining findings from the same security audit — a UNION/tautology bypass gap in the LLM-generated SQL validator, `.env`/`app-config.json` being committed to git with live secrets (DB password, JWT signing key, Catalyst OAuth credentials), missing magic-byte validation on file uploads, `/docs` (Swagger) being reachable in production, and frontend dependency versions not being exact-pinned.
+
+---
+
+### 10.26 Report Upload Wired End-to-End
+
+**Date:** July 19, 2026
+**What:** Connected the report-analysis feature's frontend to its (previously backend-only) endpoint. The composer's attach button was a disabled placeholder ("Attach report (coming soon)") even though `POST /api/reports/analyze` (`backend/routers/reports.py`) has existed and worked since an earlier step — the frontend simply never called it.
+
+**Why it was still disabled:** no functional reason — the backend endpoint was complete (auth, ownership check, size/type validation, text extraction, LLM analysis, persistence), it just had zero callers in the frontend (confirmed by grep before starting: no reference to `/api/reports/analyze` anywhere in `frontend/src/`).
+
+**Frontend changes:**
+1. New `frontend/src/api/reports.js` — `analyzeReport(file, sessionId, prompt)` reads the file via `FileReader.readAsDataURL()`, strips the `data:<mime>;base64,` prefix (browser-side, no filesystem access), and POSTs the bare base64 payload as JSON — matching the backend's expected shape. Also exports `validateReportFile()`, a client-side pre-check (5 MB cap, PDF/unknown-extension rejection) mirroring the backend's own validation, purely for faster feedback — the backend remains the source of truth and re-validates independently.
+2. `Composer.jsx` — the attach button now opens a real `<input type="file">` (hidden, triggered via `ref.click()`), shows a spinner while uploading, and surfaces upload errors inline above the composer (same visual slot as the rate-limit and status-text messages). Any text currently typed in the composer is sent along as the analysis prompt. New props: `sessionId`, `onReportAnalyzed`, `onAuthExpired`.
+3. `ChatWindow.jsx` — new `handleReportAnalyzed(result, fileName)` appends the analysis as a normal user+assistant message pair (same shape `handleSend` produces), so it renders and behaves identically to any other chat turn. The backend has already persisted the turn (`_persist_report_turn` in `reports.py`), so this only updates the local transcript + sidebar metadata (`bumpSessionMetadata`, `fetchSessions()`) — no extra network round-trip for the message content itself.
+4. Removed the now-dead `.composer-action-btn.not-yet` CSS rule (its only usage was the disabled placeholder); disabled-state styling now uses the standard `:disabled` pseudo-class instead, consistent with how other composer buttons already handle their disabled state.
+
+**Backend changes:** none to behavior — only a documentation-focused module docstring added to `routers/reports.py` explaining exactly how an uploaded file reaches the LLM (base64 → in-memory decode → text extraction → prompt text → HTTPS call to Catalyst QuickML), since a natural question when reviewing this endpoint is "does this do a low-level file read()?" — it does not. No filesystem I/O exists anywhere in this request path; the file lives in HTTP request/response bodies and Python `bytes`/`str` objects in memory for the duration of the request, and is discarded once text extraction completes.
+
+**Tests added:**
+- `backend/tests/test_pipeline_and_sessions.py::TestSessionAuthz` — three new tests alongside the existing intruder-rejection test: `test_reports_happy_path_persists_and_returns_analysis` (full mocked round-trip: decode → extract → LLM → MySQL session-row creation → message-pair save → NoSQL history save), `test_reports_rejects_unsupported_file_type` (415, LLM never called), `test_reports_rejects_oversized_file` (413, LLM never called).
+- `frontend/src/api/reports.test.js` (new file) — 10 tests covering `validateReportFile()` (size cap, PDF rejection, unknown-extension rejection, valid `.txt`/`.docx` acceptance) and `analyzeReport()` (correct base64 payload with no `data:` prefix, auth header, session_id/prompt/file_name in the request body, `AuthError` on 401, backend `detail` message surfaced on failure, generic message on network failure). Confirms `FileReader` works correctly under Vitest's jsdom environment.
+
+**Verified live, end-to-end, against the real GLM backend (not just mocked tests):** started the local backend, logged in, POSTed a real text file through the exact JSON shape the frontend now sends, got back a genuine LLM-generated intelligence note referencing the uploaded content, and confirmed via `GET /api/chat/sessions/{id}/messages` that the turn was actually persisted to MySQL. Test session cleaned up afterward.
+
+**Test counts:** backend 125 → 128 tests (all passing). Frontend 6 → 16 tests (all passing). Frontend `vite build` succeeds with no new warnings.
+
+**Not changed / explicitly out of scope for this pass:** PDF support (still rejected — needs a real parser + OCR, a separate, larger effort), and the FILE_UPLOADS magic-byte-validation gap already tracked in `Cleanup And Imp/WorkInPrg.md` (file type is still trusted from the client-supplied extension/MIME string, not verified against actual file signatures) — this pass only wired the existing, already-reviewed backend endpoint to the UI; it didn't change the endpoint's validation model.

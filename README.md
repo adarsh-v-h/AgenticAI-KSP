@@ -166,7 +166,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
     ├── .env                     # VITE_API_BASE_URL (shared backend URL)
     └── src/
         ├── App.jsx, main.jsx
-        ├── api/ (auth.js, chat.js, voice.js)
+        ├── api/ (auth.js, chat.js, voice.js, reports.js, ...)
         ├── components/ (ChatWindow, Composer, LoginPage, etc.)
         ├── context/ (LangContext.jsx)
         ├── hooks/ (useAuth.js)
@@ -485,7 +485,7 @@ Password formula: `<KGID>123`
 | `POST` | `/api/chat/sessions` | Yes | Create a new session |
 | `GET` | `/api/chat/sessions/{id}/messages` | Yes | Message history |
 | `POST` | `/api/chat/sessions/{id}/export` | Yes | Export session as HTML |
-| `POST` | `/api/reports/analyze` | Yes | Upload + analyze a report |
+| `POST` | `/api/reports/analyze` | Yes | Upload + analyze a report (attach button in the composer; `.docx`/text/Markdown/CSV/HTML — PDF not yet supported) |
 | `POST` | `/api/voice/transcribe` | Yes | STT (Zia) |
 | `POST` | `/api/voice/speak` | Yes | TTS (Zia) |
 | `GET` | `/api/analytics/trends/*` | Yes | Crime trend data |
@@ -572,7 +572,7 @@ python backend/debug_tools.py all      # Run all checks
 
 ## Running Tests
 
-Backend — 111 tests total (68 unit + 16 pipeline/session + 12 rate-limiter + 15 property-based),
+Backend — 119 tests total (68 unit + 19 pipeline/session + 17 rate-limiter + 15 property-based),
 no network or DB required:
 
 ```bash

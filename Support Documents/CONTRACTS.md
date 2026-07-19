@@ -1,6 +1,6 @@
 # Function Contracts
 
-247 functions across 63 backend files + 35 frontend files.
+253 functions across 63 backend files + 37 frontend files.
 
 ---
 
@@ -1321,6 +1321,25 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Returns:** (number) — persisted sidebar width in pixels, clamped to min/max bounds
 - **Raises:** never
 
+### handleReportAnalyzed
+- **Takes:** result (object) — {answer_text, extracted_chars, file_name, warning} from `POST /api/reports/analyze`, fileName (string) — the uploaded file's name, shown in the user-turn bubble
+- **Returns:** nothing
+- **Raises:** never
+
+---
+
+## frontend/src/components/Composer.jsx
+
+### handleAttachClick
+- **Takes:** nothing
+- **Returns:** nothing (opens the browser's native file picker)
+- **Raises:** never
+
+### handleFileSelected
+- **Takes:** event (Event) — the file input's change event
+- **Returns:** (Promise<void>) — resolves once the upload attempt finishes
+- **Raises:** never (all failures are caught and surfaced via inline error state / onAuthExpired)
+
 ---
 
 ## frontend/src/components/MediaViewer.jsx
@@ -1436,6 +1455,25 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Takes:** messageId (string|number) — unique identifier of the chat message
 - **Returns:** (Promise<object|null>) — parsed JSON evidence trail, or null if not found/not owned/DIRECT-path
 - **Raises:** AuthError — when session expired (401), Error — when request fails
+
+---
+
+## frontend/src/api/reports.js
+
+### fileToBase64
+- **Takes:** file (File) — the browser File object to encode
+- **Returns:** (Promise<string>) — the file's contents as a bare base64 string (no `data:` URL prefix)
+- **Raises:** Error — when the file cannot be read
+
+### validateReportFile
+- **Takes:** file (File) — the file the officer picked to attach
+- **Returns:** (string | null) — a user-facing error message, or null if the file passes basic checks
+- **Raises:** never
+
+### analyzeReport
+- **Takes:** file (File) — the report file to upload, sessionId (string) — chat session to attach the analysis to, prompt (string) — optional officer instruction for the analysis
+- **Returns:** (Promise<{answer_text: string, extracted_chars: number, file_name: string, warning: string|null}>) — the analysis result
+- **Raises:** AuthError — when the backend returns 401, Error — on 413/415/400/502/network failure with the backend's detail message when available
 
 ---
 

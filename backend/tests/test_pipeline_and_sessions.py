@@ -164,6 +164,130 @@ class TestSessionAuthz:
 
         asyncio.run(scenario())
 
+    def test_reports_happy_path_persists_and_returns_analysis(self, monkeypatch):
+        """
+        Full happy-path exercise of POST /api/reports/analyze: a NEW session
+        (session_exists=False) uploads a plain-text report, the LLM call
+        succeeds, and the turn is persisted to both MySQL (chat_sessions row +
+        message pair) and NoSQL history — mirroring what the real endpoint
+        does end-to-end, with only the DB/LLM boundaries mocked.
+        """
+        import base64
+
+        async def scenario():
+            calls = {"create_session_row": 0, "save_message_pair": 0, "save_turn": 0}
+
+            async def fake_exec(sql, params=()):
+                return []  # No existing row -> session_exists=False (create-or-append).
+
+            async def fake_create_session_row(session_id, officer_id, title):
+                calls["create_session_row"] += 1
+                assert session_id == "sess-new-report"
+                assert officer_id == OWNER_ID
+                return True
+
+            async def fake_save_message_pair(**kwargs):
+                calls["save_message_pair"] += 1
+                assert kwargs["session_id"] == "sess-new-report"
+                assert "theft" in kwargs["question"].lower() or "koramangala" in kwargs["answer_text"].lower()
+                return 555  # fake assistant message_id
+
+            async def fake_update_timestamp(session_id):
+                assert session_id == "sess-new-report"
+
+            async def fake_get_history(session_id):
+                return []
+
+            async def fake_save_turn(session_id, question, answer, assistant_table=None):
+                calls["save_turn"] += 1
+
+            async def fake_call_llm(model_key, prompt, system_prompt, max_tokens):
+                assert model_key == "MODEL_ANSWER"
+                assert "Koramangala" in prompt
+                return "Recurring theme: theft reports concentrated in Koramangala."
+
+            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "create_chat_session_row", fake_create_session_row)
+            monkeypatch.setattr(reports_mod, "save_message_pair", fake_save_message_pair)
+            monkeypatch.setattr(reports_mod, "update_session_timestamp", fake_update_timestamp)
+            monkeypatch.setattr(reports_mod, "get_history", fake_get_history)
+            monkeypatch.setattr(reports_mod, "save_turn", fake_save_turn)
+            monkeypatch.setattr(reports_mod, "call_llm", fake_call_llm)
+
+            file_bytes = "Incident: repeated theft reports in Koramangala area.".encode()
+            request = reports_mod.ReportAnalysisRequest(
+                session_id="sess-new-report",
+                prompt="summarize themes",
+                file_name="incident.txt",
+                mime_type="text/plain",
+                data_base64=base64.b64encode(file_bytes).decode(),
+            )
+            response = await reports_mod.analyze_report(request, officer={"officer_id": OWNER_ID})
+
+            assert response.file_name == "incident.txt"
+            assert response.extracted_chars > 0
+            assert "Koramangala" in response.answer_text
+            assert response.warning is None
+            assert calls["create_session_row"] == 1
+            assert calls["save_message_pair"] == 1
+            assert calls["save_turn"] == 1
+
+        asyncio.run(scenario())
+
+    def test_reports_rejects_unsupported_file_type(self, monkeypatch):
+        """A .exe (or any non-text/docx/pdf) upload is rejected with 415 before
+        any LLM call, same authorization-then-validation ordering as the PDF
+        rejection but for a generically unknown extension."""
+        import base64
+
+        async def scenario():
+            async def fake_exec(sql, params=()):
+                return []
+            async def fake_llm(*a, **k):
+                raise AssertionError("must not call LLM for an unsupported file type")
+
+            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "call_llm", fake_llm)
+
+            request = reports_mod.ReportAnalysisRequest(
+                session_id="sess-new-report-2",
+                file_name="binary.exe",
+                mime_type="application/octet-stream",
+                data_base64=base64.b64encode(b"MZ\x90\x00").decode(),
+            )
+            with pytest.raises(HTTPException) as exc:
+                await reports_mod.analyze_report(request, officer={"officer_id": OWNER_ID})
+            assert exc.value.status_code == 415
+
+        asyncio.run(scenario())
+
+    def test_reports_rejects_oversized_file(self, monkeypatch):
+        """A file over MAX_FILE_BYTES (5MB) is rejected with 413 before any
+        text extraction or LLM call."""
+        import base64
+
+        async def scenario():
+            async def fake_exec(sql, params=()):
+                return []
+            async def fake_llm(*a, **k):
+                raise AssertionError("must not call LLM for an oversized file")
+
+            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "call_llm", fake_llm)
+
+            oversized = b"x" * (reports_mod.MAX_FILE_BYTES + 1)
+            request = reports_mod.ReportAnalysisRequest(
+                session_id="sess-new-report-3",
+                file_name="huge.txt",
+                mime_type="text/plain",
+                data_base64=base64.b64encode(oversized).decode(),
+            )
+            with pytest.raises(HTTPException) as exc:
+                await reports_mod.analyze_report(request, officer={"officer_id": OWNER_ID})
+            assert exc.value.status_code == 413
+
+        asyncio.run(scenario())
+
     def test_chat_rejects_intruder(self, monkeypatch):
         async def scenario():
             async def fake_exec(sql, params=()): return _rows_for(OWNER_ID)

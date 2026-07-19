@@ -3,7 +3,7 @@ Persistent chat storage.
 Sessions and message metadata -> Catalyst Data Store (MySQL).
 Rich message data (table_data) -> MySQL table_data_json column.
 """
-import json
+import orjson
 import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -178,11 +178,11 @@ async def save_message_pair(
     try:
         table_json = None
         if has_table and table_data:
-            table_json = json.dumps(table_data, default=_serialize)
+            table_json = orjson.dumps(table_data, default=_serialize).decode()
 
         follow_ups_json = None
         if assistant_follow_ups:
-            follow_ups_json = json.dumps(assistant_follow_ups, default=_serialize)
+            follow_ups_json = orjson.dumps(assistant_follow_ups, default=_serialize).decode()
 
         await execute_write(
             """INSERT INTO chat_messages
@@ -231,14 +231,14 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
             table_data = []
             if row.get("table_data_json"):
                 try:
-                    table_data = json.loads(row["table_data_json"])
+                    table_data = orjson.loads(row["table_data_json"])
                 except Exception:
                     table_data = []
 
             suggested_follow_ups = []
             if row.get("follow_ups_json"):
                 try:
-                    suggested_follow_ups = json.loads(row["follow_ups_json"])
+                    suggested_follow_ups = orjson.loads(row["follow_ups_json"])
                 except Exception:
                     suggested_follow_ups = []
 
