@@ -97,7 +97,6 @@ from db.nosql_client import (
     get_document,
     insert_document,
     update_document,
-    delete_document,
 )
 
 
@@ -322,21 +321,6 @@ async def save_turn(
                 raise
     except Exception as e:
         _log(f"ERROR: history save/update failed for {session_id}: {e}")
-
-
-# CONTRACT
-# takes:  session_id (str) — session identifier to delete history for
-# returns: nothing
-# raises:  nothing (never raises)
-async def clear_history(session_id: str) -> None:
-    """Delete history for `session_id`. Never raises."""
-    if not session_id:
-        return
-    await _local_clear(session_id)
-    try:
-        await delete_document("conversation_history", session_id, timeout=_NOSQL_TIMEOUT, key_name="session_id")
-    except Exception as e:
-        _log(f"ERROR: history DELETE failed for {session_id}: {e}")
 
 
 # CONTRACT

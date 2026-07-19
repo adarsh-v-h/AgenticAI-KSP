@@ -1,9 +1,10 @@
 ﻿"""
 Offender profiling endpoints -- explainable risk scores for accused persons.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.simple_auth import get_current_officer
+from auth.role_guard import log_action
 from pipeline.risk_scoring import (
     compute_risk_for_accused,
     save_risk_score,
@@ -21,7 +22,12 @@ _PLACEHOLDER_NAMES = ("Suspect", "Unknown", "Unidentified", "Not Known", "NA", "
 
 
 @router.get("/api/profiling/risk/{accused_id}")
-async def get_risk_score(accused_id: int, force_recompute: bool = False, officer: dict = Depends(get_current_officer)):
+async def get_risk_score(accused_id: int, request: Request, force_recompute: bool = False, officer: dict = Depends(get_current_officer)):
+    # Audit trail: viewing an individual's risk profile is sensitive.
+    await log_action(
+        officer["officer_id"], "view_risk_profile",
+        resource_type="accused", resource_id=str(accused_id), request=request,
+    )
     if not force_recompute:
         cached = await get_cached_risk_score(accused_id)
         if cached:

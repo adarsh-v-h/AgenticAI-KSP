@@ -2,9 +2,10 @@
 Chat session export — PDF (primary) and HTML (fallback) formats.
 Uses fpdf2 for PDF generation — pure Python, no system dependencies.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from auth.simple_auth import get_current_officer
+from auth.role_guard import log_action
 from db.chat_store import get_messages_for_session, verify_session_owner
 from db.connection import execute_query
 from conversation.history import get_history
@@ -331,6 +332,7 @@ def _build_html(officer_name: str, badge_number: str, title: str, messages: list
 @router.post("/api/chat/sessions/{session_id}/export")
 async def export_session_pdf(
     session_id: str,
+    request: Request,
     format: str = Query("pdf", pattern="^(pdf|html)$"),
     officer: dict = Depends(get_current_officer),
 ):
@@ -341,6 +343,13 @@ async def export_session_pdf(
     owned = await verify_session_owner(session_id, officer["officer_id"])
     if not owned:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    # Audit trail: exporting case data off-platform is a sensitive action.
+    await log_action(
+        officer["officer_id"], "export_session",
+        resource_type="chat_session", resource_id=session_id,
+        details=f"format={format}", request=request,
+    )
 
     messages = await get_messages_for_session(session_id)
     if not messages:
