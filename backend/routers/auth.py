@@ -8,6 +8,7 @@ import sys
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from auth.login_rate_limiter import check_login_attempt, reset_login_attempts
 from auth.simple_auth import login
 
 router = APIRouter()
@@ -43,9 +44,25 @@ def _log(msg: str) -> None:
 async def login_route(request: LoginRequest) -> LoginResponse:
     """
     Validate credentials and issue a JWT.
-    HTTP 401 on bad credentials. Other exceptions surface as HTTP 500 from
-    FastAPI's default handler — those would be infrastructure errors (DB down).
+
+    Rate limited per badge number (10 attempts / 15 min — see
+    auth/login_rate_limiter.py) BEFORE the credential check runs, so brute
+    forcing a specific officer's password is capped regardless of source IP.
+    This endpoint is exempt from the station-wide limiter (main.py) since
+    there's no JWT yet to read a station id from.
+
+    HTTP 401 on bad credentials, HTTP 429 when the badge number has exceeded
+    its attempt budget. Other exceptions surface as HTTP 500 from FastAPI's
+    default handler — those would be infrastructure errors (DB down).
     """
+    limit_result = check_login_attempt(request.badge_number)
+    if not limit_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+            headers={"Retry-After": str(limit_result.retry_after_seconds)},
+        )
+
     try:
         result = await login(request.badge_number, request.password)
     except HTTPException:
@@ -55,6 +72,7 @@ async def login_route(request: LoginRequest) -> LoginResponse:
         _log(f"login_route unexpected error: {e}")
         raise HTTPException(status_code=503, detail="Login service unavailable.")
 
+    reset_login_attempts(request.badge_number)
     return LoginResponse(
         access_token=result["access_token"],
         officer=OfficerInfo(**result["officer"]),

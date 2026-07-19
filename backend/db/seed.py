@@ -274,16 +274,24 @@ async def seed_employees(conn, lookups):
             gender_id = 1
             blood_group_id = random.randint(1, 8)
             app_date = date(2010, 1, 1) + timedelta(days=random.randint(0, 4000))
-            
+
+            # Password is KGID + "123" (see backend/migrate_password_hash.py
+            # for the rationale) — stored as a bcrypt hash so fresh seeds match
+            # the same login() verification path as migrated production data.
+            import bcrypt
+            password_hash = bcrypt.hashpw(
+                f"{off['badge']}123".encode("utf-8"), bcrypt.gensalt()
+            ).decode("utf-8")
+
             sql = """
             INSERT INTO Employee (DistrictID, UnitID, RankID, DesignationID, KGID, FirstName, 
                                   EmployeeDOB, GenderID, BloodGroupID, PhysicallyChallenged, 
-                                  AppointmentDate, role, is_active)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                  AppointmentDate, role, is_active, password_hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             await cur.execute(sql, (
                 dist_id, unit_id, rank_id, desg_id, off["badge"], off["name"],
-                dob, gender_id, blood_group_id, 0, app_date, off["role"], 1
+                dob, gender_id, blood_group_id, 0, app_date, off["role"], 1, password_hash
             ))
             emp_id = cur.lastrowid
             employee_ids.append({

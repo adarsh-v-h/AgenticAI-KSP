@@ -75,6 +75,7 @@ CREATE TABLE Employee (
     AppointmentDate         DATE,
     role                    ENUM('investigator','analyst','supervisor','policymaker') NOT NULL DEFAULT 'investigator',
     is_active               BOOLEAN DEFAULT TRUE,
+    password_hash           VARCHAR(255),
     FOREIGN KEY (DistrictID) REFERENCES District(DistrictID),
     FOREIGN KEY (UnitID) REFERENCES Unit(UnitID),
     FOREIGN KEY (RankID) REFERENCES `Rank`(RankID),
