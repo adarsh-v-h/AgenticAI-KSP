@@ -112,10 +112,34 @@ jobs:
       - name: Generate app-config.json + bundle deps + deploy (backend + client)
         env:
           CATALYST_CLI_TOKEN: ${{ secrets.CATALYST_CLI_TOKEN }}
+          CATALYST_PROJECT_ID: ${{ secrets.CATALYST_PROJECT_ID }}
+          CATALYST_ORG_ID: ${{ secrets.CATALYST_ORG_ID }}
         run: |
           python3 scripts/gen_app_config.py
           python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
-          catalyst deploy --only appsail,client --ignore-scripts --token "$CATALYST_CLI_TOKEN"
+          # -p/--project and --org are REQUIRED here: this runner has no
+          # .catalystrc (it's gitignored, project-local only), so without
+          # these flags the CLI has no project/org context and fails with
+          # "Org and Project Id cannot be empty".
+          #
+          # IMPORTANT: the Catalyst CLI has been observed to print that error
+          # and STILL exit 0 — `set -e` alone will NOT catch this, so we
+          # capture output and explicitly grep for known failure text before
+          # letting the pipeline proceed to the smoke test. Without this, the
+          # smoke test just re-validates the OLD still-running deployment and
+          # the whole pipeline "passes" while shipping nothing (this is
+          # exactly what happened on 2026-07-19 — see git history).
+          set +e
+          DEPLOY_OUTPUT=$(catalyst deploy --only appsail,client --ignore-scripts \
+            -p "$CATALYST_PROJECT_ID" --org "$CATALYST_ORG_ID" \
+            --token "$CATALYST_CLI_TOKEN" 2>&1)
+          DEPLOY_EXIT=$?
+          set -e
+          echo "$DEPLOY_OUTPUT"
+          if [ $DEPLOY_EXIT -ne 0 ] || echo "$DEPLOY_OUTPUT" | grep -qiE "cannot be empty|error|failed to deploy"; then
+            echo "::error::catalyst deploy failed or printed an error (exit=$DEPLOY_EXIT) — aborting before the smoke test can mask this as success."
+            exit 1
+          fi
 
       - name: Wait for AppSail to come up
         run: sleep 45
@@ -138,6 +162,8 @@ jobs:
         if: steps.smoke.outcome == 'failure'
         env:
           CATALYST_CLI_TOKEN: ${{ secrets.CATALYST_CLI_TOKEN }}
+          CATALYST_PROJECT_ID: ${{ secrets.CATALYST_PROJECT_ID }}
+          CATALYST_ORG_ID: ${{ secrets.CATALYST_ORG_ID }}
         run: |
           echo "::error::Smoke test failed — rolling back to last-good-deploy."
           if git rev-parse last-good-deploy >/dev/null 2>&1; then
@@ -147,7 +173,9 @@ jobs:
             cp -r frontend/dist/. client-package/
             python3 scripts/gen_app_config.py
             python3 -m pip install -r backend/requirements.txt -t backend/ --upgrade --quiet
-            catalyst deploy --only appsail,client --ignore-scripts --token "$CATALYST_CLI_TOKEN"
+            catalyst deploy --only appsail,client --ignore-scripts \
+              -p "$CATALYST_PROJECT_ID" --org "$CATALYST_ORG_ID" \
+              --token "$CATALYST_CLI_TOKEN"
             echo "Rolled back successfully."
           else
             echo "::warning::No last-good-deploy tag yet — cannot auto-revert."
