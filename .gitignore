@@ -47,6 +47,7 @@ backend/*.dist-info/
 backend/aiomysql/
 backend/annotated_types/
 backend/anyio/
+backend/bcrypt/
 backend/bin/
 backend/certifi/
 backend/cffi/
