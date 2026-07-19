@@ -2,6 +2,7 @@ import sys
 import httpx
 from config.settings import get
 from config.catalyst_token import get_access_token
+from http_client import get_http_client
 
 
 class LLMError(Exception):
@@ -75,17 +76,17 @@ async def ping_model(model_key: str) -> bool:
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url, json=payload, headers=await _llm_headers(), timeout=30.0
-            )
-            data = response.json()
-            if response.status_code == 200 and _extract_response_text(data):
-                return True
-            print(
-                f"WARNING: LLM ping got unexpected response: {data}",
-                file=sys.stderr,
-            )
+        client = get_http_client()
+        response = await client.post(
+            url, json=payload, headers=await _llm_headers(), timeout=30.0
+        )
+        data = response.json()
+        if response.status_code == 200 and _extract_response_text(data):
+            return True
+        print(
+            f"WARNING: LLM ping got unexpected response: {data}",
+            file=sys.stderr,
+        )
     except Exception as e:
         print(f"WARNING: LLM ping failed for {model_key}: {e}", file=sys.stderr)
 
@@ -140,10 +141,10 @@ async def call_llm(
     }
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url, json=payload, headers=await _llm_headers(), timeout=180.0
-            )
+        client = get_http_client()
+        response = await client.post(
+            url, json=payload, headers=await _llm_headers(), timeout=180.0
+        )
     except httpx.TimeoutException as e:
         raise LLMError(f"LLM call timed out after 180s: {e}") from e
     except httpx.HTTPError as e:

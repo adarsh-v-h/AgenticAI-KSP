@@ -3,6 +3,27 @@ Report/file analysis endpoint.
 
 Accepts a small uploaded report as base64 JSON, extracts readable text, and
 asks the answer model for recurring themes and case relevance.
+
+HOW THE UPLOADED FILE ACTUALLY REACHS THE LLM (high level, for anyone asking
+"how does reports.py feed the AI"):
+  1. The frontend base64-encodes the file client-side (see
+     frontend/src/api/reports.js::fileToBase64 — uses the browser's
+     FileReader, not a filesystem read) and POSTs it as one JSON field.
+  2. `_decode_file()` below does `base64.b64decode(...)` — this is Python's
+     standard-library base64 decoder, a pure in-memory byte transform. There
+     is no low-level `read()`/`open()` syscall anywhere in this path: the
+     bytes never touch disk, they arrive already in the request body that
+     FastAPI/Starlette already buffered into memory for us.
+  3. `extract_report_text()` converts those bytes into a plain Python `str`
+     (unzip+XML-parse for .docx, `bytes.decode()` for text formats).
+  4. That string is spliced into a prompt (`build_report_prompt()`) as plain
+     text and sent to `call_llm()` (backend/llm/client.py), which does an
+     HTTPS POST to Catalyst QuickML. The LLM receives the report content as
+     ordinary prompt text — no special file format, no separate "file API".
+  5. The raw file bytes are discarded once step 3 finishes; only the
+     extracted text (capped at MAX_EXTRACTED_CHARS) and the LLM's answer are
+     persisted (to MySQL, via _persist_report_turn below).
+See Support Documents/Docs.md §3.21 for the full architecture writeup.
 """
 
 import asyncio

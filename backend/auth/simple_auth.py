@@ -6,6 +6,7 @@ The `get_current_officer` dependency is the only thing routes touch â€” swa
 the implementation here requires zero route changes.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -164,8 +165,11 @@ async def login(badge_number: str, password: str) -> dict:
 
     employee = rows[0]
     stored_hash = employee.get("password_hash")
-    if not stored_hash or not bcrypt.checkpw(
-        password.encode("utf-8"), stored_hash.encode("utf-8")
+    # bcrypt.checkpw is deliberately slow (CPU-bound, ~100-300ms) and has no
+    # async variant. Running it directly here would block the whole event
+    # loop for that duration — offload it to a worker thread instead.
+    if not stored_hash or not await asyncio.to_thread(
+        bcrypt.checkpw, password.encode("utf-8"), stored_hash.encode("utf-8")
     ):
         raise _unauthorized("Invalid badge number or password.")
 

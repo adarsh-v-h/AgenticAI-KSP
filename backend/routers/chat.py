@@ -10,7 +10,7 @@ can authenticate without setting custom headers.
 """
 
 import sys
-import json
+import orjson
 import asyncio
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -98,7 +98,7 @@ def _log(msg: str) -> None:
 # raises:  nothing
 def _sse(event: dict) -> str:
     """Format a single SSE message. Must end with a blank line."""
-    return f"data: {json.dumps(event, default=str)}\n\n"
+    return f"data: {orjson.dumps(event, default=str).decode()}\n\n"
 
 
 # CONTRACT

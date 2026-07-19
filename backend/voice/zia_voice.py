@@ -24,6 +24,7 @@ import httpx
 
 from config.settings import get
 from config.catalyst_token import get_access_token
+from http_client import get_http_client
 
 
 class VoiceError(Exception):
@@ -120,10 +121,10 @@ async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     data = {"language": language}
 
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                url, headers=await _zia_headers(), files=files, data=data, timeout=20.0
-            )
+        client = get_http_client()
+        resp = await client.post(
+            url, headers=await _zia_headers(), files=files, data=data, timeout=20.0
+        )
     except httpx.HTTPError as e:
         raise VoiceError(f"STT request failed: {e}") from e
 
@@ -177,13 +178,13 @@ async def translate_to_english(text: str, source_language: str = "kn") -> str:
     }
 
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                url,
-                headers=await _zia_headers({"Content-Type": "application/json"}),
-                json=payload,
-                timeout=10.0,
-            )
+        client = get_http_client()
+        resp = await client.post(
+            url,
+            headers=await _zia_headers({"Content-Type": "application/json"}),
+            json=payload,
+            timeout=10.0,
+        )
         if resp.status_code == 200:
             # Response shape: {"status": "success", "translated_text": "...", ...}
             # translated_text is top-level, NOT nested under a "data" key.
@@ -298,13 +299,13 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
     }
 
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                url,
-                headers=await _zia_headers({"Content-Type": "application/json"}),
-                json=payload,
-                timeout=20.0,
-            )
+        client = get_http_client()
+        resp = await client.post(
+            url,
+            headers=await _zia_headers({"Content-Type": "application/json"}),
+            json=payload,
+            timeout=20.0,
+        )
     except httpx.HTTPError as e:
         raise VoiceError(f"TTS request failed: {e}") from e
 

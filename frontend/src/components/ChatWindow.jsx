@@ -407,6 +407,40 @@ export default function ChatWindow({ officer, onLogout }) {
     loadSessionMessages(activeSessionIdRef.current)
   }, [loadSessionMessages])
 
+  // CONTRACT
+  // takes:  result (object) — {answer_text, extracted_chars, file_name, warning} from POST /api/reports/analyze,
+  //          fileName (string) — the uploaded file's name, shown in the user-turn bubble
+  // returns: nothing
+  // throws:  never
+  // Appends the report analysis as a normal user+assistant turn (mirroring
+  // handleSend's message shape) so it renders and persists the same way any
+  // other chat message does. The backend has already saved this turn to
+  // MySQL (see routers/reports.py::_persist_report_turn), so this only
+  // updates the LOCAL transcript + sidebar metadata — no extra network call.
+  const handleReportAnalyzed = useCallback(
+    (result, fileName) => {
+      const userLabel = `📎 Uploaded report: ${fileName}`
+      const userMsg = { id: newMessageId(), role: 'user', content: userLabel }
+      const assistantMsg = {
+        id: newMessageId(),
+        role: 'assistant',
+        content: result.warning ? `${result.answer_text}\n\n_${result.warning}_` : result.answer_text,
+        tableData: null,
+        mediaAttachments: null,
+        graphAvailable: false,
+        suggestedFollowUps: null,
+        isStreaming: false,
+        error: false,
+      }
+      setMessages((prev) => [...prev, userMsg, assistantMsg])
+      bumpSessionMetadata(activeSessionId, userLabel)
+      fetchSessions()
+        .then((loaded) => setSessions(loaded))
+        .catch(() => {})
+    },
+    [activeSessionId, bumpSessionMetadata],
+  )
+
   const handleExportActiveSession = useCallback(async () => {
     if (isExportingActive) return
     setIsExportingActive(true)
@@ -582,6 +616,9 @@ export default function ChatWindow({ officer, onLogout }) {
               disabled={isStreaming}
               statusText={statusText}
               rateLimitInfo={rateLimit}
+              sessionId={activeSessionId}
+              onReportAnalyzed={handleReportAnalyzed}
+              onAuthExpired={onLogout}
             />
           </div>
         ) : (
@@ -647,6 +684,9 @@ export default function ChatWindow({ officer, onLogout }) {
               disabled={isStreaming}
               statusText={statusText}
               rateLimitInfo={rateLimit}
+              sessionId={activeSessionId}
+              onReportAnalyzed={handleReportAnalyzed}
+              onAuthExpired={onLogout}
             />
           </div>
         )}

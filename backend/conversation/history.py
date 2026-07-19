@@ -14,7 +14,7 @@ project's NoSQL exposes a different path, only that helper needs to change.
 """
 
 import sys
-import json
+import orjson
 import uuid
 import asyncio
 from datetime import datetime, timezone
@@ -157,7 +157,7 @@ async def get_history(session_id: str) -> list[dict]:
             raw = doc.get("history")
             if raw is None:
                 return await _local_get(session_id)
-            turns = json.loads(raw) if isinstance(raw, str) else raw
+            turns = orjson.loads(raw) if isinstance(raw, str) else raw
             if isinstance(turns, list):
                 return _migrate_messages(turns[-MAX_TURNS:])
             return []
@@ -300,7 +300,7 @@ async def save_turn(
     # when NoSQL is misbehaving.
     await _local_set(session_id, trimmed)
 
-    document = {"history": json.dumps(trimmed, default=str)}
+    document = {"history": orjson.dumps(trimmed, default=str).decode()}
 
     await _sync_session_metadata(
         session_id=session_id,

@@ -3,6 +3,7 @@ import os
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import ORJSONResponse
 
 # Ensure the backend directory is in the import path
 backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -11,6 +12,7 @@ if backend_dir not in sys.path:
 
 from config.settings import validate_settings, get
 from db.connection import create_pool, close_pool
+from http_client import init_http_client, close_http_client
 from llm.client import ping_model
 from routers.chat import router as chat_router
 from routers.auth import router as auth_router
@@ -34,6 +36,11 @@ async def lifespan(app: FastAPI):
     # â”€â”€ STARTUP â”€â”€
     # 1. Validate all env vars â€” crash loudly if anything missing
     validate_settings()
+
+    # 1a. Create the shared httpx.AsyncClient used by every outbound Catalyst
+    # call (LLM, NoSQL, Cache, RAG, voice, OAuth). Must exist before anything
+    # below that makes an HTTP call.
+    init_http_client()
 
     # 1b. Warm up the Catalyst OAuth token so the first real request doesn't pay
     # the refresh latency, and so a bad refresh config surfaces at startup. The
@@ -84,6 +91,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"WARNING: rate limiter shutdown error: {e}", file=sys.stderr)
     await close_pool()
+    await close_http_client()
 
 
 app = FastAPI(
@@ -91,7 +99,8 @@ app = FastAPI(
     version="0.4.0-step4",
     docs_url="/docs",       # keep Swagger available during dev
     redoc_url=None,
-    lifespan=lifespan
+    lifespan=lifespan,
+    default_response_class=ORJSONResponse,  # faster JSON serialization on chat/API payloads
 )
 
 # CORS — allow the configured frontend origin(s), never wildcard.

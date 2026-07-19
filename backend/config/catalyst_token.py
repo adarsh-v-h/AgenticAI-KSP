@@ -37,6 +37,7 @@ import time
 import httpx
 
 from config.settings import get
+from http_client import get_http_client
 
 # How many seconds before actual expiry we proactively refresh. Zoho access
 # tokens live ~3600s; refreshing with a 5-minute safety margin avoids handing
@@ -114,17 +115,17 @@ async def _refresh_access_token(timeout: float = 15.0) -> str:
         raise RuntimeError("Catalyst refresh credentials are not configured.")
     client_id, client_secret, refresh_tok = creds
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            url,
-            data={
-                "grant_type": "refresh_token",
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "refresh_token": refresh_tok,
-            },
-            timeout=timeout,
-        )
+    client = get_http_client()
+    resp = await client.post(
+        url,
+        data={
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_tok,
+        },
+        timeout=timeout,
+    )
     resp.raise_for_status()
     data = resp.json() or {}
     token = data.get("access_token")

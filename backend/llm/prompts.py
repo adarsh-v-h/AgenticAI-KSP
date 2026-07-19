@@ -3,7 +3,7 @@ All system prompts and prompt builders used by the SQL and answer chains.
 Keep prompts in one place so they're easy to tune in one pass.
 """
 
-import json
+import orjson
 
 SQL_SYSTEM_PROMPT = """You are an expert MySQL query writer for the Karnataka State Police secure crime database.
 Your ONLY job is to write a valid MySQL SELECT query based on the user's question.
@@ -272,7 +272,7 @@ def build_answer_prompt(
 
     # Use default=str so dates/decimals serialize cleanly.
     try:
-        results_json = json.dumps(truncated, indent=2, default=str)
+        results_json = orjson.dumps(truncated, option=orjson.OPT_INDENT_2, default=str).decode()
     except Exception:
         results_json = str(truncated)
 
@@ -413,7 +413,7 @@ def build_direct_answer_prompt(
     if recent_table:
         truncated = _truncate_for_answer(recent_table, max_rows=30)
         try:
-            rows_json = json.dumps(truncated, indent=2, default=str)
+            rows_json = orjson.dumps(truncated, option=orjson.OPT_INDENT_2, default=str).decode()
         except Exception:
             rows_json = str(truncated)
         parts.append(

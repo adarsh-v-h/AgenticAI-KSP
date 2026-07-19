@@ -46,13 +46,13 @@ class TestRefresh:
         creds = ("cid", "csecret", "rtok")
         with patch.object(ct, "_refresh_credentials", return_value=creds), \
              patch.object(ct, "_accounts_url", return_value="https://accounts.zoho.in/oauth/v2/token"), \
-             patch.object(ct, "httpx") as mock_httpx:
+             patch.object(ct, "get_http_client") as mock_get_client:
             resp = AsyncMock()
             resp.raise_for_status = lambda: None
             resp.json = lambda: {"access_token": "fresh-1", "expires_in": 3600}
             client = AsyncMock()
             client.post = AsyncMock(return_value=resp)
-            mock_httpx.AsyncClient.return_value.__aenter__.return_value = client
+            mock_get_client.return_value = client
 
             first = _run(ct.get_access_token())
             assert first == "fresh-1"
@@ -65,13 +65,13 @@ class TestRefresh:
         creds = ("cid", "csecret", "rtok")
         with patch.object(ct, "_refresh_credentials", return_value=creds), \
              patch.object(ct, "_accounts_url", return_value="https://accounts.zoho.in/oauth/v2/token"), \
-             patch.object(ct, "httpx") as mock_httpx:
+             patch.object(ct, "get_http_client") as mock_get_client:
             resp = AsyncMock()
             resp.raise_for_status = lambda: None
             resp.json = lambda: {"access_token": "fresh-2", "expires_in": 3600}
             client = AsyncMock()
             client.post = AsyncMock(return_value=resp)
-            mock_httpx.AsyncClient.return_value.__aenter__.return_value = client
+            mock_get_client.return_value = client
 
             _run(ct.get_access_token())
             # Force expiry.
