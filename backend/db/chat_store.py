@@ -5,7 +5,7 @@ Rich message data (table_data) -> MySQL table_data_json column.
 """
 import json
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from db.connection import execute_query, execute_write
@@ -17,6 +17,27 @@ from db.connection import execute_query, execute_write
 # raises:  nothing
 def _log(msg):
     print(msg, file=sys.stderr, flush=True)
+
+
+# CONTRACT
+# takes:  dt (datetime | None) — a naive datetime as returned by MySQL (server
+#          timezone is UTC, see db/connection.py's aiomysql pool), or None
+# returns: (str | None) — ISO 8601 string with an explicit UTC offset, or None
+# raises:  nothing
+def _utc_iso(dt) -> str | None:
+    """
+    MySQL TIMESTAMP columns come back from aiomysql as naive datetime objects
+    (no tzinfo), even though the server's time_zone is UTC. Calling
+    `.isoformat()` directly on them produces a string with no offset (e.g.
+    "2026-07-19T05:23:19"), which JS `Date` parses as *local* time rather than
+    UTC — this is what caused session timestamps to show the wrong clock time
+    in the sidebar. Attaching `timezone.utc` before formatting fixes that.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 # ponytail: single serializer helper, ceiling: one chat payload shape, upgrade: replace with a shared JSON encoder if more stores adopt it.
@@ -90,7 +111,7 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
         rows = await execute_query(
             """SELECT session_id, title, created_at, updated_at, message_count
                FROM chat_sessions
-               WHERE officer_id = %s AND is_active = TRUE
+               WHERE officer_id = %s AND is_active = TRUE AND message_count > 0
                ORDER BY updated_at DESC
                LIMIT %s""",
             (officer_id, limit)
@@ -100,8 +121,8 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
                 "session_id": row["session_id"],
                 "title": row["title"],
                 "message_count": row["message_count"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "created_at": _utc_iso(row["created_at"]),
+                "updated_at": _utc_iso(row["updated_at"]),
             }
             for row in rows
         ]
@@ -232,7 +253,7 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
                 "table_data": table_data,
                 "media_attachments": [],
                 "suggested_follow_ups": suggested_follow_ups,
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "created_at": _utc_iso(row["created_at"]),
             }
             messages.append(msg)
 
