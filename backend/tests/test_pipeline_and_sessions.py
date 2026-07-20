@@ -147,11 +147,11 @@ def _async_ret(value):
 class TestSessionAuthz:
     def test_reports_rejects_intruder(self, monkeypatch):
         async def scenario():
-            async def fake_exec(sql, params=()): return _rows_for(OWNER_ID)
+            async def fake_get_owner(sid): return OWNER_ID
             def fake_decode(_d): raise AssertionError("must not decode")
             async def fake_llm(*a, **k): raise AssertionError("must not call LLM")
 
-            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "get_session_owner", fake_get_owner)
             monkeypatch.setattr(reports_mod, "_decode_file", fake_decode)
             monkeypatch.setattr(reports_mod, "call_llm", fake_llm)
 
@@ -177,8 +177,8 @@ class TestSessionAuthz:
         async def scenario():
             calls = {"create_session_row": 0, "save_message_pair": 0, "save_turn": 0}
 
-            async def fake_exec(sql, params=()):
-                return []  # No existing row -> session_exists=False (create-or-append).
+            async def fake_get_owner(sid):
+                return None  # No existing session -> session_exists=False (create-or-append).
 
             async def fake_create_session_row(session_id, officer_id, title):
                 calls["create_session_row"] += 1
@@ -206,7 +206,7 @@ class TestSessionAuthz:
                 assert "Koramangala" in prompt
                 return "Recurring theme: theft reports concentrated in Koramangala."
 
-            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "get_session_owner", fake_get_owner)
             monkeypatch.setattr(reports_mod, "create_chat_session_row", fake_create_session_row)
             monkeypatch.setattr(reports_mod, "save_message_pair", fake_save_message_pair)
             monkeypatch.setattr(reports_mod, "update_session_timestamp", fake_update_timestamp)
@@ -241,12 +241,12 @@ class TestSessionAuthz:
         import base64
 
         async def scenario():
-            async def fake_exec(sql, params=()):
-                return []
+            async def fake_get_owner(sid):
+                return None
             async def fake_llm(*a, **k):
                 raise AssertionError("must not call LLM for an unsupported file type")
 
-            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "get_session_owner", fake_get_owner)
             monkeypatch.setattr(reports_mod, "call_llm", fake_llm)
 
             request = reports_mod.ReportAnalysisRequest(
@@ -267,12 +267,12 @@ class TestSessionAuthz:
         import base64
 
         async def scenario():
-            async def fake_exec(sql, params=()):
-                return []
+            async def fake_get_owner(sid):
+                return None
             async def fake_llm(*a, **k):
                 raise AssertionError("must not call LLM for an oversized file")
 
-            monkeypatch.setattr(reports_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(reports_mod, "get_session_owner", fake_get_owner)
             monkeypatch.setattr(reports_mod, "call_llm", fake_llm)
 
             oversized = b"x" * (reports_mod.MAX_FILE_BYTES + 1)
@@ -290,10 +290,10 @@ class TestSessionAuthz:
 
     def test_chat_rejects_intruder(self, monkeypatch):
         async def scenario():
-            async def fake_exec(sql, params=()): return _rows_for(OWNER_ID)
+            async def fake_get_owner(sid): return OWNER_ID
             async def fake_pipeline(*a, **k): raise AssertionError("pipeline must not run")
 
-            monkeypatch.setattr(chat_mod, "execute_query", fake_exec)
+            monkeypatch.setattr(chat_mod, "get_session_owner", fake_get_owner)
             monkeypatch.setattr(chat_mod, "run_pipeline", fake_pipeline)
 
             request = chat_mod.ChatRequest(question="how many?", session_id=SESSION_ID)
@@ -305,8 +305,8 @@ class TestSessionAuthz:
 
     def test_chat_stream_rejects_intruder(self, monkeypatch):
         async def scenario():
-            async def fake_exec(sql, params=()): return _rows_for(OWNER_ID)
-            monkeypatch.setattr(chat_mod, "execute_query", fake_exec)
+            async def fake_get_owner(sid): return OWNER_ID
+            monkeypatch.setattr(chat_mod, "get_session_owner", fake_get_owner)
             with pytest.raises(HTTPException) as exc:
                 await chat_mod.chat_stream(
                     question="how many?", session_id=SESSION_ID,
@@ -317,8 +317,8 @@ class TestSessionAuthz:
 
     def test_chat_stream_allows_new_session(self, monkeypatch):
         async def scenario():
-            async def fake_exec(sql, params=()): return []
-            monkeypatch.setattr(chat_mod, "execute_query", fake_exec)
+            async def fake_get_owner(sid): return None
+            monkeypatch.setattr(chat_mod, "get_session_owner", fake_get_owner)
             resp = await chat_mod.chat_stream(
                 question="hi", session_id="sess-new", officer={"officer_id": OWNER_ID})
             assert resp.media_type == "text/event-stream"

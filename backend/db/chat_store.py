@@ -5,10 +5,76 @@ Rich message data (table_data) -> MySQL table_data_json column.
 """
 import orjson
 import sys
+import time
+from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from db.connection import execute_query, execute_write
+
+
+# LRU cache with TTL support for database query results
+class LRUCache:
+    """
+    Bounded LRU cache with time-to-live (TTL) expiration.
+    Operations are O(1) via OrderedDict.
+    """
+    def __init__(self, capacity: int, ttl_seconds: float):
+        self._cache = OrderedDict()
+        self._capacity = capacity
+        self._ttl = ttl_seconds
+
+    def get(self, key):
+        """Return cached value if present and not expired, else None."""
+        if key not in self._cache:
+            return None
+        value, timestamp = self._cache[key]
+        if time.time() - timestamp > self._ttl:
+            del self._cache[key]
+            return None
+        self._cache.move_to_end(key)
+        return value
+
+    def put(self, key, value):
+        """Store value with current timestamp. Evicts LRU if at capacity."""
+        if key in self._cache:
+            del self._cache[key]
+        elif len(self._cache) >= self._capacity:
+            self._cache.popitem(last=False)
+        self._cache[key] = (value, time.time())
+
+    def delete(self, key):
+        """Remove a specific key if present."""
+        if key in self._cache:
+            del self._cache[key]
+
+    def clear(self):
+        """Clear all entries."""
+        self._cache.clear()
+
+    def keys(self):
+        """Return all current cache keys."""
+        return list(self._cache.keys())
+
+
+# Cache instances
+_session_owner_cache = LRUCache(capacity=500, ttl_seconds=3600)  # 1 hour
+_session_messages_cache = LRUCache(capacity=100, ttl_seconds=600)  # 10 minutes
+_officer_sessions_cache = LRUCache(capacity=100, ttl_seconds=300)  # 5 minutes
+
+
+def clear_caches():
+    """Clear all database caches. Used for test isolation."""
+    _session_owner_cache.clear()
+    _session_messages_cache.clear()
+    _officer_sessions_cache.clear()
+
+
+def _invalidate_officer_sessions(officer_id: int):
+    """Evict all cached session lists for a given officer."""
+    keys_to_delete = [k for k in _officer_sessions_cache.keys() if isinstance(k, tuple) and k[0] == officer_id]
+    for key in keys_to_delete:
+        _officer_sessions_cache.delete(key)
 
 
 # CONTRACT
@@ -59,6 +125,34 @@ def _serialize(obj):
 
 
 # CONTRACT
+# takes:  session_id (str) — session identifier to look up
+# returns: (int | None) — officer_id who owns the session, or None if not found
+# raises:  nothing (catches all exceptions, returns None on failure)
+async def get_session_owner(session_id: str) -> int | None:
+    """
+    Get the officer_id who owns a session.
+    Reads from cache first, falls back to database query on miss.
+    """
+    cached = _session_owner_cache.get(session_id)
+    if cached is not None:
+        return cached
+    
+    try:
+        rows = await execute_query(
+            "SELECT officer_id FROM chat_sessions WHERE session_id = %s",
+            (session_id,)
+        )
+        if not rows:
+            return None
+        officer_id = rows[0]["officer_id"]
+        _session_owner_cache.put(session_id, officer_id)
+        return officer_id
+    except Exception as e:
+        _log(f"WARNING: Failed to get session owner for {session_id}: {e}")
+        return None
+
+
+# CONTRACT
 # takes:  session_id (str) — unique session identifier,
 #          officer_id (int) — ID of the officer who owns the session,
 #          title (str) — display title for the session (truncated to 60 chars)
@@ -72,6 +166,10 @@ async def create_session(session_id: str, officer_id: int, title: str) -> bool:
                VALUES (%s, %s, %s)""",
             (session_id, officer_id, title[:60])
         )
+        # Cache the ownership immediately
+        _session_owner_cache.put(session_id, officer_id)
+        # Invalidate the officer's sessions list cache
+        _invalidate_officer_sessions(officer_id)
         return True
     except Exception as e:
         _log(f"WARNING: Failed to create session {session_id}: {e}")
@@ -97,6 +195,10 @@ async def update_session_timestamp(session_id: str, increment_count: bool = True
                 "UPDATE chat_sessions SET updated_at = NOW() WHERE session_id = %s",
                 (session_id,)
             )
+        # Invalidate the owner's sessions list cache
+        owner_id = await get_session_owner(session_id)
+        if owner_id is not None:
+            _invalidate_officer_sessions(owner_id)
     except Exception as e:
         _log(f"WARNING: Failed to update session timestamp {session_id}: {e}")
 
@@ -107,6 +209,11 @@ async def update_session_timestamp(session_id: str, increment_count: bool = True
 # returns: (list[dict]) — list of session metadata dicts ordered by most recently updated
 # raises:  nothing (catches all exceptions, returns empty list on failure)
 async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dict]:
+    cache_key = (officer_id, limit)
+    cached = _officer_sessions_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     try:
         rows = await execute_query(
             """SELECT session_id, title, created_at, updated_at, message_count
@@ -116,7 +223,7 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
                LIMIT %s""",
             (officer_id, limit)
         )
-        return [
+        result = [
             {
                 "session_id": row["session_id"],
                 "title": row["title"],
@@ -126,6 +233,8 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
             }
             for row in rows
         ]
+        _officer_sessions_cache.put(cache_key, result)
+        return result
     except Exception as e:
         _log(f"WARNING: Failed to load sessions for officer {officer_id}: {e}")
         return []
@@ -138,13 +247,10 @@ async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dic
 # raises:  nothing (catches all exceptions, returns False on failure)
 async def verify_session_owner(session_id: str, officer_id: int) -> bool:
     try:
-        rows = await execute_query(
-            "SELECT officer_id FROM chat_sessions WHERE session_id = %s",
-            (session_id,)
-        )
-        if not rows:
+        owner_id = await get_session_owner(session_id)
+        if owner_id is None:
             return False
-        return rows[0]["officer_id"] == officer_id
+        return owner_id == officer_id
     except Exception as e:
         _log(f"WARNING: Failed to verify session owner: {e}")
         return False
@@ -202,6 +308,9 @@ async def save_message_pair(
             )
         )
 
+        # Invalidate the messages cache for this session
+        _session_messages_cache.delete(session_id)
+
         return assistant_id
 
     except Exception as e:
@@ -214,6 +323,10 @@ async def save_message_pair(
 # returns: (list[dict]) — ordered list of message dicts with parsed table_data and follow_ups
 # raises:  nothing (catches all exceptions, returns empty list on failure)
 async def get_messages_for_session(session_id: str) -> list[dict]:
+    cached = _session_messages_cache.get(session_id)
+    if cached is not None:
+        return cached
+    
     try:
         rows = await execute_query(
             """SELECT message_id, role, content, sql_generated,
@@ -257,6 +370,7 @@ async def get_messages_for_session(session_id: str) -> list[dict]:
             }
             messages.append(msg)
 
+        _session_messages_cache.put(session_id, messages)
         return messages
 
     except Exception as e:

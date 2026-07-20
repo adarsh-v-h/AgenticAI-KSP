@@ -32,6 +32,15 @@ Browser ──HTTPS──> Web Client (React)  ──HTTPS /api/*──>  AppSai
                                   AWS RDS MySQL         Catalyst NoSQL      Catalyst QuickML (LLM)
 ```
 
+**In-process caching (backend only):** The FastAPI backend maintains an in-memory
+LRU cache for session ownership, messages, and sessions lists to reduce database
+round-trips during message turns. This cache is **process-local** and does NOT
+persist across restarts or share state across multiple AppSail instances. If the
+backend ever scales horizontally (multiple instances), each instance maintains
+its own independent cache — this is by design and does not cause correctness
+issues (writes invalidate local cache, next read fetches from DB), but cache hit
+rates will be lower than with a single instance.
+
 ---
 
 ## 2. Files that make deployment work
