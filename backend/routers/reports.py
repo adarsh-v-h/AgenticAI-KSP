@@ -45,8 +45,8 @@ from db.chat_store import (
     create_session as create_chat_session_row,
     save_message_pair,
     update_session_timestamp,
+    get_session_owner,
 )
-from db.connection import execute_query
 from llm.client import LLMError, call_llm
 
 router = APIRouter()
@@ -289,14 +289,18 @@ async def analyze_report(
     # Create-or-append semantics: a not-yet-existing session_id is allowed (the
     # officer will own it on creation); only a session owned by someone else is
     # rejected. We reuse the existence result so persistence needs no extra query.
-    existing = await execute_query(
-        "SELECT officer_id FROM chat_sessions WHERE session_id = %s",
-        (request.session_id,),
-    )
-    if existing and existing[0]["officer_id"] != officer["officer_id"]:
-        # 404 (not 403) so we don't reveal that another officer's session exists.
-        raise HTTPException(status_code=404, detail="Session not found.")
-    session_exists = bool(existing)
+    
+    # Check ownership via cache-backed lookup
+    owner_id = await get_session_owner(request.session_id)
+    if owner_id is not None:
+        # Session exists and is in cache/DB
+        if owner_id != officer["officer_id"]:
+            # 404 (not 403) so we don't reveal that another officer's session exists.
+            raise HTTPException(status_code=404, detail="Session not found.")
+        session_exists = True
+    else:
+        # Session does not exist yet (get_session_owner already queried DB)
+        session_exists = False
 
     raw = _decode_file(request.data_base64)
     try:

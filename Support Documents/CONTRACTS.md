@@ -1,6 +1,6 @@
 # Function Contracts
 
-253 functions across 63 backend files + 37 frontend files.
+266 functions across 63 backend files + 37 frontend files.
 
 ---
 
@@ -226,6 +226,25 @@ Catalyst OAuth access-token manager. All Catalyst clients (LLM, NoSQL, Cache, RA
 
 ## backend/db/chat_store.py
 
+**In-process caching layer:** This module implements an LRU cache with TTL expiration for database query results to reduce round-trips during message turns. Cache instances are in-memory and process-local — they do NOT persist across restarts or share state across multiple AppSail instances.
+
+### LRUCache (class)
+Bounded LRU cache with time-to-live (TTL) expiration. Operations are O(1) via `collections.OrderedDict`. Used internally to back session ownership, messages, and sessions list caches.
+- **Methods:** `get(key)`, `put(key, value)`, `delete(key)`, `clear()`, `keys()`
+- **Behavior:** Evicts least-recently-used entry when at capacity; expired entries (TTL exceeded) are removed on access
+
+### clear_caches
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing
+- **Side-effects:** Clears all three cache instances (_session_owner_cache, _session_messages_cache, _officer_sessions_cache). Used for test isolation (called by conftest.py autouse fixture).
+
+### _invalidate_officer_sessions
+- **Takes:** officer_id (int) — officer whose cached sessions lists to evict
+- **Returns:** nothing
+- **Raises:** nothing
+- **Side-effects:** Evicts all cached session lists for the given officer_id from _officer_sessions_cache
+
 ### _log
 - **Takes:** msg (any) — message to log to stderr
 - **Returns:** nothing
@@ -236,35 +255,47 @@ Catalyst OAuth access-token manager. All Catalyst clients (LLM, NoSQL, Cache, RA
 - **Returns:** (str | float) — ISO string for dates/times, float for Decimals
 - **Raises:** TypeError — when the object type is not handled
 
+### get_session_owner
+- **Takes:** session_id (str) — session identifier to look up
+- **Returns:** (int | None) — officer_id who owns the session, or None if not found
+- **Raises:** nothing (catches all exceptions, returns None on failure)
+- **Cache behavior:** Reads from _session_owner_cache first (1-hour TTL, 500 capacity). On cache miss, queries the database and caches the result before returning.
+
 ### create_session
 - **Takes:** session_id (str) — unique session identifier,; officer_id (int) — ID of the officer who owns the session,; title (str) — display title for the session (truncated to 60 chars)
 - **Returns:** (bool) — True on success, False on failure
 - **Raises:** nothing (catches all exceptions internally)
+- **Cache side-effects:** Caches the session ownership immediately in _session_owner_cache; invalidates all cached sessions lists for the officer_id.
 
 ### get_messages_for_session
 - **Takes:** session_id (str) — session whose messages to retrieve
 - **Returns:** (list[dict]) — ordered list of message dicts with parsed table_data and follow_ups
 - **Raises:** nothing (catches all exceptions, returns empty list on failure)
+- **Cache behavior:** Reads from _session_messages_cache first (10-minute TTL, 100 capacity). On cache miss, queries the database, caches the result, and returns it.
 
 ### get_sessions_for_officer
 - **Takes:** officer_id (int) — ID of the officer whose sessions to retrieve,; limit (int) — maximum number of sessions to return
 - **Returns:** (list[dict]) — list of session metadata dicts ordered by most recently updated
 - **Raises:** nothing (catches all exceptions, returns empty list on failure)
+- **Cache behavior:** Reads from _officer_sessions_cache first (5-minute TTL, 100 capacity, keyed by (officer_id, limit) tuple). On cache miss, queries the database, caches the result, and returns it.
 
 ### save_message_pair
 - **Takes:** session_id (str) — session to save messages to,; question (str) — the user's question text,; answer_text (str) — the assistant's answer text,; sql_generated (str) — SQL query that was generated (empty if none),; has_table (bool) — whether the response includes tabular data,; has_media (bool) — whether the response includes media attachments,; graph_available (bool) — whether a graph visualization is available,; table_data (list[dict]) — raw query result rows to persist,; media_attachments (list[dict]) — media references for the response,; assistant_follow_ups (list | None) — suggested follow-up questions
 - **Returns:** (int | None) — the assistant message's row ID, or None on failure
 - **Raises:** nothing (catches all exceptions internally)
+- **Cache side-effects:** Invalidates the _session_messages_cache entry for the session_id (forces next read to fetch updated messages from DB).
 
 ### update_session_timestamp
 - **Takes:** session_id (str) — session to update,; increment_count (bool) — whether to also increment message_count by 2
 - **Returns:** nothing
 - **Raises:** nothing (catches all exceptions internally)
+- **Cache side-effects:** Looks up the session's owner_id via get_session_owner (cache-backed) and invalidates all cached sessions lists for that officer.
 
 ### verify_session_owner
 - **Takes:** session_id (str) — session to verify ownership of,; officer_id (int) — expected owner's ID
 - **Returns:** (bool) — True if the officer owns the session, False otherwise
 - **Raises:** nothing (catches all exceptions, returns False on failure)
+- **Cache behavior:** Uses get_session_owner internally (cache-backed lookup). Does not hit the database directly if the owner is cached.
 
 ### get_evidence_trail_for_message
 - **Takes:** message_id (int) — message row ID to look up, officer_id (int) — EmployeeID of the requesting officer

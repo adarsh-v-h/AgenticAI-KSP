@@ -24,7 +24,6 @@ from graph.network_builder import build_graph_for_fir, build_graph_for_accused
 from conversation.history import get_history, save_turn
 from conversation.session_store import create_session
 from auth.simple_auth import get_current_officer, get_current_officer_sse
-from db.connection import execute_query
 from db.chat_store import (
     create_session as create_chat_session_row,
     update_session_timestamp,
@@ -33,6 +32,7 @@ from db.chat_store import (
     get_messages_for_session,
     verify_session_owner,
     get_evidence_trail_for_message,
+    get_session_owner,
 )
 from pipeline.evidence_trail import save_evidence_trail
 
@@ -176,13 +176,16 @@ async def _authorize_session_write(session_id: str, officer_id: int) -> bool:
     Returns True when the session already exists (and is owned by this officer),
     False when it does not yet exist.
     """
-    rows = await execute_query(
-        "SELECT officer_id FROM chat_sessions WHERE session_id = %s",
-        (session_id,),
-    )
-    if rows and rows[0]["officer_id"] != officer_id:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    return bool(rows)
+    # Check ownership via cache-backed lookup
+    owner_id = await get_session_owner(session_id)
+    if owner_id is not None:
+        # Session exists and is in cache/DB
+        if owner_id != officer_id:
+            raise HTTPException(status_code=404, detail="Session not found.")
+        return True
+    
+    # Session does not exist yet (get_session_owner already queried DB)
+    return False
 
 
 @router.get("/api/graph/fir/{fir_id}")
