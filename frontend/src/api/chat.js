@@ -436,7 +436,7 @@ export async function exportSession(sessionId) {
 
   const contentDisposition = response.headers.get('Content-Disposition')
   const filename =
-    contentDisposition?.match(/filename="(.+)"/)?.[1] ?? 'KSP-Export.html'
+    contentDisposition?.match(/filename="(.+)"/)?.[1] ?? 'KSP-Export.pdf'
 
   // Trigger a browser download.
   const url = URL.createObjectURL(blob)
