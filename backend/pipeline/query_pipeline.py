@@ -31,6 +31,7 @@ from llm.sql_generator import (
 )
 from db.connection import execute_query
 from pipeline.media_resolver import resolve_media, collect_case_master_ids
+from pipeline.station_scope import enforce_station_scope, StationScopeError
 from llm.answer_formatter import format_answer, route_intent, generate_direct_answer, generate_follow_ups
 from llm.client import LLMError
 
@@ -317,7 +318,27 @@ async def run_pipeline(
 
     response.sql_generated = sql
 
-    # 3. Execute SQL — with one corrective retry on MySQL exceptions, but only
+    # 2a. Enforce station-level row visibility — deterministic rewrite, not
+    #     a prompt-level instruction. Runs before execution so the query is
+    #     already scoped when it hits the database.
+    #     Only applies when an authenticated officer context is available;
+    #     skip when officer is None (e.g. during testing or unauthenticated calls).
+    if officer:
+        try:
+            sql, was_scoped = await enforce_station_scope(sql, officer)
+            if was_scoped:
+                response.sql_generated = sql
+        except StationScopeError:
+            _log(f"Station scope enforcement failed for query (cannot determine CaseMaster alias)")
+            response.error = "station_scope_enforcement_failed"
+            response.answer_text = (
+                "I couldn't safely restrict that query to your station's data, "
+                "so I didn't run it. Try rephrasing, or ask a supervisor if you "
+                "need cross-station data."
+            )
+            return response
+
+    # 3. Execute SQL — with one corrective retry on MySQL exceptions, but only
     #    if we still have budget under the MAX_ATTEMPTS=2 cap.
     results = None
     try:
@@ -361,6 +382,20 @@ async def run_pipeline(
             return response
 
         response.sql_generated = corrected_sql
+
+        if officer:
+            try:
+                corrected_sql, was_scoped = await enforce_station_scope(corrected_sql, officer)
+                if was_scoped:
+                    response.sql_generated = corrected_sql
+            except StationScopeError:
+                _log(f"Station scope enforcement failed for corrected query")
+                response.error = "station_scope_enforcement_failed"
+                response.answer_text = (
+                    "I couldn't safely restrict that query to your station's data, "
+                    "so I didn't run it."
+                )
+                return response
 
         try:
             results = await execute_query(corrected_sql)

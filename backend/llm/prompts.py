@@ -151,7 +151,8 @@ def _format_history_for_sql_prompt(
 def _format_officer_for_prompt(officer: dict | None) -> str:
     """
     Build a short identity block describing the authenticated employee so the
-    SQL generator can resolve first-person references ("I", "me", "my cases").
+    SQL generator can resolve first-person references ("I", "me", "my cases")
+    and station-scoped questions.
 
     Returns "" when no employee context is available.
     """
@@ -164,14 +165,24 @@ def _format_officer_for_prompt(officer: dict | None) -> str:
     name = (officer.get("FirstName") or officer.get("full_name") or "").strip()
     descriptor = ", ".join(p for p in (name, f"KGID {kgid}" if kgid else "") if p)
     who = f" ({descriptor})" if descriptor else ""
+    unit_name = (officer.get("unit_name") or "").strip()
+    unit_id = officer.get("unit_id")
+    station_info = ""
+    if unit_name:
+        station_info = f"The logged-in officer is assigned to '{unit_name}' (UnitID = {unit_id}). "
+    elif unit_id:
+        station_info = f"The logged-in officer is assigned to UnitID = {unit_id}. "
     return (
         "Current officer context:\n"
         f"The logged-in employee is EmployeeID = {employee_id}{who}.\n"
+        f"{station_info}"
         "ONLY use this id when the question refers to the logged-in officer/employee in "
         "the FIRST PERSON (\"I\", \"me\", \"my\", \"cases I am handling\", "
         "\"assigned to me\"): filter on "
         f"CaseMaster.PolicePersonID = {employee_id} and never emit a "
         "placeholder like <current_employee_id>.\n"
+        "When the question refers to cases related to this officer's station, use "
+        "CaseMaster.PoliceStationID to filter by their assigned UnitID. "
         "If the question names a DIFFERENT person (e.g. \"cases handled by "
         "Harish Kumar\"), IGNORE this id and match that person by name instead "
         "(join Employee and filter e.FirstName LIKE '%name%')."
