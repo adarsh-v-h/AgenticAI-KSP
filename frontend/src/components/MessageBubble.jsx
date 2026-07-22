@@ -100,6 +100,7 @@ function stripMarkdownTable(text) {
 export default function MessageBubble({
   role,
   content,
+  statusText,
   tableData,
   mediaAttachments,
   graphAvailable,
@@ -147,13 +148,23 @@ export default function MessageBubble({
   }
 
   const canReadAloud = !isStreaming && !error && (renderedContent || '').trim().length > 0
+  const showStatusIndicator = isStreaming && (!renderedContent || renderedContent.length === 0)
 
   return (
     <div className="message message--assistant">
       <div className="message__meta">Assistant</div>
       <div className={`message__body ${error ? 'message__body--error' : ''}`}>
-        {renderedContent}
-        {isStreaming ? <span className="message__caret">â–</span> : null}
+        {showStatusIndicator ? (
+          <div className="status-indicator">
+            <span className="status-indicator__dot" />
+            <span className="status-indicator__text">{statusText || 'Processing query...'}</span>
+          </div>
+        ) : (
+          renderedContent
+        )}
+        {isStreaming && renderedContent && renderedContent.length > 0 ? (
+          <span className="message__caret">■</span>
+        ) : null}
       </div>
 
       {hasTable ? <TableRenderer data={tableData} /> : null}

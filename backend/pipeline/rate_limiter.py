@@ -157,16 +157,35 @@ def check_and_increment(unit_id: int | None) -> RateLimitResult:
 
 # CONTRACT
 # takes:  unit_id (int)
-# returns: (int) — cap = 25 × active headcount, or 0 when the station has none
+# returns: (int) — cap = 25 × active headcount across unit hierarchy, minimum 25
 # raises:  nothing (DB errors are swallowed → caller keeps the old cap)
 async def _compute_cap(unit_id: int) -> int:
     from db.connection import execute_query  # local import avoids load-time cycle
 
-    rows = await execute_query(
-        "SELECT COUNT(*) AS n FROM Employee WHERE UnitID = %s AND is_active = TRUE",
-        (unit_id,),
-    )
-    headcount = int(rows[0]["n"]) if rows else 0
+    try:
+        rows = await execute_query(
+            """WITH RECURSIVE descendants AS (
+                   SELECT UnitID FROM Unit WHERE UnitID = %s
+                   UNION ALL
+                   SELECT u.UnitID FROM Unit u
+                   JOIN descendants d ON u.ParentUnit = d.UnitID
+               )
+               SELECT COUNT(*) AS n FROM Employee
+               WHERE UnitID IN (SELECT UnitID FROM descendants) AND is_active = TRUE""",
+            (unit_id,),
+        )
+        headcount = int(rows[0]["n"]) if rows else 0
+    except Exception:
+        try:
+            rows = await execute_query(
+                "SELECT COUNT(*) AS n FROM Employee WHERE UnitID = %s AND is_active = TRUE",
+                (unit_id,),
+            )
+            headcount = int(rows[0]["n"]) if rows else 0
+        except Exception:
+            headcount = 1
+
+    headcount = max(headcount, 1)
     return headcount * PER_OFFICER_QUOTA
 
 
