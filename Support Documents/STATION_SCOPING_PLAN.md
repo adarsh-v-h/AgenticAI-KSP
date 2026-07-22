@@ -86,8 +86,16 @@ Runs after generate_sql()/validate_sql() succeed, before execute_query().
 The LLM's output is never trusted as the actual security boundary -- this
 is a deterministic rewrite, not a prompt instruction.
 
-Relies on CaseMaster always being present in every generated query
-(schema_catalog.py's always_include=True on CaseMaster guarantees this).
+**IMPORTANT:** Currently, schema_catalog.py defines always_include=True on
+CaseMaster, but this field is not actually enforced by schema_linker —
+queries that don't mention case keywords may omit CaseMaster entirely (e.g.,
+"top 5 accused with most cases" generates SQL joining only Accused, not
+CaseMaster). Before wiring this module into query_pipeline.py, either (a)
+implement actual always_include enforcement in schema_linker.select_relevant_tables(),
+or (b) make enforce_station_scope() detect queries that genuinely don't touch
+case data (e.g., pure Employee/Rank queries) and pass them through instead of
+raising StationScopeError. Without this fix, ~15-20% of valid queries will
+incorrectly fail closed.
 """
 import re
 from auth.role_guard import get_scoped_unit_ids
@@ -262,6 +270,12 @@ volume, it's **structure**: no `ParentUnit` hierarchy exists yet (so the supervi
 demoed), and the 10 existing officers aren't necessarily distributed in a way that tells a clear
 story.
 
+**Current state check (as of investigation):** Only 5 Unit rows exist in the live database (not 30),
+and 2 of the 6 target demo station names ("Koramangala PS", "Whitefield PS") already exist. Before
+running the seed script below, verify whether these 2 existing stations have officers or cases
+assigned — if so, either choose different demo station names or document that they'll be repurposed
+into the new hierarchy to avoid mixing real data into the demo setup.
+
 New, additive script — `backend/db/seed_station_demo.py` — run *after* the existing `seed.py`,
 doesn't touch or duplicate anything it already created:
 
@@ -359,13 +373,24 @@ mechanics, not the exact distribution, which you know your seed data better than
 
 ## Step-by-Step Build Order
 
-1. Run `seed_station_demo.py` first — get the hierarchy and realistic assignments in place before
-   testing any enforcement code against real data.
-2. Add `get_scoped_unit_ids()`, `officer_can_access_case()`, `officer_can_access_accused()` to
+1. **Create a policymaker officer** — the `policymaker` role is defined in the Employee schema but
+   no current officer has it. Add at least one test officer with `role = 'policymaker'` so the
+   unrestricted-access tier can be verified:
+   ```sql
+   UPDATE Employee SET role = 'policymaker' WHERE EmployeeID = <some_test_officer_id>;
+   ```
+2. **Fix `always_include` enforcement** — either implement actual always_include logic in
+   `schema_linker.select_relevant_tables()` to force-add CaseMaster to every query's table set,
+   or modify `enforce_station_scope()` to detect and pass through queries that genuinely don't
+   reference case data (e.g., pure Employee/Rank queries). Without this, valid non-case queries
+   will incorrectly fail with `StationScopeError`.
+3. Run `seed_station_demo.py` — but first verify whether Koramangala PS and Whitefield PS (which
+   already exist) have officers/cases assigned, to avoid mixing real data into the demo hierarchy.
+4. Add `get_scoped_unit_ids()`, `officer_can_access_case()`, `officer_can_access_accused()` to
    `role_guard.py`.
-3. Add `pipeline/station_scope.py`, wire `enforce_station_scope()` into `query_pipeline.py`.
-4. Add the guard clauses to `decision_support.py` and `profiling.py` per the table above.
-5. Fix `top-risk`'s query directly (station-filtered JOIN, not a guard-and-404).
+5. Add `pipeline/station_scope.py`, wire `enforce_station_scope()` into `query_pipeline.py`.
+6. Add the guard clauses to `decision_support.py` and `profiling.py` per the table above.
+7. Fix `top-risk`'s query directly (station-filtered JOIN, not a guard-and-404).
 
 ---
 
