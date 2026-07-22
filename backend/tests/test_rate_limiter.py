@@ -9,7 +9,7 @@ Run: pytest backend/tests/test_rate_limiter.py -v
 
 import asyncio
 from unittest.mock import AsyncMock, patch
-
+# pyrefly: ignore [missing-import]
 import pytest
 
 from pipeline import rate_limiter as rl

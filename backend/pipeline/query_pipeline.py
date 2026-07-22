@@ -248,33 +248,16 @@ async def _retry_with_latest_date(sql: str, officer: dict | None, question: str 
 
 
 # CONTRACT
-# takes:  cb (Callable | None) — callback function, msg (str) — status message
-# returns: nothing
-# raises:  nothing
-async def _notify_status(cb, msg: str) -> None:
-    if cb:
-        try:
-            res = cb(msg)
-            if asyncio.iscoroutine(res):
-                await res
-        except Exception:
-            pass
-
-
-# CONTRACT
-# takes:  question (str) — natural language user question, history (list[dict] | None) — prior conversation turns, officer (dict | None) — authenticated officer identity, status_callback (Callable | None) — status progress handler
+# takes:  question (str) — natural language user question, history (list[dict] | None) — prior conversation turns, officer (dict | None) — authenticated officer identity
 # returns: (PipelineResponse) — complete pipeline response object
 # raises:  nothing (never raises — error details captured in PipelineResponse)
 async def run_pipeline(
     question: str,
     history: list[dict] | None = None,
     officer: dict | None = None,
-    status_callback=None,
 ) -> PipelineResponse:
     start = time.monotonic()
     response = PipelineResponse()
-
-    await _notify_status(status_callback, "Understanding user query & intent...")
 
     # Match rule engine (greetings, thanks, help, etc.)
     rule_match = try_rule_response(question)
@@ -304,7 +287,6 @@ async def run_pipeline(
     )
     if any(kw in question.lower() for kw in NARRATIVE_KEYWORDS):
         _log("Narrative keyword detected -- routing directly to RAG")
-        await _notify_status(status_callback, "Searching case narratives & documentation...")
         try:
             rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
             rag_result = await rag_session.ask(question)
@@ -323,14 +305,12 @@ async def run_pipeline(
             question=question, history=history, has_recent_data=bool(recent_table)
         )
         if decision == "DIRECT":
-            await _notify_status(status_callback, "Formulating response from conversation context...")
             direct = await _run_direct(question, history, recent_table)
             elapsed = time.monotonic() - start
             _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (no SQL)")
             return direct
 
     # 1. Schema linker
-    await _notify_status(status_callback, "Analyzing database schema & selecting tables...")
     try:
         tables, assumptions = select_relevant_tables(question)
         response.assumptions = assumptions
@@ -341,7 +321,6 @@ async def run_pipeline(
         return response
 
     # 2. SQL generation
-    await _notify_status(status_callback, "Generating SQL query...")
     try:
         sql, attempts_used = await generate_sql(
             question=question, table_names=tables, history=history, officer=officer
@@ -428,7 +407,6 @@ async def run_pipeline(
             return response
 
     # 3. Execute SQL
-    await _notify_status(status_callback, "Querying crime database...")
     results = None
     date_note = None
     try:
@@ -519,7 +497,6 @@ async def run_pipeline(
         response.graph_available = await _check_graph_available(case_master_ids)
 
     # 6. Answer formatter with Rule 11 diagnostics and Rule 12 assumptions
-    await _notify_status(status_callback, "Formatting answer...")
     diagnostics = None
     if not results:
         diagnostics = {

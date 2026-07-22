@@ -496,44 +496,18 @@ async def chat_stream(
                 _log(f"get_history failed in stream (using empty): {e}")
                 history = []
 
-            status_queue: asyncio.Queue = asyncio.Queue()
-
-            async def status_cb(msg: str):
-                await status_queue.put({"type": "status", "content": msg})
-
-            async def _pipeline_runner():
-                try:
-                    res = await run_pipeline(
-                        question=q,
-                        history=history,
-                        officer=officer,
-                        status_callback=status_cb,
-                    )
-                    await status_queue.put({"type": "_done", "result": res})
-                except Exception as ex:
-                    await status_queue.put({"type": "_error", "error": ex})
-
-            runner_task = asyncio.create_task(_pipeline_runner())
-
-            result = None
-            while True:
-                item = await status_queue.get()
-                if item["type"] == "status":
-                    yield _sse(item)
-                    await asyncio.sleep(0.01)
-                elif item["type"] == "_done":
-                    result = item["result"]
-                    break
-                elif item["type"] == "_error":
-                    _log(f"run_pipeline crashed in stream: {item['error']}")
-                    yield _sse(
-                        {
-                            "type": "error",
-                            "message": "An unexpected error occurred while processing your question.",
-                        }
-                    )
-                    yield _sse({"type": "done"})
-                    return
+            try:
+                result = await run_pipeline(question=q, history=history, officer=officer)
+            except Exception as e:
+                _log(f"run_pipeline crashed in stream: {e}")
+                yield _sse(
+                    {
+                        "type": "error",
+                        "message": "An unexpected error occurred while processing your question.",
+                    }
+                )
+                yield _sse({"type": "done"})
+                return
 
             if result.sql_generated:
                 yield _sse({"type": "sql", "content": result.sql_generated})

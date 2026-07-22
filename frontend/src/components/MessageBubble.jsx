@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import TableRenderer from './TableRenderer.jsx'
 import MediaViewer from './MediaViewer.jsx'
 import RiskBadge from './RiskBadge.jsx'
@@ -6,6 +6,31 @@ import EvidenceTrail from './EvidenceTrail.jsx'
 import { IconNetwork, IconSpeaker } from './Icons.jsx'
 import { speakText } from '../api/voice.js'
 import { useLang } from '../context/LangContext.jsx'
+
+const STATUS_STEPS = [
+  'Understanding user query & intent...',
+  'Analyzing database schema & tables...',
+  'Querying crime database...',
+  'Formatting answer...',
+]
+
+function StatusIndicator() {
+  const [stepIndex, setStepIndex] = useState(0)
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStepIndex((prev) => (prev + 1) % STATUS_STEPS.length)
+    }, 2200)
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <div className="status-indicator">
+      <span className="status-indicator__dot" />
+      <span className="status-indicator__text">{STATUS_STEPS[stepIndex]}</span>
+    </div>
+  )
+}
 
 // Pull the first usable CaseMasterID out of structured table rows so "View network"
 // can open a graph centered on that case. Returns null when no CaseMasterID column
@@ -155,10 +180,7 @@ export default function MessageBubble({
       <div className="message__meta">Assistant</div>
       <div className={`message__body ${error ? 'message__body--error' : ''}`}>
         {showStatusIndicator ? (
-          <div className="status-indicator">
-            <span className="status-indicator__dot" />
-            <span className="status-indicator__text">{statusText || 'Processing query...'}</span>
-          </div>
+          <StatusIndicator />
         ) : (
           renderedContent
         )}
