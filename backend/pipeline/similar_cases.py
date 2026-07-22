@@ -48,6 +48,21 @@ async def find_similar_cases(case_master_id: int, limit: int = 5) -> list[dict]:
     )
     source_names = {r["AccusedName"] for r in source_accused_rows if r.get("AccusedName")}
 
+    # Batch fetch accused names for all candidate cases in 1 query (eliminates N+1 query problem)
+    candidate_ids = [c["CaseMasterID"] for c in candidates if c.get("CaseMasterID")]
+    names_by_case: dict[int, set[str]] = {}
+    if candidate_ids:
+        placeholders = ",".join(["%s"] * len(candidate_ids))
+        all_accused_rows = await execute_query(
+            f"SELECT CaseMasterID, AccusedName FROM Accused WHERE CaseMasterID IN ({placeholders})",
+            tuple(candidate_ids)
+        )
+        for r in all_accused_rows:
+            cid = r.get("CaseMasterID")
+            name = r.get("AccusedName")
+            if cid and name:
+                names_by_case.setdefault(cid, set()).add(name)
+
     results = []
     for c in candidates:
         score = 40  # same crime type, guaranteed by the WHERE clause above
@@ -63,11 +78,7 @@ async def find_similar_cases(case_master_id: int, limit: int = 5) -> list[dict]:
                 score += 15
                 reasons.append("Filed within 90 days")
 
-        cand_accused_rows = await execute_query(
-            "SELECT AccusedName FROM Accused WHERE CaseMasterID = %s",
-            (c["CaseMasterID"],)
-        )
-        cand_names = {r["AccusedName"] for r in cand_accused_rows if r.get("AccusedName")}
+        cand_names = names_by_case.get(c["CaseMasterID"], set())
         shared = source_names & cand_names
         if shared:
             score += 20

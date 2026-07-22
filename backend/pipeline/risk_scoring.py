@@ -1,4 +1,4 @@
-﻿"""
+"""
 Rule-based, explainable offender risk scoring.
 
 Purpose: this is the "point at what may have gone wrong with this suspect"
@@ -15,6 +15,7 @@ official KSP schema -- both are derived live:
   - at-large status  = TRUE if NO row exists for this accused in
     ArrestSurrender
 """
+import asyncio
 import orjson
 from datetime import date
 from db.connection import execute_query, execute_write
@@ -170,9 +171,17 @@ async def get_cached_risk_score(accused_id: int) -> dict | None:
 # raises:  Exception — when DB operations fail
 async def recompute_all_risk_scores() -> int:
     rows = await execute_query("SELECT DISTINCT AccusedMasterID FROM Accused")
-    count = 0
-    for row in rows:
-        result = await compute_risk_for_accused(row["AccusedMasterID"])
-        await save_risk_score(result)
-        count += 1
-    return count
+    if not rows:
+        return 0
+
+    sem = asyncio.Semaphore(8)  # Stay safely under DB connection pool maxsize (10)
+
+    async def _worker(accused_id: int):
+        async with sem:
+            result = await compute_risk_for_accused(accused_id)
+            await save_risk_score(result)
+
+    tasks = [_worker(r["AccusedMasterID"]) for r in rows if r.get("AccusedMasterID") is not None]
+    if tasks:
+        await asyncio.gather(*tasks)
+    return len(tasks)
