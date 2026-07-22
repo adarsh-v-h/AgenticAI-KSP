@@ -66,9 +66,11 @@ backend/
 │   └── prompts.py             # All prompts and prompt builders
 ├── pipeline/
 │   ├── query_pipeline.py      # Main orchestrator (route → NL → SQL → answer, or DIRECT)
+│   ├── station_scope.py       # Role-based station scoping & disclaimer engine
+│   ├── date_utils.py          # Shared date predicate extraction & rewrite utility
 │   ├── sql_validator.py       # SQL safety validation
 │   ├── media_resolver.py      # Evidence media lookup
-│   ├── schema_linker.py       # Keyword-based table selector
+│   ├── schema_linker.py       # Keyword-based table selector with assumption tracking
 │   ├── risk_scoring.py        # Offender risk scoring (rule-based, explainable)
 │   ├── trend_analytics.py     # Crime pattern analytics (pure SQL aggregation)
 │   ├── similar_cases.py       # Similar case finder
@@ -2143,6 +2145,31 @@ Both columns were `VARCHAR(36)` -- sized for a bare UUID. The actual session ID 
 None of the guarded-migration checks included a `TABLE_SCHEMA` filter, so on a machine with multiple similarly-named databases, `fetchone()` could return a row from the wrong database. Confirmed: an unscoped query for `session_id` returned 8 rows across multiple databases before the fix. Fixed: every query now includes `AND TABLE_SCHEMA = DATABASE()`.
 
 All three fixes verified end-to-end via the real `/api/chat/sessions` + `/api/chat/stream` flow.
+
+
+## 10.14 Behavior Rules & Station Scoping Reliability System
+
+**Date:** July 22, 2026  
+**What:** Implemented a centralized behavior rules framework and station scoping reliability architecture across the pipeline, database guard, and answer generation layers.
+
+**The 12 Enforced Behavior Rules:**
+1. **Rule 1 (First-Person Query Scoping)**: First-person queries ("my cases", "assigned to me") scope to `PolicePersonID = {officer_id}`.
+2. **Rule 2 (Scope Disclosure Requirement)**: When wide-scope queries ("all cases in Karnataka", "statewide statistics") are submitted by restricted roles (`investigator`/`supervisor`), an explicit disclosure is prepended: *"Note: Results are limited to your assigned station ({unit_name})."*
+3. **Rule 3 (Employee Listing Scoping)**: Queries listing officers or station personnel without `CaseMaster` (e.g. *"list all officers"*) are automatically scoped to `Employee.UnitID IN (...)` rather than throwing `StationScopeError`.
+4. **Rule 4 (Policymaker Unrestricted State-wide Access)**: `policymaker`, `analyst`, and `admin` roles bypass station-level WHERE clauses and access unfiltered state-wide data without scope disclaimers.
+5. **Rule 5 (Assigned Case Protection)**: Protects cases assigned to an officer outside their primary station by constructing `({alias}.PoliceStationID IN (...) OR {alias}.PolicePersonID = {officer_id})`.
+6. **Rule 6 (Role-Restricted Cross-Station Comparison Intercept)**: Pre-execution intercept in `query_pipeline.py` detects comparison intent ("compare Koramangala PS with Whitefield PS") for restricted roles and returns a direct policy response before SQL generation.
+7. **Rule 7 (Date Fallback Retry)**: When a date-filtered SQL query returns 0 rows, `_retry_with_latest_date()` extracts the date predicate, queries `SELECT MAX(YEAR(CrimeRegisteredDate)) FROM CaseMaster`, rewrites the year, and retries execution automatically with an informative note.
+8. **Rule 8 (Deterministic Victim PII Redaction)**: On aggregate queries (`GROUP BY`, `COUNT`, `SUM`, `AVG`), `_sanitize_pii()` inside `_truncate_for_answer()` replaces victim PII keys (`VictimName`, `Phone`, `Address`, `NationalID`, `Aadhaar`) with `"[REDACTED]"`.
+9. **Rule 9 (Accused Detail Privacy Default)**: `SQL_SYSTEM_PROMPT` enforces privacy by excluding unnecessary personal identifiers for accused persons unless explicitly asked.
+10. **Rule 10 (Scope Disclaimer Refinement & First-Person Exclusion)**: `_compute_scope_disclaimer_needed()` triggers disclaimers only on wide queries and explicitly suppresses them when first-person keywords ("my", "I'm", "assigned to me") are present.
+11. **Rule 11 (Zero-Result Diagnostic Context)**: When queries return 0 rows, diagnostic metadata (`active_station_scope` and `date_filter`) is passed to `format_answer()` so the LLM explains *why* no records matched.
+12. **Rule 12 (Entity Resolution Assumption Disclosure)**: `schema_linker.select_relevant_tables()` returns `(tables, assumptions)` to capture fuzzy keyword mappings (e.g., `"vehicle"` -> `CrimeSubHead` = `'Vehicle Theft'`) and passes assumptions to `format_answer()` for user disclosure.
+
+**Database & Hierarchy Resolution Changes:**
+- **`backend/db/connection.py`**: Created `_validate_read_only_sql(sql)` allowing `SELECT` and `WITH` (read-only CTE) statements. Enabled `WITH RECURSIVE` queries for supervisor unit hierarchy resolution while maintaining strict guards against write/DDL operations.
+- **`backend/auth/role_guard.py`**: Defined `ScopeResolutionError(Exception)` and logged supervisor CTE failures via standard `logging` (`logger.error(..., exc_info=True)`).
+- **`backend/pipeline/date_utils.py`**: Created shared date predicate extraction and rewriting utility module shared between Rule 7 (date retry) and Rule 11 (zero-result diagnostics).
 
 
 ### 3.X backend/pipeline/risk_scoring.py + backend/routers/profiling.py
