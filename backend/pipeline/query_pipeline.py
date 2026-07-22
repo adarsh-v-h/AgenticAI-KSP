@@ -99,16 +99,39 @@ class PipelineResponse:
 
 _GENERIC_DB_ERROR = "I couldn't run that query. Try rephrasing."
 _COMPARISON_KEYWORDS = ("compare", " vs ", " versus ", "comparison", "difference between")
-_STATION_TERMS = ("station", "ps", "unit", "circle")
 
 
 def _is_cross_station_comparison(question: str) -> bool:
+    """
+    Rule 6: Intercept cross-station comparisons requested by restricted officers.
+    Triggers ONLY when comparing across different stations/units.
+    Does NOT trigger for comparisons of crime types, dates, or demographics within a single station.
+    """
     if not question:
         return False
     q_lower = question.lower()
+
+    cross_phrases = (
+        "compare stations", "compare police stations", "compare units",
+        "station comparison", "unit comparison", "across stations",
+        "between stations", "across units", "between units",
+        "station vs station", "unit vs unit", "ps vs ps"
+    )
+    if any(phrase in q_lower for phrase in cross_phrases):
+        return True
+
     has_cmp = any(kw in q_lower for kw in _COMPARISON_KEYWORDS)
-    has_stn = any(st in q_lower for st in _STATION_TERMS)
-    return has_cmp and has_stn
+    if not has_cmp:
+        return False
+
+    if any(fp in q_lower for fp in ("my station", "assigned to me", "in my unit", "at my station", "my ps")):
+        return False
+
+    ps_matches = re.findall(r"\b[A-Za-z0-9_-]+\s+(?:ps|police station|unit)\b", q_lower)
+    if len(ps_matches) >= 2:
+        return True
+
+    return False
 
 
 # CONTRACT

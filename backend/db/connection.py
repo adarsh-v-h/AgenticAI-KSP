@@ -68,17 +68,28 @@ def _normalize_bit_fields(row: dict) -> dict:
 # raises:  RuntimeError — when pool has not been created,
 #           ValueError — when sql is not a SELECT statement,
 #           TimeoutError — when query exceeds 5-second timeout
+import re
+
 _READ_ONLY_PREFIXES = ("SELECT", "WITH")
-_FORBIDDEN_KEYWORDS = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "REPLACE")
+_FORBIDDEN_STATEMENTS = (
+    r"\bINSERT\s+INTO\b",
+    r"\bUPDATE\s+`?[A-Za-z0-9_]+`?\s+SET\b",
+    r"\bDELETE\s+FROM\b",
+    r"\bDROP\s+(?:TABLE|DATABASE|INDEX|VIEW)\b",
+    r"\bALTER\s+(?:TABLE|DATABASE)\b",
+    r"\bTRUNCATE\s+(?:TABLE)?\b",
+    r"\bCREATE\s+(?:TABLE|DATABASE|INDEX|VIEW)\b",
+    r"\bREPLACE\s+INTO\b",
+)
 
 def _validate_read_only_sql(sql: str) -> str:
     stripped = sql.strip()
     upper_sql = stripped.upper()
     if not upper_sql.startswith(_READ_ONLY_PREFIXES):
         raise ValueError("Security violation: Only SELECT and WITH (read-only) queries are allowed.")
-    for kw in _FORBIDDEN_KEYWORDS:
-        if f" {kw} " in f" {upper_sql} ":
-            raise ValueError(f"Security violation: Write keyword '{kw}' is forbidden in execute_query.")
+    for pattern in _FORBIDDEN_STATEMENTS:
+        if re.search(pattern, upper_sql):
+            raise ValueError("Security violation: Data modification statements are forbidden in execute_query.")
     return stripped
 
 async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
