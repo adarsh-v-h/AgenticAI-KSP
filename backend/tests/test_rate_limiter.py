@@ -183,13 +183,13 @@ def _build_client():
     app = FastAPI()
     app.add_middleware(_StationRateLimitMiddleware)
 
-    @app.get("/api/ping")
-    async def ping():
+    @app.get("/api/chat")
+    async def chat_probe():
         return {"ok": True}
 
-    @app.get("/api/auth/login")
-    async def login_probe():   # exempt path
-        return {"login": True}
+    @app.get("/api/chat/sessions")
+    async def sessions_probe():   # exempt path (reading history never limited)
+        return {"sessions": []}
 
     @app.get("/health")
     async def health():        # non-/api path
@@ -213,11 +213,11 @@ class TestMiddlewareEndToEnd:
         rl._local[42]["count"] = 0
 
         # Two allowed...
-        assert client.get("/api/ping", headers=headers).status_code == 200
-        assert client.get("/api/ping", headers=headers).status_code == 200
+        assert client.get("/api/chat", headers=headers).status_code == 200
+        assert client.get("/api/chat", headers=headers).status_code == 200
 
         # ...third blocked with the informative body + Retry-After header.
-        resp = client.get("/api/ping", headers=headers)
+        resp = client.get("/api/chat", headers=headers)
         assert resp.status_code == 429
         assert "Retry-After" in resp.headers
         body = resp.json()
@@ -238,10 +238,10 @@ class TestMiddlewareEndToEnd:
         rl._local[7]["cap"] = 1
         rl._local[7]["count"] = 1
 
-        # /api/ping is blocked...
-        assert client.get("/api/ping", headers=headers).status_code == 429
-        # ...but the login and health paths sail through.
-        assert client.get("/api/auth/login", headers=headers).status_code == 200
+        # /api/chat is blocked...
+        assert client.get("/api/chat", headers=headers).status_code == 429
+        # ...but sessions and health paths sail through.
+        assert client.get("/api/chat/sessions", headers=headers).status_code == 200
         assert client.get("/health", headers=headers).status_code == 200
 
     def test_crafted_unit_id_in_body_is_ignored(self):
@@ -257,7 +257,7 @@ class TestMiddlewareEndToEnd:
         rl._local[100]["count"] = 1        # station 100 maxed
 
         # Attacker tries to spend station 999's budget via query param.
-        resp = client.get("/api/ping?unit_id=999", headers=headers)
+        resp = client.get("/api/chat?unit_id=999", headers=headers)
         assert resp.status_code == 429            # still charged to 100
         assert resp.json()["unit_id"] == 100
         # Station 999 was never touched.
@@ -267,4 +267,4 @@ class TestMiddlewareEndToEnd:
         rl._reset_for_tests()
         client = _build_client()
         # No Authorization header at all → can't attribute a station → allow.
-        assert client.get("/api/ping").status_code == 200
+        assert client.get("/api/chat").status_code == 200

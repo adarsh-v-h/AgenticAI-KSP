@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 import asyncio
 from contextlib import asynccontextmanager
@@ -180,8 +180,15 @@ from pipeline.rate_limiter import check_and_increment, WINDOW_SECONDS
 from auth.simple_auth import ALGORITHM
 from jose import jwt, JWTError
 
-# Paths under /api that must never be rate limited (auth + health).
-_RATE_LIMIT_EXEMPT = {"/api/auth/login", "/api/health"}
+# Paths under /api that consume station rate limit quota (AI generation / expensive tasks only).
+# Reading sessions, fetching messages, exports, analytics, and auth are NEVER rate limited.
+_RATE_LIMITED_PATHS = {
+    "/api/chat",
+    "/api/chat/stream",
+    "/api/reports/analyze",
+    "/api/voice/speak",
+    "/api/voice/transcribe",
+}
 
 
 # CONTRACT
@@ -208,7 +215,7 @@ def _station_from_request(request) -> tuple:
 class _StationRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if not path.startswith("/api/") or path in _RATE_LIMIT_EXEMPT:
+        if path not in _RATE_LIMITED_PATHS:
             return await call_next(request)
 
         unit_id, unit_name = _station_from_request(request)

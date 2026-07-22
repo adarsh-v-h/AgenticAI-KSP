@@ -289,6 +289,7 @@ export default function ChatWindow({ officer, onLogout }) {
         id: newMessageId(),
         role: 'assistant',
         content: '',
+        statusText: 'Understanding user query...',
         tableData: null,
         mediaAttachments: null,
         graphAvailable: false,
@@ -300,12 +301,15 @@ export default function ChatWindow({ officer, onLogout }) {
       setMessages((prev) => [...prev, userMsg, assistantMsg])
       setInputValue('')
       setIsStreaming(true)
-      setStatusText('Sending...')
+      setStatusText('Understanding user query...')
 
       const turnSessionId = activeSessionId
 
       cancelRef.current = startChatStream(question, activeSessionId, {
-        onStatus: (msg) => setStatusText(msg),
+        onStatus: (msg) => {
+          setStatusText(msg)
+          updateLastAssistant(() => ({ statusText: msg }))
+        },
         onToken: (chunk) =>
           updateLastAssistant((m) => ({ content: (m.content || '') + chunk })),
         onTable: (rows) => updateLastAssistant(() => ({ tableData: rows })),
@@ -661,6 +665,7 @@ export default function ChatWindow({ officer, onLogout }) {
                     key={m.id}
                     role={m.role}
                     content={m.content}
+                    statusText={m.statusText}
                     tableData={m.tableData}
                     mediaAttachments={m.mediaAttachments}
                     graphAvailable={m.graphAvailable}
