@@ -5,6 +5,25 @@ Keep prompts in one place so they're easy to tune in one pass.
 
 import orjson
 
+BEHAVIOR_RULES = [
+    "If asked about 'my cases', 'my station', or any first-person phrasing, filter results by the officer's own EmployeeID or unit.",
+    "If a scoped (non-policymaker) officer's question implies scope beyond their own station (e.g. mentions a district, state, 'all stations', 'statewide'), explicitly disclose that the answer is limited to their own station before presenting results -- never present a station-only count as if it were the full answer.",
+    "If asked to list or describe officers, restrict results to the officer's own unit unless the requester is a policymaker.",
+    "Policymakers see unrestricted results across all stations and districts, with no scope disclosure needed.",
+    "If asked about 'cases I'm handling' or 'my active cases', filter by cases where the officer is listed as the assigned investigator, not just cases at their station -- including cases assigned to them at a different station.",
+    "If a scoped officer asks to compare their station against another named station, decline to show the other station's data and explain that cross-station comparisons are only available to policymakers.",
+    "If a question implies a time range but the underlying data uses a different date field than expected, use the most recent available date in the data rather than the current system date.",
+    "Never include victim personal identifying information (PII) in aggregate or statistical answers, even if the underlying query result contains it.",
+    "If asked about 'accused' or 'arrested' individuals, only return counts and status summaries by default -- full names and case details only if explicitly requested and the officer's role permits it.",
+    "If a question's scope is ambiguous (e.g. just 'how many cases?'), default to the officer's own station and state that assumption explicitly in the answer.",
+    "If a query returns zero results, state that clearly and suggest a likely reason rather than implying the whole system has no data.",
+    "If the system had to guess at what the officer meant (e.g. resolving an ambiguous station name), state that assumption in the answer rather than presenting the guess as certain fact.",
+]
+
+def _format_behavior_rules() -> str:
+    return "SYSTEM BEHAVIOR RULES:\n" + "\n".join(f"{i}. {rule}" for i, rule in enumerate(BEHAVIOR_RULES, start=1))
+
+
 SQL_SYSTEM_PROMPT = """You are an expert MySQL query writer for the Karnataka State Police secure crime database.
 Your ONLY job is to write a valid MySQL SELECT query based on the user's question.
 
@@ -26,6 +45,7 @@ STRICT RULES:
 12. Use `CrimeSubHead.CrimeHeadName` to filter by crime type (e.g., 'Theft', 'Murder', 'Assault'), not a raw case_type column.
 13. Use a `LEFT JOIN ArrestSurrender` and filter `WHERE ArrestSurrender.ArrestSurrenderID IS NULL` to represent accused who are still at large (no arrest/surrender record exists).
 14. When the user's question is a FOLLOW-UP that refines a previous turn, you MUST preserve the prior turn's filter clauses (the WHERE predicates and JOINs that scoped the previous result) and add the new refinement on top.
+15. For questions about accused or arrested persons that do NOT explicitly request individual names, select counts and status groupings (e.g. COUNT(*), ArrestStatus) rather than full personal names.
 """
 
 ANSWER_SYSTEM_PROMPT = """You are a professional police intelligence assistant helping Karnataka State Police officers.
@@ -39,7 +59,7 @@ RULES:
 5. Never speculate. If data is insufficient, say so clearly.
 6. Use plain professional English. No technical jargon.
 7. Refer to the database records naturally — say "case" not "row", "officer" not "record".
-8. If zero results were returned, say clearly that no matching records were found.
+8. If zero results were returned, say clearly that no matching records were found and outline potential reasons (such as active date or station filters).
 9. Markdown lists, **bold**, and inline emphasis are fine for non-tabular prose. Do not use them to reconstruct a table.
 """
 
@@ -235,16 +255,45 @@ def build_sql_prompt(
     return sys_p, user_p
 
 
+_PII_KEYS = {"victimname", "phone", "address", "nationalid", "aadhaar", "email"}
+_AGGREGATE_KEYWORDS = ("summary", "how many", "total", "average", "count", "distribution", "breakdown", "statistics", "overview")
+
+def _is_aggregate_query(question: str, sql: str = "") -> bool:
+    if sql:
+        sql_u = sql.upper()
+        if any(kw in sql_u for kw in ("COUNT(", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY")):
+            return True
+    if question:
+        q_l = question.lower()
+        if any(kw in q_l for kw in _AGGREGATE_KEYWORDS):
+            return True
+    return False
+
+def _sanitize_pii(results: list[dict], is_aggregate: bool) -> list[dict]:
+    if not is_aggregate or not results:
+        return results
+    sanitized = []
+    for row in results:
+        new_row = {}
+        for k, v in row.items():
+            if k.lower() in _PII_KEYS:
+                new_row[k] = "[REDACTED]"
+            else:
+                new_row[k] = v
+        sanitized.append(new_row)
+    return sanitized
+
 # CONTRACT
-# takes:  results (list[dict]) — query results to trim, max_rows (int) — row cap, max_field_chars (int) — per-field char cap
-# returns: (list[dict]) — trimmed results with long string fields clipped
+# takes:  results (list[dict]) — query results to trim, max_rows (int) — row cap, max_field_chars (int) — per-field char cap, is_aggregate (bool) — whether query is aggregate
+# returns: (list[dict]) — trimmed results with long string fields clipped and PII sanitized if aggregate
 # raises:  nothing
-def _truncate_for_answer(results: list[dict], max_rows: int = 50, max_field_chars: int = 200) -> list[dict]:
-    """Trim results to `max_rows` rows and clip long string fields."""
+def _truncate_for_answer(results: list[dict], max_rows: int = 50, max_field_chars: int = 200, is_aggregate: bool = False) -> list[dict]:
+    """Trim results to `max_rows` rows, clip long string fields, and sanitize PII for aggregate queries."""
+    results_sanitized = _sanitize_pii(results, is_aggregate=is_aggregate)
     return [
         {k: (v[:max_field_chars] + "…" if isinstance(v, str) and len(v) > max_field_chars else v)
          for k, v in row.items()}
-        for row in results[:max_rows]
+        for row in results_sanitized[:max_rows]
     ]
 
 
@@ -264,7 +313,7 @@ def _summarize_media(media_refs: list[dict]) -> str:
 
 
 # CONTRACT
-# takes:  question (str) — officer's question, results (list[dict]) — query results, media_refs (list[dict]) — media attachments, history (list[dict] | None) — conversation history, max_rows (int) — result row cap, max_field_chars (int) — per-field char cap
+# takes:  question (str) — officer's question, results (list[dict]) — query results, media_refs (list[dict]) — media attachments, history (list[dict] | None) — conversation history, max_rows (int) — result row cap, max_field_chars (int) — per-field char cap, officer (dict | None) — officer context, was_scoped (bool) — whether station scope applied, scope_disclaimer_needed (bool) — whether disclaimer should be shown, diagnostics (dict | None) — zero result diagnostics, assumptions (list[str] | None) — entity resolution assumptions, sql (str) — generated SQL
 # returns: (tuple[str, str]) — (system_prompt, user_prompt) for answer-formatting LLM call
 # raises:  nothing
 def build_answer_prompt(
@@ -274,42 +323,70 @@ def build_answer_prompt(
     history: list[dict] | None,
     max_rows: int = 50,
     max_field_chars: int = 200,
+    officer: dict | None = None,
+    was_scoped: bool = False,
+    scope_disclaimer_needed: bool = False,
+    diagnostics: dict | None = None,
+    assumptions: list[str] | None = None,
+    sql: str = "",
 ) -> tuple[str, str]:
     """
     Build (system_prompt, prompt) for the answer-formatting LLM call.
     """
-    truncated = _truncate_for_answer(results, max_rows=max_rows, max_field_chars=max_field_chars)
+    is_agg = _is_aggregate_query(question, sql)
+    truncated = _truncate_for_answer(results, max_rows=max_rows, max_field_chars=max_field_chars, is_aggregate=is_agg)
     n_total = len(results)
 
-    # Use default=str so dates/decimals serialize cleanly.
     try:
         results_json = orjson.dumps(truncated, option=orjson.OPT_INDENT_2, default=str).decode()
     except Exception:
         results_json = str(truncated)
 
     media_summary = _summarize_media(media_refs or [])
-
     history_block = _format_history_for_prompt(history or [])
     history_part = f"Previous context:\n{history_block}\n\n" if history_block else ""
 
-    user_p = (
-        f"{history_part}"
+    rules_block = _format_behavior_rules()
+
+    user_parts = [history_part, f"{rules_block}\n"]
+
+    if scope_disclaimer_needed and officer:
+        unit_name = officer.get("unit_name") or f"UnitID {officer.get('unit_id')}"
+        user_parts.append(
+            f"REQUIRED SCOPE DISCLAIMER DIRECTIVE:\n"
+            f"Explicitly disclose at the beginning of your response: "
+            f"\"Note: Results are limited to your assigned station ({unit_name}).\"\n"
+        )
+
+    if assumptions:
+        user_parts.append("SYSTEM ENTITY ASSUMPTIONS:\n" + "\n".join(f"- {a}" for a in assumptions) + "\n")
+
+    if not results and diagnostics:
+        diag_lines = []
+        if diagnostics.get("active_station_scope"):
+            diag_lines.append(f"Station scope applied: {diagnostics['active_station_scope']}")
+        if diagnostics.get("date_filter"):
+            df = diagnostics["date_filter"]
+            diag_lines.append(f"Date filter applied: {df.get('raw_clause')}")
+        if diag_lines:
+            user_parts.append("ZERO-RESULT DIAGNOSTIC CONTEXT:\n" + "\n".join(diag_lines) + "\n")
+
+    user_parts.append(
         f"Officer's question: {question}\n\n"
         f"Query results ({n_total} record(s) found"
     )
     if n_total > len(truncated):
-        user_p += f", showing first {len(truncated)}"
-    user_p += "):\n"
-    user_p += results_json + "\n\n"
-    user_p += f"Media attachments: {media_summary}\n\n"
-    user_p += (
+        user_parts[-1] += f", showing first {len(truncated)}"
+    user_parts[-1] += "):\n" + results_json + "\n\n"
+    user_parts.append(f"Media attachments: {media_summary}\n\n")
+    user_parts.append(
         "Format a clear, professional answer for the officer. "
         "Remember: 1–2 sentence prose summary only — the rows are already "
         "displayed in a separate table by the UI, so do NOT include any "
         "markdown table (no `|`-separated rows, no `|---|` divider)."
     )
 
-    return ANSWER_SYSTEM_PROMPT, user_p
+    return ANSWER_SYSTEM_PROMPT, "".join(user_parts)
 
 
 # CONTRACT

@@ -68,24 +68,34 @@ def _normalize_bit_fields(row: dict) -> dict:
 # raises:  RuntimeError — when pool has not been created,
 #           ValueError — when sql is not a SELECT statement,
 #           TimeoutError — when query exceeds 5-second timeout
+_READ_ONLY_PREFIXES = ("SELECT", "WITH")
+_FORBIDDEN_KEYWORDS = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "REPLACE")
+
+def _validate_read_only_sql(sql: str) -> str:
+    stripped = sql.strip()
+    upper_sql = stripped.upper()
+    if not upper_sql.startswith(_READ_ONLY_PREFIXES):
+        raise ValueError("Security violation: Only SELECT and WITH (read-only) queries are allowed.")
+    for kw in _FORBIDDEN_KEYWORDS:
+        if f" {kw} " in f" {upper_sql} ":
+            raise ValueError(f"Security violation: Write keyword '{kw}' is forbidden in execute_query.")
+    return stripped
+
 async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
     """
-    Execute a SELECT-only query using the global pool.
+    Execute a SELECT-only or WITH (read-only) query using the global pool.
     - Gets a connection from pool
     - Executes query with params (use parameterized queries always)
     - Returns list of dicts (column_name → value)
     - Enforces 5-second query execution timeout
-    - Raises ValueError if sql does not start with SELECT (case-insensitive after strip)
+    - Raises ValueError if sql does not start with SELECT or WITH
     - Releases connection back to pool in finally block always
     """
     if _pool is None:
         raise RuntimeError("Database connection pool has not been created yet.")
         
-    # Check if SQL starts with SELECT
-    stripped_sql = sql.strip()
-    if not stripped_sql.upper().startswith("SELECT"):
-        raise ValueError("Security violation: Only SELECT queries are allowed.")
-        
+    stripped_sql = _validate_read_only_sql(sql)
+
     async def _run():
         async with _pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:

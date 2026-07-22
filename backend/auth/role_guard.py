@@ -8,17 +8,24 @@ This file is now also the single source of truth for "what can this officer
 see" — see get_scoped_unit_ids(), officer_can_access_case(), and
 officer_can_access_accused() below.
 """
+import logging
 from fastapi import Depends, HTTPException, Request
 from auth.simple_auth import get_current_officer
 from db.connection import execute_query, execute_write
 import sys
+
+logger = logging.getLogger(__name__)
+
+
+class ScopeResolutionError(Exception):
+    """Raised when scoped unit IDs cannot be reliably determined."""
 
 
 # CONTRACT
 # takes:  officer (dict) — authenticated officer's JWT payload
 # returns: (list[int] | None) — list of Unit.UnitID values this officer can see,
 #          or None if unrestricted (analyst/policymaker)
-# raises:  nothing (fail-closed: returns [] on any error)
+# raises:  ScopeResolutionError — when unit hierarchy resolution fails
 async def get_scoped_unit_ids(officer: dict) -> list[int] | None:
     """
     Returns the list of Unit.UnitID values this officer is allowed to see
@@ -53,9 +60,14 @@ async def get_scoped_unit_ids(officer: dict) -> list[int] | None:
                 (unit_id,)
             )
             return [r["UnitID"] for r in rows]
-        except Exception:
-            # Fail closed — can't determine scope, return nothing
-            return []
+        except Exception as e:
+            logger.error(
+                "Failed to resolve scoped unit IDs for supervisor unit_id=%s: %s",
+                unit_id, e, exc_info=True
+            )
+            raise ScopeResolutionError(
+                f"Could not resolve station hierarchy scope for supervisor unit_id={unit_id}"
+            ) from e
 
     # investigator, or any unrecognized role/state — fail closed
     return [unit_id] if unit_id else []

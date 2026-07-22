@@ -4,9 +4,6 @@ Runs after generate_sql()/validate_sql() succeed, before execute_query().
 
 The LLM's output is never trusted as the actual security boundary -- this
 is a deterministic rewrite, not a prompt instruction.
-
-Relies on CaseMaster always being present in every generated query
-(schema_catalog.py's always_include=True on CaseMaster guarantees this).
 """
 import re
 from auth.role_guard import get_scoped_unit_ids
@@ -22,6 +19,19 @@ _CASEMASTER_REF_RE = re.compile(
     re.IGNORECASE
 )
 
+_EMPLOYEE_REF_RE = re.compile(
+    r"\b(?:FROM|JOIN)\s+`?Employee`?"
+    r"(?:\s+(?:AS\s+)?`?(?!(?:" + SQL_KEYWORDS + r")\b)([A-Za-z_][A-Za-z0-9_]*)`?)?",
+    re.IGNORECASE
+)
+
+_WIDE_SCOPE_KEYWORDS = (
+    "karnataka", "state", "all stations", "district", "statewide", "all cases"
+)
+_FIRST_PERSON_KEYWORDS = (
+    "my", "i'm", "assigned to me", "i am", "my station", "me"
+)
+
 
 class StationScopeError(Exception):
     """Raised when a query can't be confidently scoped. Caller must fail closed."""
@@ -33,6 +43,14 @@ def _casemaster_alias(sql: str) -> str | None:
     if not m:
         return None
     return m.group(1) or "CaseMaster"
+
+
+def _employee_alias(sql: str) -> str | None:
+    """Extract the alias of Employee from the FROM/JOIN clause, or None if not found."""
+    m = _EMPLOYEE_REF_RE.search(sql)
+    if not m:
+        return None
+    return m.group(1) or "Employee"
 
 
 def _find_top_level_clause(sql: str) -> tuple[str | None, int]:
@@ -93,50 +111,72 @@ def _find_top_level_clause(sql: str) -> tuple[str | None, int]:
     return None, -1
 
 
-# CONTRACT
-# takes:  sql (str) — the LLM-generated SQL string, officer (dict) — authenticated officer's JWT payload
-# returns: (tuple[str, bool]) — (possibly-rewritten sql, was_scoped)
-# raises:  StationScopeError — when CaseMaster's alias can't be located
-async def enforce_station_scope(sql: str, officer: dict) -> tuple[str, bool]:
+def _compute_scope_disclaimer_needed(question: str, was_scoped: bool) -> bool:
     """
-    Returns (possibly-rewritten sql, was_scoped).
+    Determines whether a scope disclosure disclaimer should be shown.
+    Returns True if:
+      - was_scoped is True (officer is restricted)
+      - user question contains a wide-scope keyword ("all cases", "statewide", etc.)
+      - user question DOES NOT contain first-person keywords ("my", "assigned to me")
+    """
+    if not was_scoped or not question:
+        return False
+
+    q_lower = question.lower()
+    has_wide_scope = any(kw in q_lower for kw in _WIDE_SCOPE_KEYWORDS)
+    has_first_person = any(kw in q_lower for kw in _FIRST_PERSON_KEYWORDS)
+
+    return has_wide_scope and not has_first_person
+
+
+# CONTRACT
+# takes:  sql (str) — the LLM-generated SQL string, officer (dict) — authenticated officer's JWT payload, question (str) — natural language user question
+# returns: (tuple[str, bool, bool]) — (possibly-rewritten sql, was_scoped, scope_disclaimer_needed)
+# raises:  StationScopeError — when neither CaseMaster nor Employee alias can be located
+async def enforce_station_scope(sql: str, officer: dict, question: str = "") -> tuple[str, bool, bool]:
+    """
+    Returns (possibly-rewritten sql, was_scoped, scope_disclaimer_needed).
     was_scoped is False only when the officer's role is unrestricted
     (analyst/policymaker) -- nothing to inject in that case.
-    Raises StationScopeError if CaseMaster's alias can't be located; the
-    caller must refuse to execute rather than run an unscoped query for a
-    role that should be restricted.
+    Raises StationScopeError if neither CaseMaster nor Employee alias can be located.
     """
     scoped_ids = await get_scoped_unit_ids(officer)
     if scoped_ids is None:
-        return sql, False
-
-    alias = _casemaster_alias(sql)
-    if alias is None:
-        raise StationScopeError(
-            "Could not locate CaseMaster in generated SQL to apply station scope"
-        )
+        return sql, False, False
 
     if not scoped_ids:
         scoped_ids = [-1]  # officer has no assigned station -- show nothing, not everything
 
-    # Values are integers sourced from get_scoped_unit_ids()'s own DB
-    # lookup, never from user input -- safe to interpolate directly
-    # after the int() cast, no injection surface.
     placeholders = ",".join(str(int(i)) for i in scoped_ids)
-    condition = f"{alias}.PoliceStationID IN ({placeholders})"
+    employee_id = officer.get("EmployeeID") or officer.get("officer_id")
+
+    cm_alias = _casemaster_alias(sql)
+    emp_alias = _employee_alias(sql)
+
+    if cm_alias:
+        # Check if PolicePersonID filter is present for assigned case protection (Rule 5)
+        has_person_id_filter = bool(employee_id and re.search(r"\bPolicePersonID\s*=", sql, re.IGNORECASE))
+        if has_person_id_filter:
+            condition = f"({cm_alias}.PoliceStationID IN ({placeholders}) OR {cm_alias}.PolicePersonID = {int(employee_id)})"
+        else:
+            condition = f"{cm_alias}.PoliceStationID IN ({placeholders})"
+    elif emp_alias:
+        # Rule 3: Secondary scoping on Employee.UnitID when querying Employee directly
+        condition = f"{emp_alias}.UnitID IN ({placeholders})"
+    else:
+        raise StationScopeError(
+            "Could not locate CaseMaster or Employee in generated SQL to apply station scope"
+        )
 
     clause_name, idx = _find_top_level_clause(sql)
 
     if clause_name == "WHERE":
-        # Insert condition right after WHERE clause starts: WHERE <condition> AND ...
         insert_at = idx + len("WHERE")
         rewritten = sql[:insert_at] + f" {condition} AND" + sql[insert_at:]
     elif clause_name in ("GROUP BY", "HAVING", "ORDER BY", "LIMIT", "UNION"):
-        # Insert WHERE <condition> before boundary
         rewritten = sql[:idx].rstrip() + f" WHERE {condition} " + sql[idx:]
     else:
-        # No top-level WHERE or boundary — append WHERE at the end
         rewritten = sql.rstrip() + f" WHERE {condition}"
 
-    return rewritten, True
-
+    disclaimer_needed = _compute_scope_disclaimer_needed(question, was_scoped=True)
+    return rewritten, True, disclaimer_needed

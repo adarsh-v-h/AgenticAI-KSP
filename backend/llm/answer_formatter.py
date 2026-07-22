@@ -75,6 +75,12 @@ async def format_answer(
     results: list[dict],
     media_attachments: list[dict],
     history: list[dict] | None,
+    officer: dict | None = None,
+    was_scoped: bool = False,
+    scope_disclaimer_needed: bool = False,
+    diagnostics: dict | None = None,
+    assumptions: list[str] | None = None,
+    sql: str = "",
 ) -> str:
     """
     Format raw DB query results into a natural-language answer.
@@ -90,6 +96,12 @@ async def format_answer(
         results=results,
         media_refs=media_attachments,
         history=history,
+        officer=officer,
+        was_scoped=was_scoped,
+        scope_disclaimer_needed=scope_disclaimer_needed,
+        diagnostics=diagnostics,
+        assumptions=assumptions,
+        sql=sql,
     )
 
     try:
@@ -97,10 +109,6 @@ async def format_answer(
         model_key="MODEL_ANSWER",
         prompt=user_prompt,
         system_prompt=system_prompt,
-        # max_tokens is the TOTAL budget (input + output) in QuickML. The
-        # answer prompt embeds up to 50 rows of JSON results, which can run to
-        # a few thousand input tokens, so this must be large enough to hold the
-        # prompt PLUS the generated summary. 8000 comfortably covers both.
         max_tokens=8000,
     )
     except Exception as e:
@@ -114,6 +122,12 @@ async def format_answer(
             history=history,
             max_rows=_RETRY_ROWS,
             max_field_chars=_RETRY_FIELD_CHARS,
+            officer=officer,
+            was_scoped=was_scoped,
+            scope_disclaimer_needed=scope_disclaimer_needed,
+            diagnostics=diagnostics,
+            assumptions=assumptions,
+            sql=sql,
         )
         return await call_llm(
             model_key="MODEL_ANSWER",
