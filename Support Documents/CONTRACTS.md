@@ -6,6 +6,14 @@
 
 ## backend/auth/role_guard.py
 
+### ScopeResolutionError (class)
+Custom exception raised when an officer's station scope resolution fails (e.g. supervisor unit hierarchy CTE query failure). Inherits from Exception.
+
+### get_scoped_unit_ids
+- **Takes:** officer (dict | None) — authenticated officer JWT payload containing role, unit_id, and officer_id
+- **Returns:** (list[int] | None) — list of accessible UnitIDs for restricted roles (`investigator`, `supervisor`), or None for unrestricted roles (`policymaker`, `analyst`, `admin`)
+- **Raises:** ScopeResolutionError — when supervisor unit hierarchy resolution fails (logged via logger.error)
+
 ### log_action
 - **Takes:** officer_id (int) — EmployeeID performing the action, action (str) — action name, resource_type (str | None) — type of resource affected, resource_id (str | None) — ID of resource affected, details (str | None) — extra context, request (Request | None) — HTTP request for IP extraction
 - **Returns:** nothing
@@ -327,20 +335,25 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Returns:** (dict) — the row with single-byte BIT fields converted to booleans
 - **Raises:** nothing
 
+### _validate_read_only_sql
+- **Takes:** sql (str) — SQL query string to validate
+- **Returns:** nothing
+- **Raises:** ValueError — when SQL statement does not start with SELECT or WITH, or contains forbidden write/DDL keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, REPLACE)
+
 ### close_pool
 - **Takes:** nothing
 - **Returns:** nothing
 - **Raises:** nothing
 
 ### create_pool
-- **Takes:** nothing; aiomysql.Error — when database connection fails
+- **Takes:** nothing
 - **Returns:** (aiomysql.Pool) — newly created MySQL connection pool
-- **Raises:** ValueError — when required DB env vars are not set,
+- **Raises:** ValueError — when required DB env vars are not set, aiomysql.Error — when database connection fails
 
 ### execute_query
-- **Takes:** sql (str) — SELECT query to execute,; params (tuple) — parameterized query values; ValueError — when sql is not a SELECT statement,; TimeoutError — when query exceeds 5-second timeout
+- **Takes:** sql (str) — SELECT or WITH query to execute, params (tuple) — parameterized query values
 - **Returns:** (list[dict]) — list of row dicts (column_name → value)
-- **Raises:** RuntimeError — when pool has not been created,
+- **Raises:** ValueError — when sql fails _validate_read_only_sql, TimeoutError — when query exceeds 5-second timeout, RuntimeError — when pool has not been created
 
 ### execute_write
 - **Takes:** sql (str) — INSERT or UPDATE statement to execute,; params (tuple) — parameterized query values; ValueError — when sql is a SELECT statement,; TimeoutError — when write exceeds 5-second timeout
@@ -507,22 +520,22 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Raises:** nothing
 
 ### format_answer
-- **Takes:** question (str) — the user's natural-language question,; results (list[dict]) — raw rows from the DB query,; media_attachments (list[dict]) — resolved media references for the response,; history (list[dict] | None) — prior conversation turns for context
+- **Takes:** question (str) — the user's natural-language question, results (list[dict]) — raw rows from the DB query, media_attachments (list[dict]) — resolved media references for the response, history (list[dict] | None) — prior conversation turns for context, officer (dict | None) — authenticated officer identity, was_scoped (bool) — whether station scope applied, scope_disclaimer_needed (bool) — whether disclaimer should be shown, diagnostics (dict | None) — zero-result diagnostics context, assumptions (list[str] | None) — entity resolution assumptions, sql (str) — generated SQL query
 - **Returns:** (str) — natural-language answer formatted from the query results
 - **Raises:** LLMError — when the LLM call fails (non-payload-size errors)
 
 ### generate_follow_ups
-- **Takes:** context_block (str) — the case/answer context suggestions build on,; history_block (str) — pre-formatted "Conversation so far: ..." block (may be empty)
+- **Takes:** context_block (str) — the case/answer context suggestions build on, history_block (str) — pre-formatted "Conversation so far: ..." block (may be empty)
 - **Returns:** (list[str]) — up to 3 short follow-up question strings (single source of truth shared by the SQL pipeline and the RAG path)
 - **Raises:** nothing (best-effort — returns [] on any LLM/parsing failure)
 
 ### generate_direct_answer
-- **Takes:** question (str) — the user's natural-language question,; history (list[dict] | None) — prior conversation turns for context,; recent_table (list[dict] | None) — most recent query result rows for grounding
+- **Takes:** question (str) — the user's natural-language question, history (list[dict] | None) — prior conversation turns for context, recent_table (list[dict] | None) — most recent query result rows for grounding
 - **Returns:** (str) — natural-language answer generated without running SQL
 - **Raises:** LLMError — when the underlying LLM call fails
 
 ### route_intent
-- **Takes:** question (str) — the user's natural-language question,; history (list[dict] | None) — prior conversation turns for context,; has_recent_data (bool) — whether the session has recent query results available
+- **Takes:** question (str) — the user's natural-language question, history (list[dict] | None) — prior conversation turns for context, has_recent_data (bool) — whether the session has recent query results available
 - **Returns:** (str) — routing decision, either "SQL" or "DIRECT"
 - **Raises:** nothing (catches all exceptions, defaults to "SQL")
 
@@ -541,7 +554,7 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Raises:** ValueError — when required env vars (CATALYST_API_TOKEN, CATALYST_ORG_ID) are not set
 
 ### call_llm
-- **Takes:** model_key (str) — env var name resolving to the model identifier (e.g. "MODEL_SQL"),; prompt (str) — user/task prompt to send to the model,; system_prompt (str) — system instruction for the model,; max_tokens (int) — maximum tokens to generate in the response
+- **Takes:** model_key (str) — env var name resolving to the model identifier (e.g. "MODEL_SQL"), prompt (str) — user/task prompt to send to the model, system_prompt (str) — system instruction for the model, max_tokens (int) — maximum tokens to generate in the response
 - **Returns:** (str) — the model's non-empty response text
 - **Raises:** LLMError — on network failure, bad HTTP status, invalid JSON, or empty response
 
@@ -553,6 +566,11 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 ---
 
 ## backend/llm/prompts.py
+
+### _format_behavior_rules
+- **Takes:** nothing
+- **Returns:** (str) — pre-formatted system behavior rules block for LLM answer prompt injection
+- **Raises:** nothing
 
 ### _format_history_for_prompt
 - **Takes:** history (list[dict]) — conversation history turns, max_turns (int) — max user/assistant pairs to include, max_chars (int) — max chars per assistant answer
@@ -569,18 +587,28 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Returns:** (str) — identity block for SQL prompt resolving first-person references, or ""
 - **Raises:** nothing
 
+### _is_aggregate_query
+- **Takes:** question (str) — user question string, sql (str) — generated SQL query
+- **Returns:** (bool) — True if query contains aggregation (GROUP BY / COUNT / SUM / AVG / MAX / MIN) or aggregate keywords
+- **Raises:** nothing
+
+### _sanitize_pii
+- **Takes:** results (list[dict]) — raw query results, is_aggregate (bool) — whether query is aggregate
+- **Returns:** (list[dict]) — results with victim PII keys (VictimName, Phone, Address, etc.) redacted to "[REDACTED]" when is_aggregate is True
+- **Raises:** nothing
+
 ### _summarize_media
 - **Takes:** media_refs (list[dict]) — media attachment dicts with media_type fields
 - **Returns:** (str) — human-readable summary like "3 attachment(s): 2 image, 1 video"
 - **Raises:** nothing
 
 ### _truncate_for_answer
-- **Takes:** results (list[dict]) — query results to trim, max_rows (int) — row cap, max_field_chars (int) — per-field char cap
-- **Returns:** (list[dict]) — trimmed results with long string fields clipped
+- **Takes:** results (list[dict]) — query results to trim, max_rows (int) — row cap, max_field_chars (int) — per-field char cap, is_aggregate (bool) — whether query is aggregate
+- **Returns:** (list[dict]) — trimmed results with long string fields clipped and victim PII sanitized if aggregate
 - **Raises:** nothing
 
 ### build_answer_prompt
-- **Takes:** question (str) — officer's question, results (list[dict]) — query results, media_refs (list[dict]) — media attachments, history (list[dict] | None) — conversation history, max_rows (int) — result row cap, max_field_chars (int) — per-field char cap
+- **Takes:** question (str) — officer's question, results (list[dict]) — query results, media_refs (list[dict]) — media attachments, history (list[dict] | None) — conversation history, max_rows (int) — result row cap, max_field_chars (int) — per-field char cap, officer (dict | None) — officer identity, was_scoped (bool) — station scope applied, scope_disclaimer_needed (bool) — disclaimer flag, diagnostics (dict | None) — zero-result diagnostics, assumptions (list[str] | None) — entity assumptions, sql (str) — generated SQL
 - **Returns:** (tuple[str, str]) — (system_prompt, user_prompt) for answer-formatting LLM call
 - **Raises:** nothing
 
@@ -736,7 +764,51 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 
 ---
 
+## backend/pipeline/date_utils.py
+
+### extract_date_predicate
+- **Takes:** sql (str) — generated SQL query string to inspect for date predicates
+- **Returns:** (dict | None) — extracted date predicate dict with column, operator, value, and raw_clause keys, or None if no date filter found
+- **Raises:** nothing
+
+### rewrite_date_predicate
+- **Takes:** sql (str) — original SQL string, new_year (int) — target year to substitute
+- **Returns:** (str) — rewritten SQL string with new year inserted
+- **Raises:** nothing
+
+---
+
+## backend/pipeline/station_scope.py
+
+### StationScopeError (class)
+Custom exception raised when station scope enforcement fails (e.g. unable to determine CaseMaster or Employee alias). Inherits from Exception.
+
+### _casemaster_alias
+- **Takes:** sql (str) — SQL query string
+- **Returns:** (str | None) — table alias for CaseMaster, or None if not referenced
+- **Raises:** nothing
+
+### _employee_alias
+- **Takes:** sql (str) — SQL query string
+- **Returns:** (str | None) — table alias for Employee, or None if not referenced
+- **Raises:** nothing
+
+### _compute_scope_disclaimer_needed
+- **Takes:** question (str) — natural language user question, was_scoped (bool) — whether station scope filter was applied
+- **Returns:** (bool) — True if question contains wide-scope keywords ("karnataka", "state", "all stations") AND lacks first-person keywords ("my", "assigned to me")
+- **Raises:** nothing
+
+### enforce_station_scope
+- **Takes:** sql (str) — generated SQL query string, officer (dict | None) — authenticated officer identity, question (str) — natural language question
+- **Returns:** (tuple[str, bool, bool]) — (rewritten_sql, was_scoped, scope_disclaimer_needed). Enforces Rule 3 Employee table scoping and Rule 5 assigned case protection `(PoliceStationID IN (...) OR PolicePersonID = {id})`.
+- **Raises:** StationScopeError — when query touches CaseMaster/Employee but alias cannot be parsed
+
+---
+
 ## backend/pipeline/query_pipeline.py
+
+### PipelineResponse (dataclass)
+Return object for run_pipeline containing: answer_text (str), table_data (list[dict]), media_attachments (list[dict]), sql_generated (str), graph_available (bool), error (str | None), suggested_follow_ups (list[str]), assumptions (list[str]).
 
 ### _check_graph_available
 - **Takes:** case_master_ids (list[int]) — list of CaseMasterIDs to check
@@ -753,6 +825,11 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Returns:** (bool) — True if the first result row contains a CaseMasterID key
 - **Raises:** nothing
 
+### _is_cross_station_comparison
+- **Takes:** question (str) — user question string
+- **Returns:** (bool) — True if question contains comparison keywords ("compare", "vs", "versus") and station terms ("station", "ps", "unit")
+- **Raises:** nothing
+
 ### _log
 - **Takes:** msg (str) — message to log
 - **Returns:** nothing
@@ -763,6 +840,11 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Returns:** (list[dict]) — the table snapshot from the most recent assistant turn, or []
 - **Raises:** nothing
 
+### _retry_with_latest_date
+- **Takes:** sql (str) — original SQL query with date predicate, officer (dict | None) — officer context, question (str) — natural language question
+- **Returns:** (tuple[list[dict] | None, str | None, str | None]) — (retry_results, rewritten_sql, date_adjustment_note) or (None, None, None) on failure
+- **Raises:** nothing
+
 ### _run_direct
 - **Takes:** question (str) — user question, history (list[dict]) — conversation history, recent_table (list[dict]) — last result set
 - **Returns:** (PipelineResponse) — answer generated without SQL, with error handling
@@ -770,7 +852,7 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 
 ### run_pipeline
 - **Takes:** question (str) — user question, history (list[dict] | None) — conversation history, officer (dict | None) — authenticated officer JWT payload
-- **Returns:** (PipelineResponse) — full pipeline result with answer, table data, media, graph flag
+- **Returns:** (PipelineResponse) — full pipeline result with answer, table data, media, graph flag, assumptions
 - **Raises:** nothing (never raises, all failures surfaced via error/answer_text fields)
 
 ---
@@ -813,7 +895,7 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 
 ### select_relevant_tables
 - **Takes:** question (str) — natural language question from the user
-- **Returns:** (list[str]) — relevant table names, CaseMaster always first, capped at 5
+- **Returns:** (tuple[list[str], list[str]]) — (table_names, assumptions) where table_names is list of relevant tables with CaseMaster first (capped at 5) and assumptions is list of entity resolution assumption strings (Rule 12)
 - **Raises:** nothing
 
 ---
@@ -1063,6 +1145,25 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Takes:** officer_name (str) — officer's display name, badge_number (str) — KGID, title (str) — session title, messages (list) — message dicts with content and optional table_data
 - **Returns:** (str) — complete HTML document string for export
 - **Raises:** nothing
+
+---
+
+## backend/routers/profiling.py
+
+### get_risk_score
+- **Takes:** accused_id (int) — AccusedMasterID, request (Request) — HTTP request for audit logging, force_recompute (bool) — force score recalculation, officer (dict) — authenticated officer
+- **Returns:** (dict) — risk assessment payload with accused_id, risk_score, risk_tier, contributing_factors
+- **Raises:** HTTPException — 404 when accused person is not found or inaccessible under station scoping
+
+### top_risk_offenders
+- **Takes:** limit (int) — maximum number of offenders to return, officer (dict) — authenticated officer
+- **Returns:** (dict) — response payload `{"top_risk": list[dict], "scoped": bool, "unit_name": str | None}` filtered to officer's accessible stations
+- **Raises:** nothing
+
+### recompute_all
+- **Takes:** officer (dict) — authenticated officer (requires supervisor/analyst/policymaker role)
+- **Returns:** (dict) — `{"recomputed": int}` count of updated risk scores
+- **Raises:** HTTPException — 403 when officer lacks required role
 
 ### _build_pdf
 - **Takes:** officer_name (str) — officer's display name, badge_number (str) — KGID, title (str) — session title, messages (list) — message dicts with content, table_data, sql_generated, media_attachments

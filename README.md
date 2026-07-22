@@ -9,14 +9,15 @@ A natural language crime intelligence platform for Karnataka State Police. Offic
 ## What It Does
 
 1. Officer types a question like *"How many theft cases are open in Koramangala?"*
-2. A **schema linker** selects the relevant database tables.
-3. **GLM-4.7-Flash** (LLM) converts the question into a MySQL SELECT query.
-4. A **SQL validator** checks the query is safe (SELECT-only, valid tables, no injection).
-5. The query runs against the crime database (MySQL).
-6. **GLM-4.7-Flash** (the same LLM as used for query generator) formats the raw results into a natural-language answer
-7. The answer streams back token-by-token via Server-Sent Events (SSE).
-8. If the query returns tabular data, it renders as an interactive table in the UI
-9. 3 follow-up question suggestions are generated for the officer
+2. A **schema linker** selects relevant database tables and captures entity-resolution assumptions (Rule 12).
+3. **GLM-4.7-Flash** (LLM) converts the question into a MySQL query.
+4. A **SQL validator** and **station scoping engine** enforce role-based station visibility (`CaseMaster.PoliceStationID` or `Employee.UnitID`), assigned-case protection (`(PoliceStationID IN (...) OR PolicePersonID = {id})`), and intercept restricted cross-station comparisons (Rule 6).
+5. The query runs via a **read-only SQL guard** supporting `SELECT` and `WITH` (recursive CTE) operations while blocking data modifications.
+6. If a date-bounded query returns 0 rows, a **date-fallback mechanism** auto-retries using the max available date in `CaseMaster` (Rule 7).
+7. **GLM-4.7-Flash** formats the raw results into a natural-language answer with deterministic PII redaction on aggregate queries (Rule 8), zero-result diagnostics (Rule 11), entity assumptions (Rule 12), and explicit scope disclaimers (Rules 2 & 10).
+8. The answer streams back token-by-token via Server-Sent Events (SSE).
+9. If the query returns tabular data, it renders as an interactive table in the UI.
+10. 3 follow-up question suggestions are generated for the officer.
 
 Multi-turn conversation is supported — follow-up questions use previous context without repeating information.
 
@@ -499,7 +500,7 @@ Password formula: `<KGID>123`
 | `GET` | `/api/analytics/forecasting/repeat-crimes` | Yes | Repeat crime clusters |
 | `GET` | `/api/analytics/forecasting/gang-activity` | Yes | Potential organized crime |
 | `GET` | `/api/profiling/risk/{accused_id}` | Yes | Offender risk score |
-| `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders |
+| `GET` | `/api/profiling/top-risk` | Yes | Top risk offenders (station-scoped, includes `scoped` and `unit_name` metadata) |
 | `GET` | `/api/decision-support/similar-cases/{case_id}` | Yes | Similar case finder |
 | `GET` | `/api/decision-support/timeline/{case_id}` | Yes | Case timeline events |
 | `GET` | `/api/decision-support/summary/{case_id}` | Yes | LLM-generated case brief |
@@ -572,7 +573,7 @@ python backend/debug_tools.py all      # Run all checks
 
 ## Running Tests
 
-Backend — 128 tests total (71 unit + 8 token + 17 pipeline/session + 17 rate-limiter + 15 property-based),
+Backend — 150 tests total (unit, pipeline, session, rate-limiter, behavior-rules, and property-based tests),
 no network or DB required:
 
 ```bash
