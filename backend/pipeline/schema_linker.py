@@ -1,13 +1,6 @@
 """
-Schema linker — picks the smallest set of relevant tables for a question.
-
-Algorithm (intentionally simple — keyword presence):
-  1. Lowercase the question.
-  2. For each table in SCHEMA_CATALOG, score it by how many of its keywords
-     appear in the question.
-  3. Tables marked `always_include: True` are always added.
-  4. Cap result at 5 tables (CaseMaster plus 4 others) to avoid context bloat.
-  5. CaseMaster is always returned first.
+Schema linker — picks the smallest set of relevant tables for a question
+and captures entity resolution assumptions for Rule 12.
 """
 
 import re
@@ -24,19 +17,22 @@ from db.schema_catalog import SCHEMA_CATALOG  # noqa: E402
 
 _MAX_TABLES = 5
 
+_FUZZY_ASSUMPTIONS = [
+    ("vehicle", "Assuming 'vehicle' refers to CrimeSubHead 'Vehicle Theft'"),
+    ("cyber", "Assuming 'cyber' refers to CrimeHead 'Cyber Crimes'"),
+    ("phishing", "Assuming 'phishing' refers to CrimeSubHead 'Phishing' under Cyber Crimes"),
+    ("drug", "Assuming 'drug' refers to CrimeSubHead 'Drug Offense'"),
+    ("assault", "Assuming 'assault' refers to CrimeSubHead 'Assault' under Crimes Against Person"),
+    ("murder", "Assuming 'murder' refers to CrimeSubHead 'Murder' under Crimes Against Person"),
+    ("robbery", "Assuming 'robbery' refers to CrimeSubHead 'Robbery'"),
+]
+
 
 # CONTRACT
 # takes:  question_lower (str) — lowercased user question, keyword (str) — keyword to match against
 # returns: (bool) — True if the keyword is present in the question respecting word boundaries
 # raises:  nothing
 def _keyword_matches(question_lower: str, keyword: str) -> bool:
-    """
-    Match a keyword against the lowercased question.
-
-    Multi-word keywords ("missing person", "co-accused") use plain substring
-    match. Single tokens (no spaces, no hyphens) use a word-boundary match so
-    short tokens like "si" or "pi" don't match inside "missing" / "phishing".
-    """
     kw = keyword.lower().strip()
     if not kw:
         return False
@@ -48,17 +44,23 @@ def _keyword_matches(question_lower: str, keyword: str) -> bool:
 
 # CONTRACT
 # takes:  question (str) — natural language question from the user
-# returns: (list[str]) — relevant table names, CaseMaster always first, capped at 5
+# returns: (tuple[list[str], list[str]]) — (relevant_table_names, list_of_assumptions)
 # raises:  nothing
-def select_relevant_tables(question: str) -> list[str]:
+def select_relevant_tables(question: str) -> tuple[list[str], list[str]]:
     """
-    Return a list of table names relevant to the question. CaseMaster always
-    appears first. List length is capped at _MAX_TABLES.
+    Return a tuple of (table_names, assumptions). CaseMaster always appears first.
+    Table names list length is capped at _MAX_TABLES.
     """
     if not question:
-        return ["CaseMaster"]
+        return ["CaseMaster"], []
 
     q = question.lower()
+    assumptions: list[str] = []
+
+    # Rule 12: Capture entity resolution assumptions
+    for kw, assumption_text in _FUZZY_ASSUMPTIONS:
+        if _keyword_matches(q, kw):
+            assumptions.append(assumption_text)
 
     scored: list[tuple[int, str]] = []
     always_in: list[str] = []
@@ -77,8 +79,6 @@ def select_relevant_tables(question: str) -> list[str]:
 
     scored.sort(key=lambda x: (-x[0], x[1]))
 
-    # Build final list: CaseMaster first, then any other always_include tables,
-    # then the highest-scoring keyword matches up to the cap.
     out: list[str] = []
     if "CaseMaster" in always_in:
         out.append("CaseMaster")
@@ -92,7 +92,7 @@ def select_relevant_tables(question: str) -> list[str]:
             break
         out.append(name)
 
-    return out
+    return out, assumptions
 
 
 if __name__ == "__main__":
@@ -109,7 +109,8 @@ if __name__ == "__main__":
         "List all cases linked to the Bullet Mahesh gang",
     ]
     for q in test_questions:
-        tables = select_relevant_tables(q)
+        tables, asm = select_relevant_tables(q)
         print(f"Q: {q}")
-        print(f"   -> {tables}")
+        print(f"   -> tables: {tables}")
+        print(f"   -> assumptions: {asm}")
         print()

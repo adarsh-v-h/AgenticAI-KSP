@@ -72,7 +72,7 @@ class TestIntentRouting:
             monkeypatch.setattr(qp, "format_answer", fake_fmt)
             monkeypatch.setattr(qp, "_check_graph_available", fake_graph)
             monkeypatch.setattr(qp, "resolve_media", fake_resolve)
-            monkeypatch.setattr(qp, "select_relevant_tables", lambda q: ["CaseMaster"])
+            monkeypatch.setattr(qp, "select_relevant_tables", lambda q: (["CaseMaster"], []))
 
             resp = await qp.run_pipeline("show theft cases", history=[])
             assert resp.sql_generated == "SELECT 1 AS fir_id"
@@ -89,7 +89,7 @@ class TestIntentRouting:
             monkeypatch.setattr(qp, "route_intent", fake_route)
             monkeypatch.setattr(qp, "generate_sql", fake_gen)
             monkeypatch.setattr(qp, "generate_direct_answer", fake_direct)
-            monkeypatch.setattr(qp, "select_relevant_tables", lambda q: ["CaseMaster"])
+            monkeypatch.setattr(qp, "select_relevant_tables", lambda q: (["CaseMaster"], []))
 
             resp = await qp.run_pipeline("what is your name?", history=[])
             assert "Can't pull" in resp.answer_text
@@ -114,7 +114,7 @@ class TestIntentRouting:
             monkeypatch.setattr(qp, "format_answer", fake_fmt)
             monkeypatch.setattr(qp, "_check_graph_available", fake_graph)
             monkeypatch.setattr(qp, "resolve_media", fake_resolve)
-            monkeypatch.setattr(qp, "select_relevant_tables", lambda q: ["CaseMaster"])
+            monkeypatch.setattr(qp, "select_relevant_tables", lambda q: (["CaseMaster"], []))
 
             await qp.run_pipeline("show theft cases", history=[])
             assert calls["router"] == 0
