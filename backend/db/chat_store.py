@@ -98,9 +98,16 @@ def _utc_iso(dt) -> str | None:
     "2026-07-19T05:23:19"), which JS `Date` parses as *local* time rather than
     UTC — this is what caused session timestamps to show the wrong clock time
     in the sidebar. Attaching `timezone.utc` before formatting fixes that.
+
+    If dt is a string (e.g. returned after gRPC/JSON serialization), it is returned
+    directly with UTC timezone appended if not already present.
     """
     if dt is None:
         return None
+    if isinstance(dt, str):
+        if "+" not in dt and not dt.endswith("Z"):
+            return dt + "+00:00"
+        return dt
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()

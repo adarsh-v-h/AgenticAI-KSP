@@ -32,6 +32,8 @@ on:
     paths-ignore:
       - "Support Documents/**"
       - "Cleanup And Imp/**"
+      - "**/*.md"
+      - "README.md"
   workflow_dispatch:
 
 concurrency:
