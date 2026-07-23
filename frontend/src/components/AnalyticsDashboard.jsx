@@ -162,6 +162,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 xKey="month"
                 yKey="count"
                 type="line"
+                height={250}
+                padding={{ top: 16, right: 28, bottom: 55, left: 55 }}
                 emptyLabel="No cases registered in this window"
               />
             )}
@@ -173,7 +175,14 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 Could not load this panel
               </div>
             ) : (
-              <TrendChart data={crimeType} xKey="crime_type" yKey="count" type="bar" />
+              <TrendChart
+                data={crimeType}
+                xKey="crime_type"
+                yKey="count"
+                type="bar"
+                height={260}
+                padding={{ top: 16, right: 28, bottom: 70, left: 70 }}
+              />
             )}
           </Panel>
 
@@ -191,6 +200,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 xKey="station"
                 yKey="count"
                 type="bar"
+                height={250}
+                padding={{ top: 16, right: 28, bottom: 65, left: 65 }}
                 onBarClick={handleStationClick}
               />
             )}
@@ -283,7 +294,14 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
             {crimeByOccupation === null ? (
               <div className="analytics-panel__state analytics-panel__state--error">Could not load this panel</div>
             ) : (
-              <TrendChart data={crimeByOccupation} xKey="occupation" yKey="count" type="bar" />
+              <TrendChart
+                data={crimeByOccupation}
+                xKey="occupation"
+                yKey="count"
+                type="bar"
+                height={260}
+                padding={{ top: 16, right: 28, bottom: 70, left: 70 }}
+              />
             )}
           </Panel>
 

@@ -16,16 +16,18 @@ export default function TrendChart({
   xKey,
   yKey,
   type = 'bar',
-  height = 220,
+  height = 250,
+  padding,
   color = 'var(--primary)',
   onBarClick,
   formatX = (v) => v,
   emptyLabel = 'No data yet',
 }) {
   const width = 560
-  const padding = { top: 16, right: 16, bottom: 36, left: 40 }
-  const innerW = width - padding.left - padding.right
-  const innerH = height - padding.top - padding.bottom
+  const defaultPadding = { top: 16, right: 28, bottom: 65, left: 65 }
+  const pad = { ...defaultPadding, ...padding }
+  const innerW = width - pad.left - pad.right
+  const innerH = height - pad.top - pad.bottom
 
   const maxY = useMemo(() => {
     if (!data || data.length === 0) return 1
@@ -39,9 +41,6 @@ export default function TrendChart({
   const stepX = innerW / data.length
   const scaleY = (v) => innerH - (Number(v) / maxY) * innerH
 
-  // Rotate labels when there are many categories to prevent overlap
-  const shouldRotateLabels = data.length > 8
-
   return (
     <svg
       className="trend-chart"
@@ -49,7 +48,7 @@ export default function TrendChart({
       role="img"
       aria-label="Trend chart"
     >
-      <g transform={`translate(${padding.left},${padding.top})`}>
+      <g transform={`translate(${pad.left},${pad.top})`}>
         {/* gridlines */}
         {[0, 0.5, 1].map((t) => (
           <line
@@ -84,28 +83,16 @@ export default function TrendChart({
                 >
                   <title>{`${labelText}: ${d[yKey]}`}</title>
                 </rect>
-                {shouldRotateLabels ? (
-                  <text
-                    x={x + barW / 2}
-                    y={innerH + 8}
-                    textAnchor="end"
-                    fontSize="11"
-                    fill="var(--text-secondary)"
-                    transform={`rotate(-45 ${x + barW / 2} ${innerH + 8})`}
-                  >
-                    {labelText.slice(0, 18)}
-                  </text>
-                ) : (
-                  <text
-                    x={x + barW / 2}
-                    y={innerH + 14}
-                    textAnchor="middle"
-                    fontSize="12"
-                    fill="var(--text-secondary)"
-                  >
-                    {labelText.slice(0, 10)}
-                  </text>
-                )}
+                <text
+                  x={x + barW / 2}
+                  y={innerH + 10}
+                  textAnchor="end"
+                  fontSize="11"
+                  fill="var(--text-secondary)"
+                  transform={`rotate(-45 ${x + barW / 2} ${innerH + 10})`}
+                >
+                  {labelText.length > 22 ? `${labelText.slice(0, 20)}…` : labelText}
+                </text>
               </g>
             )
           })}
@@ -131,18 +118,23 @@ export default function TrendChart({
                 <title>{`${formatX(d[xKey])}: ${d[yKey]}`}</title>
               </circle>
             ))}
-            {data.map((d, i) => (
-              <text
-                key={`lbl-${i}`}
-                x={i * stepX + stepX / 2}
-                y={innerH + 14}
-                textAnchor="middle"
-                fontSize="12"
-                fill="var(--text-secondary)"
-              >
-                {String(formatX(d[xKey])).slice(0, 10)}
-              </text>
-            ))}
+            {data.map((d, i) => {
+              const labelText = String(formatX(d[xKey]))
+              const xPos = i * stepX + stepX / 2
+              return (
+                <text
+                  key={`lbl-${i}`}
+                  x={xPos}
+                  y={innerH + 10}
+                  textAnchor="end"
+                  fontSize="11"
+                  fill="var(--text-secondary)"
+                  transform={`rotate(-45 ${xPos} ${innerH + 10})`}
+                >
+                  {labelText.length > 22 ? `${labelText.slice(0, 20)}…` : labelText}
+                </text>
+              )
+            })}
           </>
         )}
       </g>
