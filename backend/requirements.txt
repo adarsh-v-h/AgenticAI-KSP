@@ -10,3 +10,7 @@ fpdf2==2.8.7
 bcrypt==4.2.0
 python-multipart==0.0.12
 pytest-asyncio==0.24.0
+
+# gRPC
+grpcio==1.83.0
+grpcio-tools==1.83.0
