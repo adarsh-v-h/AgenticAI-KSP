@@ -10,6 +10,7 @@ from db.chat_store import get_messages_for_session, verify_session_owner
 from db.connection import execute_query
 from conversation.history import get_history
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import io
 import html as html_lib
 
@@ -92,7 +93,7 @@ def _build_pdf(officer_name: str, badge_number: str, title: str, messages: list)
 
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(100, 100, 100)
-    export_date = datetime.now().strftime("%d %B %Y, %I:%M %p")
+    export_date = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y, %I:%M %p")
     pdf.cell(0, 5, f"Officer: {officer_name} ({badge_number})  |  Session: {title}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 5, f"Exported: {export_date}", new_x="LMARGIN", new_y="NEXT")
 
@@ -296,7 +297,7 @@ def _build_html(officer_name: str, badge_number: str, title: str, messages: list
                     )
             messages_html += "\n</div>"
 
-    export_date = datetime.now().strftime("%d %B %Y, %I:%M %p")
+    export_date = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y, %I:%M %p")
     return (
         "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n"
         "<title>KSP Export</title>\n<style>\n"
