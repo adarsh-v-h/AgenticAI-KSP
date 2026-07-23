@@ -83,7 +83,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │       └── ci_deploy.sh         # Non-interactive Catalyst deploy used by CI
 │
 ├── scripts/
-│   ├── gen_app_config.py        # Generates backend/app-config.json from .env
+│   ├── gen_app_config.py        # Generates backend/app-config.json from .env (maps scaling env vars too)
 │   └── smoke_test.py            # Live post-deploy smoke test (29 endpoints)
 │
 ├── client-package/              # Frontend build output for Web Client Hosting (generated)
@@ -97,6 +97,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │
 ├── backend/
 │   ├── main.py                  # FastAPI app, startup lifecycle, health check
+│   ├── benchmark.py             # Standalone HTTP benchmark harness for latency testing
 │   ├── app-config.template.json # AppSail config template (no secrets, committed)
 │   ├── app-config.json          # Generated AppSail config (has secrets, gitignored)
 │   ├── requirements.txt         # Deps bundled into the AppSail runtime
@@ -304,6 +305,14 @@ Open `.env` and fill in every value. The server crashes on startup if any requir
 | `NOSQL_BASE_URL` | `https://api.catalyst.zoho.in/baas/v1/project/{PROJECT_ID}/nosqltable` |
 | `APP_SECRET_KEY` | Generate: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` (dev) |
+
+**Optional scaling variables** (mapped by `gen_app_config.py` into `app-config.json` for AppSail):
+
+| Variable | Default | Purpose |
+|----------|---------|--------|
+| `DB_POOL_MAXSIZE` | `10` | Maximum MySQL connection pool size |
+| `DB_POOL_MINSIZE` | `5` | Minimum MySQL connection pool size |
+| `DISABLE_RATE_LIMIT` | _(unset)_ | Set to `true` to bypass station rate limiting (useful during load testing) |
 
 ### 7. Create tables and seed the database
 

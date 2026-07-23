@@ -47,6 +47,7 @@ Called via the Catalyst QuickML GLM endpoint (`/quickml/v1/project/.../glm/chat`
 ```
 backend/
 ├── main.py                    # FastAPI app, lifespan, CORS, health check
+├── benchmark.py               # Standalone HTTP benchmark harness for API latency testing
 ├── Dockerfile                 # Container for Catalyst AppSail
 ├── debug_tools.py             # Unified CLI debug utility (env/db/schema/tables/rag)
 ├── setup_db.py                # Create tables + seed from .env (any MySQL target)
@@ -125,10 +126,12 @@ backend/
 
 **Startup sequence:**
 1. `validate_settings()` → crash if `.env` incomplete
-2. `create_pool()` → MySQL connection pool (minsize=3, maxsize=10)
+2. `create_pool()` → MySQL connection pool (minsize/maxsize configurable via `DB_POOL_MINSIZE`/`DB_POOL_MAXSIZE` env vars, defaults 5/10)
 3. DB probe → `SELECT 1`, sets `app.state.db_ok`
 4. NoSQL probe → confirms Catalyst NoSQL reachable
-5. Register `auth_router`, `chat_router`, `export_router`, and `reports_router`
+5. Rate limiter background sync started
+6. Eager warm-up → `ping_model("MODEL_SQL")`, `ping_model("MODEL_ANSWER")`, and `ping_voice()` run concurrently via `asyncio.gather` **before** accepting connections; then a background `_keep_warm_loop` repeats the same pings every 300 s (sleep-first, so the loop waits before each iteration rather than pinging immediately after the eager run)
+7. Register `auth_router`, `chat_router`, `export_router`, and `reports_router`
 
 **App metadata:**
 - `title`: `"KSP Crime Intelligence API"`
@@ -203,7 +206,7 @@ backend/
 
 | Function | Description |
 |----------|-------------|
-| `create_pool() -> aiomysql.Pool` | Creates the connection pool with `host`, `port`, `user`, `password`, `db` from env vars. Settings: `minsize=3`, `maxsize=10`, `autocommit=True`, `connect_timeout=5`. Stores in `_pool`. Called once during FastAPI lifespan. |
+| `create_pool() -> aiomysql.Pool` | Creates the connection pool with `host`, `port`, `user`, `password`, `db` from env vars. Pool sizes are configurable via `DB_POOL_MINSIZE` (default `5`) and `DB_POOL_MAXSIZE` (default `10`) environment variables, read with `os.getenv()`. Settings: `autocommit=True`, `connect_timeout=5`. Stores in `_pool`. Called once during FastAPI lifespan. |
 | `get_pool() -> aiomysql.Pool` | Returns the existing pool. Raises `RuntimeError` if called before `create_pool()`. |
 | `execute_query(sql, params) -> list[dict]` | **Security-critical function.** (1) Checks `sql.strip().upper().startswith("SELECT")` — raises `ValueError` if not. (2) Acquires a connection from the pool. (3) Executes with `aiomysql.DictCursor` (returns dicts, not tuples). (4) Uses `asyncio.wait_for` with a 5-second timeout. (5) Releases connection in `finally` block. Returns `list[dict]` where keys are column names. |
 | `execute_write(sql, params) -> int` | INSERT/UPDATE counterpart to `execute_query`. Refuses anything starting with `SELECT` (raises `ValueError` — use `execute_query` for reads). Commits and returns `cur.lastrowid` for INSERTs or `cur.rowcount` for UPDATEs. Same pool, 5-second timeout. Added in Step 4 for persistent chat storage (`chat_store.py`). |
@@ -323,7 +326,7 @@ backend/
 |----------|-------------|
 | `_llm_headers() -> dict` | Returns `{"Authorization": "Zoho-oauthtoken ...", "Content-Type": "application/json", "CATALYST-ORG": "..."}` — required on every Catalyst API call. |
 | `ping_model(model_key) -> bool` | Sends `"Say OK."` to the given model. Returns `True` on non-empty 200 response, `False` otherwise. Never raises — used by health check. Timeout: 120s. |
-| `call_llm(model_key, prompt, system_prompt, max_tokens) -> str` | **Core LLM call.** Sends a POST to `QUICKML_LLM_URL` with payload: `{model, prompt, system_prompt, max_tokens, temperature: 0.1, top_p: 0.95, top_k: 40}`. Returns the `response` field from JSON. Raises `LLMError` on: missing config, timeout (180s), HTTP error, non-200 status, invalid JSON, or empty response. |
+| `call_llm(model_key, prompt, system_prompt, max_tokens) -> str` | **Core LLM call.** Sends a POST to `QUICKML_LLM_URL` with payload: `{model, messages: [{role: "system", ...}, {role: "user", ...}], max_tokens, temperature: 0.1, stream: False}`. **Retry with exponential backoff:** on HTTP 429 (rate-limited), 408 (timeout), or 5xx (server error), retries up to 3 times with jittered backoff (`base_delay × 2^attempt + random(0.1, 0.5)`). Also retries on `httpx.TimeoutException` and `httpx.HTTPError`. Returns the `response` field from JSON. Raises `LLMError` on: missing config, non-retryable non-200 status, retries exhausted, invalid JSON, or empty response. |
 
 **Catalyst QuickML API format (different from OpenAI):**
 ```json
@@ -437,6 +440,10 @@ Attempt 2:
 
 **Data structures:**
 
+`PipelineCache` — LRU cache with TTL eviction. Backed by `collections.OrderedDict`. Constructor takes `capacity` (max entries, default 500) and `ttl_seconds` (entry lifetime, default 300). Methods: `get(key)` returns cached value or `None` (expired entries are deleted on access); `put(key, value)` inserts with a `time.monotonic()` timestamp, evicting the oldest entry when at capacity.
+
+Module-level instance: `_pipeline_cache = PipelineCache(capacity=1000, ttl_seconds=300)`.
+
 `PipelineResponse` — dataclass with fields:
 - `answer_text: str` — the formatted natural-language answer
 - `table_data: list[dict]` — raw query results (for table rendering)
@@ -445,10 +452,13 @@ Attempt 2:
 - `graph_available: bool` — whether network graph data exists for the cases in results
 - `error: str | None` — error message if something went wrong
 
+**KB document ID loading:** `_kb_doc_ids_cache` is populated eagerly at **module load time** from the `KB_DOCUMENT_IDS` environment variable (comma-separated). The old `_get_kb_document_ids()` function, which used to re-read the `.env` file on every request based on mtime changes, has been replaced by a simple accessor that returns the cached list. This eliminates synchronous filesystem I/O from the hot request path.
+
 **Functions:**
 
 | Function | Description |
 |----------|-------------|
+| `get_pipeline_cache_key(question, history, officer) -> str` | Builds an MD5 hash key from the lowercased question, serialized history (role+content only), and officer identity (unit_id + role). Used to look up / store cached `PipelineResponse` objects. |
 | `_has_case_master_id(results)` | Checks if the first result row contains a `CaseMasterID` or `case_master_id` key |
 | `collect_case_master_ids(results)` | Imported from `media_resolver` — extracts unique integer `CaseMasterID` or `case_master_id` values from all result rows. |
 | `_check_graph_available(case_master_ids)` | Probe that returns `True` if any case IDs are present. The network graph is constructed dynamically on-demand from Accused and CaseMaster linkages. |
@@ -458,13 +468,15 @@ Attempt 2:
 
 **Pipeline steps (in `run_pipeline`):**
 
-0. **Intent routing** — `_most_recent_table(history)` recovers the last result set. **Optimization:** the router only runs when there *is* prior history (a brand-new chat with no history skips the router LLM call and goes straight to SQL — there's nothing to answer "directly" from yet). When history exists, `route_intent()` returns `SQL` or `DIRECT`; a `DIRECT` decision calls `_run_direct()` and returns immediately (no SQL, no DB).
-1. **Schema linker** — `select_relevant_tables(question)` → list of table names
-2. **SQL generation** — `generate_sql(question, tables, history, officer)` → `(SQL, attempts_used)` (with retry loop)
-3. **Execute SQL** — `execute_query(sql)` → `list[dict]` (one corrective retry on MySQL error, within the shared `MAX_ATTEMPTS` budget)
-4. **Media resolver** — `resolve_media(results)` → only if results have `CaseMasterID`/`case_master_id` column
-5. **Graph probe** — `_check_graph_available(case_master_ids)` → boolean
-6. **Answer formatting** — `format_answer(question, results, media, history)` → text
+0. **Semantic cache check** — `get_pipeline_cache_key(question, history, officer)` hashes the inputs; if `_pipeline_cache.get(key)` returns a hit, the cached `PipelineResponse` is returned immediately (no LLM calls, no DB). Failures in cache lookup are caught and logged, never block the pipeline.
+1. **Intent routing** — `_most_recent_table(history)` recovers the last result set. **Optimization:** the router only runs when there *is* prior history (a brand-new chat with no history skips the router LLM call and goes straight to SQL — there's nothing to answer "directly" from yet). When history exists, `route_intent()` returns `SQL` or `DIRECT`; a `DIRECT` decision calls `_run_direct()` and returns immediately (no SQL, no DB).
+2. **Schema linker** — `select_relevant_tables(question)` → list of table names
+3. **SQL generation** — `generate_sql(question, tables, history, officer)` → `(SQL, attempts_used)` (with retry loop)
+4. **Execute SQL** — `execute_query(sql)` → `list[dict]` (one corrective retry on MySQL error, within the shared `MAX_ATTEMPTS` budget)
+5. **Media resolver** — `resolve_media(results)` → only if results have `CaseMasterID`/`case_master_id` column
+6. **Graph probe** — `_check_graph_available(case_master_ids)` → boolean
+7. **Answer formatting** — `format_answer(question, results, media, history)` → text
+8. **Cache store** — on successful, error-free completion, stores the `PipelineResponse` in `_pipeline_cache` for future hits
 
 **Error handling in pipeline:**
 - `CannotAnswerError` → **falls back to the DIRECT path** (`_run_direct`) so general questions and insights still get a real conversational answer instead of a canned error
@@ -560,7 +572,7 @@ Attempt 2:
 | `_local_set(session_id, turns)` | Thread-safe write to `_local_history`, trims to `MAX_TURNS` |
 | `_local_clear(session_id)` | Thread-safe delete from `_local_history` |
 | `get_history(session_id) -> list[dict]` | Fetches history. Tries NoSQL first. On success: parses JSON from `data.history` field. On 404 or error: falls back to `_local_get()`. Never raises. |
-| `save_turn(session_id, user_message, assistant_message, assistant_sql=None, assistant_table=None)` | Appends a user+assistant turn. Updates in-memory first (always). Then PUTs to NoSQL. If PUT returns 404 (document doesn't exist), POSTs to create it. `assistant_sql` is stored on the assistant turn so follow-up SQL generation can preserve filter clauses; `assistant_table` stores a bounded (`_TABLE_SNAPSHOT_ROWS`) snapshot of the result set so the next turn can answer follow-ups via the DIRECT path **without re-querying**. Uses `json.dumps(..., default=str)` when serializing history payloads so `date`/`datetime`/`timedelta` values persist cleanly. Never raises. |
+| `save_turn(session_id, user_message, assistant_message, assistant_sql=None, assistant_table=None)` | Appends a user+assistant turn. Updates in-memory first (always). Then **offloads** the NoSQL save and session-metadata sync to a **background `asyncio` task** (`_bg_save`) so the request path is not blocked by remote I/O. The background task PUTs to NoSQL; if PUT returns 404 (document doesn't exist), POSTs to create it. During `pytest`, the background task is awaited inline for test determinism. `assistant_sql` is stored on the assistant turn so follow-up SQL generation can preserve filter clauses; `assistant_table` stores a bounded (`_TABLE_SNAPSHOT_ROWS`) snapshot of the result set so the next turn can answer follow-ups via the DIRECT path **without re-querying**. Uses `json.dumps(..., default=str)` when serializing history payloads so `date`/`datetime`/`timedelta` values persist cleanly. Never raises. |
 | `clear_history(session_id)` | Deletes from both NoSQL and in-memory. Never raises. |
 | `init_nosql_table()` | Probes NoSQL by fetching a non-existent document (`__probe__`). Status 200 or 404 means the service is alive. Called once at startup. Never raises. |
 
@@ -585,9 +597,9 @@ Attempt 2:
 
 | Function | Description |
 |----------|-------------|
-| `create_session(document) -> dict` | Persists a new `session_metadata` document (writes in-memory first, then POSTs to NoSQL). Never raises. |
+| `create_session(document) -> dict` | Persists a new `session_metadata` document (writes in-memory first, then **offloads** the NoSQL POST to a background `asyncio` task with one retry). During `pytest`, the background task is awaited inline. Never raises. |
 | `get_session(session_id) -> dict \| None` | Fetches one session document; falls back to in-memory on NoSQL error. Never raises. |
-| `update_session(session_id, updates) -> dict \| None` | Merges `updates` into an existing document and PUTs it (creating it on 404). Returns `None` when no session exists. Never raises. |
+| `update_session(session_id, updates) -> dict \| None` | Merges `updates` into an existing document, updates in-memory first, then **offloads** the NoSQL PUT to a background task (creating on 404). During `pytest`, the background task is awaited inline. Returns `None` when no session exists. Never raises. |
 | `list_sessions(officer_id) -> list[dict]` | Returns all of an officer's sessions ordered by `updated_at` DESC. Filters/sorts in Python since NoSQL may not support filtered queries. Never raises. |
 | `generate_title(message) -> str` | Derives a 3–8 word, ≤60-char human-readable title from the first user message; falls back to `"New chat"`. |
 
@@ -853,18 +865,23 @@ Frontend ChatWindow.jsx: handleSend()
           → HTTP GET to Catalyst NoSQL (or in-memory fallback)
         → pipeline/query_pipeline.py: run_pipeline(question, history)
           
-          Step 0: Intent Router (only when history exists)
+          Step 0: Pipeline Cache Check
+            → get_pipeline_cache_key(question, history, officer)
+            → _pipeline_cache.get(key)
+            → if HIT: return cached PipelineResponse immediately (no LLM, no DB)
+          
+          Step 1: Intent Router (only when history exists)
             → llm/answer_formatter.py: route_intent(question, history, has_recent_data)
               → "DIRECT" → generate_direct_answer(...) and RETURN (no SQL, no DB)
               → "SQL"    → continue below
               (a brand-new chat with no history skips this step → straight to SQL)
           
-          Step 1: Schema Linker
+          Step 2: Schema Linker
             → pipeline/schema_linker.py: select_relevant_tables(question)
               → SCHEMA_CATALOG keyword matching
               → returns ["CaseMaster", "Accused", ...]
           
-          Step 2: SQL Generation
+          Step 3: SQL Generation
             → llm/sql_generator.py: generate_sql(question, tables, history)
               → db/schema_catalog.py: get_schema_for_tables(tables)  // compact schema
               → db/schema_catalog.py: get_few_shot_examples(tables)  // 3 examples
@@ -876,25 +893,28 @@ Frontend ChatWindow.jsx: handleSend()
               → if invalid: build_correction_prompt(), retry once
               → returns validated SQL string
         
-          Step 3: Execute SQL
+          Step 4: Execute SQL
             → db/connection.py: execute_query(sql)
               → aiomysql pool → MySQL → returns list[dict]
         
-          Step 4: Media Resolution
+          Step 5: Media Resolution
             → pipeline/media_resolver.py: resolve_media(results)
               → db/connection.py: execute_query("SELECT ... FROM evidence_media WHERE case_master_id IN (...)")
               → returns [{media_type, url, description, case_master_id}]
         
-          Step 5: Graph Probe
+          Step 6: Graph Probe
             → _check_graph_available(case_master_ids)
               → returns True/False
         
-          Step 6: Answer Formatting
+          Step 7: Answer Formatting
             → llm/answer_formatter.py: format_answer(question, results, media, history)
               → llm/prompts.py: build_answer_prompt(...)
               → llm/client.py: call_llm("MODEL_ANSWER", prompt, system_prompt)
                 → HTTP POST to Catalyst QuickML (Qwen 2.5-14B Instruct)
               → returns formatted text
+          
+          Step 8: Cache Store
+            → _pipeline_cache.put(cache_key, response)  // only on success, no error
         
           → returns PipelineResponse(answer_text, table_data, media, sql, graph_available, error)
         
@@ -913,6 +933,7 @@ Frontend ChatWindow.jsx: handleSend()
           {"type":"done"}
         
         → conversation/history.py: save_turn(session_id, question, answer)
+            // NoSQL write + metadata sync offloaded to background asyncio task
     
     Frontend receives events:
       → onStatus: update status text
@@ -943,7 +964,7 @@ The Catalyst QuickML API does **not** support streaming (one POST returns the fu
 ```
 Turn 1: "Show me cases in Koramangala"
   → history: [] (empty)
-  → pipeline runs, saves turn to NoSQL + in-memory
+  → pipeline runs, saves turn to in-memory (sync) + NoSQL (background task)
 
 Turn 2: "Now show only the open ones"
   → history: [{"role":"user","content":"Show me cases in Koramangala"}, 
@@ -956,7 +977,7 @@ Turn 2: "Now show only the open ones"
 1. `get_history(session_id)` → tries NoSQL, falls back to in-memory
 2. History is passed to `generate_sql()` → compressed to last 2 turns in `_format_history_for_prompt()`
 3. History is passed to `format_answer()` → same compression
-4. After pipeline completes, `save_turn(session_id, question, answer, assistant_sql, assistant_table)` → updates both NoSQL and in-memory; `assistant_table` stores a bounded result snapshot so the next turn's DIRECT path can answer without re-querying. `_persist_turn(...)` then writes the session + message pair to MySQL (see [4.7](#47-persistent-chat-storage))
+4. After pipeline completes, `save_turn(session_id, question, answer, assistant_sql, assistant_table)` → updates in-memory first (synchronous), then offloads the NoSQL save + session-metadata sync to a background `asyncio` task; `assistant_table` stores a bounded result snapshot so the next turn's DIRECT path can answer without re-querying. `_persist_turn(...)` then writes the session + message pair to MySQL (see [4.7](#47-persistent-chat-storage))
 
 ---
 
@@ -2734,3 +2755,40 @@ The following files at the project root are one-time local MySQL migration artif
    - Updated `auth/role_guard.py` (supervisor scope check) and `pipeline/rate_limiter.py` (active headcount headcount calculation) to resolve descendants via `get_descendant_units_mem()`, removing recursive CTE queries.
 
 **Verified:** The test suite was extended with `TestLookupCache` covering lookups and descendant hierarchy resolution. All 140 tests pass cleanly.
+
+---
+
+### 10.30 Resource Optimization: Connection Pools, Retry Backoffs, Async NoSQL Writes, Pipeline Cache, and Eager Warmup
+
+**Date:** July 23, 2026
+**What:** A broad set of optimizations targeting connection pool sizing, LLM call resilience, NoSQL write latency on the request path, pipeline-level semantic caching, eager warm-up before accepting connections, and the configurable uvicorn startup command.
+
+**Files Changed:**
+
+1. **`backend/db/connection.py`** — `create_pool()` now reads `DB_POOL_MINSIZE` (default `5`) and `DB_POOL_MAXSIZE` (default `10`) from environment variables via `os.getenv()`, replacing the previous hard-coded `minsize=3`, `maxsize=10`. This allows pool sizing to be tuned per deployment without code changes.
+
+2. **`backend/llm/client.py`** — `call_llm()` now retries up to 3 times with jittered exponential backoff on transient failures: HTTP 429 (rate-limited), 408 (request timeout), 5xx (server error), `httpx.TimeoutException`, and `httpx.HTTPError`. Backoff formula: `base_delay × 2^attempt + random(0.1, 0.5)` with `base_delay=1.0`. Non-retryable non-200 responses raise `LLMError` immediately. The payload format was also updated to use the OpenAI-compatible `messages` array (`[{role, content}]`) instead of the flat `prompt`/`system_prompt` fields.
+
+3. **`backend/conversation/history.py`** — `save_turn()` now offloads the NoSQL save and session-metadata sync (`_sync_session_metadata`) to a **background `asyncio` task** (`_bg_save`). The in-memory fallback is still updated synchronously before returning. During `pytest`, the task is `await`-ed inline so tests remain deterministic. This removes ~200–500 ms of NoSQL I/O latency from the request path.
+
+4. **`backend/conversation/session_store.py`** — `create_session()` and `update_session()` now offload their NoSQL POST/PUT operations to background `asyncio` tasks (`_bg_insert`, `_bg_update`), following the same pattern as `history.py`. In-memory state is updated synchronously first. During `pytest`, tasks are awaited inline.
+
+5. **`backend/pipeline/query_pipeline.py`** — Two major changes:
+   - **Pipeline semantic cache:** Added `PipelineCache` (LRU + TTL, capacity=1000, ttl=300s) and `get_pipeline_cache_key()` (MD5 of normalized question + history + officer identity). `run_pipeline()` checks the cache before any LLM/DB work and stores successful responses after completion. Cache misses proceed through the normal pipeline; cache errors are caught and logged.
+   - **Eager KB doc loading:** `_kb_doc_ids_cache` is now populated once at module load time from `os.getenv("KB_DOCUMENT_IDS")`. The old `_get_kb_document_ids()`, which re-read `.env` via `os.path.getmtime()` on every request, was replaced by a simple accessor returning the pre-loaded list. This eliminates synchronous filesystem I/O from the hot path.
+
+6. **`backend/pipeline/rate_limiter.py`** — `check_and_increment()` now checks `os.getenv("DISABLE_RATE_LIMIT")` at the top; when set to `"true"`, the function returns an allow-all result immediately. This supports load testing and benchmarking without rate-limit interference.
+
+7. **`backend/main.py`** — The keep-warm lifecycle was restructured: an **eager warm-up** (`asyncio.gather(ping_model("MODEL_SQL"), ping_model("MODEL_ANSWER"), ping_voice())`) now runs **before** the app yields and starts accepting connections. The subsequent `_keep_warm_loop` was changed to **sleep-first** (300 s wait before each iteration) so it doesn't immediately re-ping after the eager run.
+
+8. **`backend/app-config.template.json`** — The startup command was updated to `python3 -m uvicorn main:app --host 0.0.0.0 --port 9000 --workers 2 --loop uvloop`, adding multi-worker and uvloop support for AppSail deployments.
+
+9. **`scripts/gen_app_config.py`** — Three new optional env-var mappings added to `_OPTIONAL_ENV_VAR_SOURCES`: `DISABLE_RATE_LIMIT`, `DB_POOL_MAXSIZE`, and `DB_POOL_MINSIZE`. These are forwarded from `.env` into `app-config.json` so AppSail deployments can configure pool sizes and rate-limit bypass without code changes.
+
+10. **`Support Documents/DEPLOYMENT.md`** — Updated the startup command documentation from `--port 9000` to `--port 9000 --workers 2 --loop uvloop`.
+
+11. **`Support Documents/FULL_DEPLOYMENT_WALKTHROUGH.md`** — Updated the startup command from `--port 8000` to `--port 9000 --workers 2 --loop uvloop`.
+
+12. **`Support Documents/STATION_SCOPING_PLAN.md`** — **Deleted.** The station scoping plan was a design artifact from before the scoping feature was implemented; the implementation itself (in `pipeline/station_scope.py`, `auth/role_guard.py`, etc.) is the source of truth and is documented in Docs.md §10.14.
+
+13. **`backend/benchmark.py`** — **New file.** Standalone HTTP benchmark harness that hits the running API over HTTP to measure endpoint latency. Usage: `python backend/benchmark.py --base-url http://localhost:8000 --badge <KGID> --password <password>`.
