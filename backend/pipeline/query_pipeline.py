@@ -81,41 +81,12 @@ def get_pipeline_cache_key(question: str, history: list[dict] | None, officer: d
     return hashlib.md5(combined.encode("utf-8")).hexdigest()
 
 
-_kb_doc_ids_cache: list[str] | None = None
-_kb_env_mtime: float = 0.0
+# Load KB document IDs once eagerly at module load time to avoid sync file operations on request path.
+_kb_doc_ids_cache = [
+    d.strip() for d in os.getenv("KB_DOCUMENT_IDS", "").split(",") if d.strip()
+]
 
-
-# CONTRACT
-# takes:  nothing
-# returns: (list[str]) — KB document IDs loaded from .env, cached until file changes
-# raises:  nothing
 def _get_kb_document_ids() -> list[str]:
-    """
-    Dynamically load KB_DOCUMENT_IDS from .env. Re-reads the file if its
-    mtime has changed, so kb_sync.py updates are picked up without a
-    server restart.
-    """
-    global _kb_doc_ids_cache, _kb_env_mtime
-
-    env_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        ".env",
-    )
-    try:
-        current_mtime = os.path.getmtime(env_path)
-    except OSError:
-        current_mtime = 0.0
-
-    if _kb_doc_ids_cache is not None and current_mtime == _kb_env_mtime:
-        return _kb_doc_ids_cache
-
-    from dotenv import load_dotenv
-    load_dotenv(dotenv_path=env_path, override=True)
-    _kb_doc_ids_cache = [
-        d.strip() for d in os.getenv("KB_DOCUMENT_IDS", "").split(",") if d.strip()
-    ]
-    _kb_env_mtime = current_mtime
-    _log(f"Loaded {len(_kb_doc_ids_cache)} KB document IDs")
     return _kb_doc_ids_cache
 
 

@@ -140,21 +140,46 @@ async def call_llm(
         "chat_template_kwargs": {"enable_thinking": False},
     }
 
-    try:
-        client = get_http_client()
-        response = await client.post(
-            url, json=payload, headers=await _llm_headers(), timeout=180.0
-        )
-    except httpx.TimeoutException as e:
-        raise LLMError(f"LLM call timed out after 180s: {e}") from e
-    except httpx.HTTPError as e:
-        raise LLMError(f"LLM HTTP transport error: {e}") from e
+    import random
+    max_retries = 3
+    base_delay = 1.0
+    response = None
 
-    if response.status_code != 200:
-        body_preview = response.text[:500] if response.text else "<empty>"
-        raise LLMError(
-            f"LLM returned HTTP {response.status_code}: {body_preview}"
-        )
+    for attempt in range(max_retries + 1):
+        try:
+            client = get_http_client()
+            response = await client.post(
+                url, json=payload, headers=await _llm_headers(), timeout=180.0
+            )
+            # If rate limited (429) or transient gateway/server error (5xx or 408), retry with backoff
+            if response.status_code in (429, 408) or response.status_code >= 500:
+                if attempt < max_retries:
+                    sleep_time = base_delay * (2 ** attempt) + random.uniform(0.1, 0.5)
+                    print(
+                        f"WARNING: LLM call got HTTP {response.status_code}, retrying in {sleep_time:.2f}s (attempt {attempt + 1}/{max_retries})...",
+                        file=sys.stderr,
+                        flush=True
+                    )
+                    await asyncio.sleep(sleep_time)
+                    continue
+
+            if response.status_code != 200:
+                body_preview = response.text[:500] if response.text else "<empty>"
+                raise LLMError(
+                    f"LLM returned HTTP {response.status_code}: {body_preview}"
+                )
+            break
+        except (httpx.TimeoutException, httpx.HTTPError) as e:
+            if attempt < max_retries:
+                sleep_time = base_delay * (2 ** attempt) + random.uniform(0.1, 0.5)
+                print(
+                    f"WARNING: LLM call got error: {e}, retrying in {sleep_time:.2f}s (attempt {attempt + 1}/{max_retries})...",
+                    file=sys.stderr,
+                    flush=True
+                )
+                await asyncio.sleep(sleep_time)
+                continue
+            raise LLMError(f"LLM call failed after {max_retries} retries: {e}") from e
 
     try:
         data = response.json()
