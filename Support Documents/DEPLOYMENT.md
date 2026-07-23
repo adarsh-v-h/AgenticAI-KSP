@@ -236,7 +236,7 @@ segment before scaling out.
    AppSail `source` at `backend/` and registers `client-package/` as the web
    client. The AppSail `app-config.json` lives inside `backend/`.
 2. **Correct startup command.** `python3 -m uvicorn main:app --host 0.0.0.0
-   --port 9000` (the runtime has `python3`, not `python`; Catalyst serves on
+   --port 9000 --workers 2 --loop uvloop` (the runtime has `python3`, not `python`; Catalyst serves on
    port 9000 by default).
 3. **Dependency bundling.** Added the `predeploy` script
    (`pip install -r requirements.txt -t .`) because Catalyst's managed runtime

@@ -105,7 +105,7 @@ You'll be asked a series of questions — answer as follows:
 - **Runtime** → select **Python** (and the specific version if asked — match whatever version is in the project's `requirements.txt` or `runtime.txt`, or use the latest Python 3.x option offered)
 - **Startup command** → enter exactly:
   ```
-  uvicorn main:app --host 0.0.0.0 --port 8000
+  uvicorn main:app --host 0.0.0.0 --port 9000 --workers 2 --loop uvloop
   ```
 
 This creates an `app-config.json` file describing the service — you can leave it as generated.
