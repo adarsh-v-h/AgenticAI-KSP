@@ -15,13 +15,24 @@ import services_pb2
 import services_pb2_grpc
 from db.connection_real import execute_query
 
+import decimal
+from datetime import date, datetime
+
+def _default_serialize(obj):
+    if isinstance(obj, decimal.Decimal):
+        if obj % 1 == 0:
+            return int(obj)
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    return str(obj)
+
 class SQLServiceServicer(services_pb2_grpc.SQLServiceServicer):
     async def ExecuteQuery(self, request, context):
         try:
             params = tuple(json.loads(request.params_json)) if request.params_json else ()
             rows = await execute_query(request.query, params)
-            # orjson is fast and handles decimals, datetimes with default=str
-            rows_json = orjson.dumps(rows, default=str).decode()
+            rows_json = orjson.dumps(rows, default=_default_serialize).decode()
             return services_pb2.ExecuteQueryResponse(rows_json=rows_json)
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
