@@ -13,9 +13,10 @@ Created once during FastAPI startup (see main.py's lifespan) and closed on
 shutdown. Call `get_http_client()` to use it -- never instantiate
 `httpx.AsyncClient()` directly at a Catalyst call site.
 """
+import asyncio
 import httpx
 
-_client: httpx.AsyncClient | None = None
+_clients = {}  # loop -> client
 
 
 # CONTRACT
@@ -23,29 +24,32 @@ _client: httpx.AsyncClient | None = None
 # returns: (httpx.AsyncClient) — the newly created shared client
 # raises:  nothing
 def init_http_client() -> httpx.AsyncClient:
-    """
-    Create the shared AsyncClient. Called once during FastAPI startup.
-    Pool sized small and deliberately, given 2 shared vCPUs / limited RAM.
-    Per-call timeouts are still set at each call site via the `timeout=`
-    kwarg on individual requests, so this default is just a safety net.
-    """
-    global _client
-    _client = httpx.AsyncClient(
-        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        timeout=30.0,
-    )
-    return _client
+    """Initialize the http client for the current loop."""
+    return get_http_client()
 
 
 # CONTRACT
 # takes:  nothing
 # returns: (httpx.AsyncClient) — the existing shared client
-# raises:  RuntimeError — when the client has not been created yet
+# raises:  nothing
 def get_http_client() -> httpx.AsyncClient:
-    """Return the shared AsyncClient. Mirrors db/connection.py's get_pool()."""
-    if _client is None:
-        raise RuntimeError("Shared HTTP client has not been created yet.")
-    return _client
+    """Return the shared AsyncClient resolved for the current loop."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+    global _clients
+    if loop not in _clients:
+        _clients[loop] = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            timeout=30.0,
+        )
+    return _clients[loop]
 
 
 # CONTRACT
@@ -53,8 +57,11 @@ def get_http_client() -> httpx.AsyncClient:
 # returns: nothing
 # raises:  nothing
 async def close_http_client() -> None:
-    """Close the shared AsyncClient. Called once during FastAPI shutdown."""
-    global _client
-    if _client is not None:
-        await _client.aclose()
-        _client = None
+    """Close all shared AsyncClients."""
+    global _clients
+    for client in list(_clients.values()):
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+    _clients.clear()

@@ -55,6 +55,15 @@ async def lifespan(app: FastAPI):
     # 2. Create DB connection pool
     await create_pool()
 
+    # 2b. Start standalone gRPC servers for LLM and SQL services
+    try:
+        from llm.grpc_server import start_llm_grpc_server
+        from db.grpc_server import start_sql_grpc_server
+        await start_llm_grpc_server()
+        await start_sql_grpc_server()
+    except Exception as e:
+        print(f"WARNING: gRPC servers startup failed: {e}", file=sys.stderr)
+
     # 2a. Populate in-memory lookup cache for Unit, CrimeSubHead, and CaseStatusMaster
     try:
         from db.lookup_cache import init_lookup_cache
@@ -132,6 +141,20 @@ async def lifespan(app: FastAPI):
         await stop_rate_limiter()
     except Exception as e:
         print(f"WARNING: rate limiter shutdown error: {e}", file=sys.stderr)
+
+    # Stop gRPC servers and close clients
+    try:
+        from llm.grpc_server import stop_llm_grpc_server
+        from db.grpc_server import stop_sql_grpc_server
+        from llm.client import close_llm_client
+        from db.connection import close_sql_client
+        await stop_llm_grpc_server()
+        await stop_sql_grpc_server()
+        await close_llm_client()
+        await close_sql_client()
+    except Exception as e:
+        print(f"WARNING: gRPC servers shutdown failed: {e}", file=sys.stderr)
+
     await close_pool()
     await close_http_client()
 
