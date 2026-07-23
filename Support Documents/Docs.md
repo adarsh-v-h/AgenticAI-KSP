@@ -2397,8 +2397,8 @@ The following files at the project root are one-time local MySQL migration artif
 **4. Frontend Implementation**
 - **Files Created:**
   - `frontend/src/api/analytics.js` — 7 fetch functions: `fetchMonthlyTrend()`, `fetchCrimeTypeTrend()`, `fetchStationTrend()`, `fetchStationBreakdown()`, `fetchStatusBreakdown()`, `fetchMoClusters()`, `fetchSeasonalPattern()`. Reuses existing `getToken()` from `auth.js` and `AuthError` from `chat.js` (no duplication).
-  - `frontend/src/components/TrendChart.jsx` — Dependency-free SVG chart component supporting bar and line modes, with optional click handlers for drill-down, empty-state handling, and custom axis formatters.
-  - `frontend/src/components/AnalyticsDashboard.jsx` — 6-panel grid dashboard with lazy data fetching, per-panel error isolation via `Promise.allSettled()`, and a drill-down modal for station crime-type breakdown.
+  - `frontend/src/components/TrendChart.jsx` — Dependency-free SVG chart component (640×240 viewBox) supporting bar and line modes, with optional click handlers for drill-down, empty-state handling, and custom axis formatters. Includes `wrapLabel()` for horizontal 2-line word-wrapped labels on bar charts with ≥8 categories (replacing earlier −45° rotation), `formatLabel()` for abbreviating YYYY-MM dates to "Mon 'YY" format, and tick-skipping for line charts with >8 points (every 2nd label hidden, all data dots retained). Accepts `height` and `padding` props for per-chart layout overrides.
+  - `frontend/src/components/AnalyticsDashboard.jsx` — 6-panel grid dashboard with lazy data fetching, per-panel error isolation via `Promise.allSettled()`, and a drill-down modal for station crime-type breakdown. Passes explicit `height` and `padding` props to each `TrendChart` instance.
   - `IconAnalytics` added to `frontend/src/components/Icons.jsx` (bar-chart icon, matching existing icon conventions).
 - **Wiring (`frontend/src/components/ChatWindow.jsx`):**
   - Added `analyticsOpen` state and `handleAnalyticsToggle()`.
@@ -2406,7 +2406,7 @@ The following files at the project root are one-time local MySQL migration artif
   - Lazy-imported `AnalyticsDashboard` via `React.lazy()` to keep it code-split from the main bundle.
   - Added Suspense block alongside the existing NetworkGraph Suspense block.
 - **CSS (`frontend/src/styles/main.css`):**
-  - Added ~200 lines of `.analytics-*` classes: `.analytics-dashboard`, `.analytics-dashboard__header`, `.analytics-dashboard__grid`, `.analytics-panel`, `.analytics-panel__title`, `.analytics-panel__state`, `.analytics-table`, `.analytics-drilldown`, `.trend-chart`, `.trend-chart__empty`, and all chart-specific bar/line/axis styles.
+  - Added ~200 lines of `.analytics-*` classes: `.analytics-dashboard`, `.analytics-dashboard__header`, `.analytics-dashboard__grid` (520px column width), `.analytics-panel` (overflow: visible), `.analytics-panel__title` (20px font-size), `.analytics-panel__state`, `.analytics-table`, `.analytics-drilldown`, `.trend-chart`, `.trend-chart__empty`, and all chart-specific bar/line/axis styles.
 
 **5. Runtime Bug Fix — SQL `%Y` escaping crash**
 - **File:** `backend/pipeline/trend_analytics.py`, `get_trend_by_month()` function
