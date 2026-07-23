@@ -138,13 +138,13 @@ export default function TrendChart({
 
         {type === 'bar' &&
           data.map((d, i) => {
-            const barW = stepX * 0.6
+            const barW = stepX * 0.48
             const x = i * stepX + (stepX - barW) / 2
             const y = scaleY(d[yKey])
             const h = innerH - y
             const labelText = formatLabel(d[xKey], formatX)
             const xCenter = x + barW / 2
-            const shouldWrap = data.length > 8
+            const shouldWrap = data.length >= 8
 
             const maxChars = Math.max(8, Math.floor((stepX - 4) / 5.2))
             const lines = shouldWrap ? wrapLabel(labelText, maxChars) : [labelText]
