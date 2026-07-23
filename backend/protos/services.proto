@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package ksp;
+
+service LLMService {
+  rpc CallLLM(CallLLMRequest) returns (CallLLMResponse);
+  rpc PingModel(PingModelRequest) returns (PingModelResponse);
+}
+
+message CallLLMRequest {
+  string model_key = 1;
+  string prompt = 2;
+  string system_prompt = 3;
+  int32 max_tokens = 4;
+}
+
+message CallLLMResponse {
+  string text = 1;
+}
+
+message PingModelRequest {
+  string model_key = 1;
+}
+
+message PingModelResponse {
+  bool success = 1;
+}
+
+service SQLService {
+  rpc ExecuteQuery(ExecuteQueryRequest) returns (ExecuteQueryResponse);
+}
+
+message ExecuteQueryRequest {
+  string query = 1;
+  string params_json = 2;
+}
+
+message ExecuteQueryResponse {
+  string rows_json = 1;
+}

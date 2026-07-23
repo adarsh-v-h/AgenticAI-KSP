@@ -373,6 +373,8 @@ class _FailingAsyncClient:
 @pytest.fixture
 def force_in_memory(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", _FailingAsyncClient)
+    import http_client
+    http_client._clients.clear()
     store_mod._local_sessions.clear()
     history_mod._local_history.clear()
     yield
