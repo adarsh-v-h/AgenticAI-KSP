@@ -11,12 +11,63 @@ const PALETTE = [
   'var(--muted-soft)',
 ]
 
+/**
+ * Wraps text into up to 2 horizontal lines breaking at word boundaries.
+ * If a single word exceeds maxCharsPerLine, truncates only that word with an ellipsis.
+ */
+function wrapLabel(text, maxCharsPerLine = 10) {
+  const str = String(text).trim()
+  if (!str) return ['']
+
+  if (str.length <= maxCharsPerLine) {
+    return [str]
+  }
+
+  const words = str.split(/\s+/)
+  if (words.length === 1) {
+    const w = words[0]
+    if (w.length > maxCharsPerLine) {
+      return [w.slice(0, maxCharsPerLine - 1) + '…']
+    }
+    return [w]
+  }
+
+  // Find optimal split point between words for 2 lines
+  let bestSplit = 1
+  let minPenalty = Infinity
+
+  for (let i = 1; i < words.length; i++) {
+    const l1 = words.slice(0, i).join(' ')
+    const l2 = words.slice(i).join(' ')
+
+    const overflow1 = Math.max(0, l1.length - maxCharsPerLine)
+    const overflow2 = Math.max(0, l2.length - maxCharsPerLine)
+    const diff = Math.abs(l1.length - l2.length)
+
+    const penalty = overflow1 * 20 + overflow2 * 20 + diff
+    if (penalty < minPenalty) {
+      minPenalty = penalty
+      bestSplit = i
+    }
+  }
+
+  let line1 = words.slice(0, bestSplit).join(' ')
+  let line2 = words.slice(bestSplit).join(' ')
+
+  function fitLine(l) {
+    if (l.length <= maxCharsPerLine) return l
+    return l.slice(0, Math.max(1, maxCharsPerLine - 1)).trimEnd() + '…'
+  }
+
+  return [fitLine(line1), fitLine(line2)]
+}
+
 export default function TrendChart({
   data,
   xKey,
   yKey,
   type = 'bar',
-  height = 250,
+  height = 240,
   padding,
   color = 'var(--primary)',
   onBarClick,
@@ -24,7 +75,7 @@ export default function TrendChart({
   emptyLabel = 'No data yet',
 }) {
   const width = 560
-  const defaultPadding = { top: 16, right: 28, bottom: 65, left: 65 }
+  const defaultPadding = { top: 16, right: 24, bottom: 42, left: 36 }
   const pad = { ...defaultPadding, ...padding }
   const innerW = width - pad.left - pad.right
   const innerH = height - pad.top - pad.bottom
@@ -69,6 +120,12 @@ export default function TrendChart({
             const y = scaleY(d[yKey])
             const h = innerH - y
             const labelText = String(formatX(d[xKey]))
+            const xCenter = x + barW / 2
+            const shouldWrap = data.length > 8
+
+            const maxChars = Math.max(8, Math.floor((stepX - 4) / 5.2))
+            const lines = shouldWrap ? wrapLabel(labelText, maxChars) : [labelText]
+
             return (
               <g key={i}>
                 <rect
@@ -84,14 +141,21 @@ export default function TrendChart({
                   <title>{`${labelText}: ${d[yKey]}`}</title>
                 </rect>
                 <text
-                  x={x + barW / 2}
-                  y={innerH + 10}
-                  textAnchor="end"
-                  fontSize="11"
+                  x={xCenter}
+                  y={innerH + 12}
+                  textAnchor="middle"
+                  fontSize={shouldWrap ? '10.5' : '11'}
                   fill="var(--text-secondary)"
-                  transform={`rotate(-45 ${x + barW / 2} ${innerH + 10})`}
                 >
-                  {labelText.length > 22 ? `${labelText.slice(0, 20)}…` : labelText}
+                  {lines.map((lineStr, lineIdx) => (
+                    <tspan
+                      key={lineIdx}
+                      x={xCenter}
+                      dy={lineIdx === 0 ? 0 : 13}
+                    >
+                      {lineStr}
+                    </tspan>
+                  ))}
                 </text>
               </g>
             )
@@ -125,13 +189,12 @@ export default function TrendChart({
                 <text
                   key={`lbl-${i}`}
                   x={xPos}
-                  y={innerH + 10}
-                  textAnchor="end"
-                  fontSize="11"
+                  y={innerH + 12}
+                  textAnchor="middle"
+                  fontSize="10"
                   fill="var(--text-secondary)"
-                  transform={`rotate(-45 ${xPos} ${innerH + 10})`}
                 >
-                  {labelText.length > 22 ? `${labelText.slice(0, 20)}…` : labelText}
+                  {labelText}
                 </text>
               )
             })}
