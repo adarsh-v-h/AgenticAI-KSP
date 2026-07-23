@@ -454,6 +454,26 @@ class TestVoiceTranscribe:
         out = asyncio.run(zv.translate_to_english("hello", "en"))
         assert out == "hello"
 
+    def test_ping_voice(self, monkeypatch):
+        called_urls = []
+
+        class _FakeClient:
+            async def post(self, url, **kw):
+                called_urls.append(url)
+                if "translate" in url or "TRANSLATE" in url:
+                    return TestVoiceTranscribe._FakeResp(200, {"translated_text": "hello"})
+                elif "tts" in url or "TTS" in url:
+                    return TestVoiceTranscribe._FakeResp(200, content=b"audio_bytes")
+                elif "stt" in url or "STT" in url:
+                    return TestVoiceTranscribe._FakeResp(200, {"data": {"transcript": "hello"}})
+                return TestVoiceTranscribe._FakeResp(200)
+
+        monkeypatch.setattr(zv, "get", lambda key: f"http://fake/{key}")
+        monkeypatch.setattr(zv, "get_http_client", lambda: _FakeClient())
+
+        asyncio.run(zv.ping_voice())
+        assert len(called_urls) == 3
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION: PDF Export

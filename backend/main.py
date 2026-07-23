@@ -14,6 +14,7 @@ from config.settings import validate_settings, get
 from db.connection import create_pool, close_pool
 from http_client import init_http_client, close_http_client
 from llm.client import ping_model
+from voice.zia_voice import ping_voice
 from routers.chat import router as chat_router
 from routers.auth import router as auth_router
 from routers.export import router as export_router
@@ -80,12 +81,37 @@ async def lifespan(app: FastAPI):
         start_rate_limiter()
     except Exception as e:
         print(f"WARNING: rate limiter failed to start (rate limiting disabled): {e}", file=sys.stderr)
+
+    # 6. Start LLM & Voice keep-warm background task to avoid serverless cold starts
+    async def _keep_warm_loop():
+        # Sleep a few seconds initially to let startup finish cleanly
+        await asyncio.sleep(5)
+        while True:
+            try:
+                await asyncio.gather(
+                    ping_model("MODEL_SQL"),
+                    ping_model("MODEL_ANSWER"),
+                    ping_voice(),
+                    return_exceptions=True
+                )
+            except Exception as e:
+                print(f"WARNING: Keep-warm loop error: {e}", file=sys.stderr)
+            await asyncio.sleep(300)
+
+    keep_warm_task = asyncio.create_task(_keep_warm_loop())
+
     # This is the dividing line between startup and shutdown.
     # Everything before yield runs when the app starts.
     yield
     # Everything after yield runs when the app stops.
 
-    # â”€â”€ SHUTDOWN â”€â”€
+    # ── SHUTDOWN ──
+    keep_warm_task.cancel()
+    try:
+        await keep_warm_task
+    except asyncio.CancelledError:
+        pass
+
     try:
         await stop_rate_limiter()
     except Exception as e:
@@ -346,4 +372,19 @@ async def health_check():
         "llm_answer": answer_status,
         "env": env
     }
+
+
+@app.post("/internal/warm")
+async def warm_endpoint():
+    """
+    Lightweight endpoint to warm up LLM models and Zia voice/translation services.
+    Can be called by external scheduler/cron or Catalyst Job Scheduling.
+    """
+    await asyncio.gather(
+        ping_model("MODEL_SQL"),
+        ping_model("MODEL_ANSWER"),
+        ping_voice(),
+        return_exceptions=True
+    )
+    return {"status": "success", "message": "Pings dispatched successfully"}
 

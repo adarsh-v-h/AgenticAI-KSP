@@ -316,3 +316,31 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
     if not resp.content:
         raise VoiceError("TTS returned empty audio.")
     return resp.content
+
+
+async def ping_voice() -> None:
+    """
+    Ping Zia translation, speech-to-text, and text-to-speech services to warm
+    their serverless endpoints/lambdas, mitigating cold start latency.
+    """
+    # 1. Warm Translation
+    try:
+        await translate_to_english("ನಮಸ್ಕಾರ", source_language="kn")
+    except Exception as e:
+        _log(f"Zia Translation warm-up ping failed: {e}")
+
+    # 2. Warm TTS (text-to-speech)
+    try:
+        await synthesize_speech("OK", language="en")
+    except Exception as e:
+        _log(f"Zia TTS warm-up ping failed: {e}")
+
+    # 3. Warm STT (speech-to-text) by sending a tiny dummy audio payload.
+    # Even if STT fails or returns an error on dummy data, hitting the endpoint
+    # warms the Zoho Catalyst serverless container.
+    try:
+        dummy_webm = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x11\x2b\x00\x00\x11\x2b\x00\x00\x01\x00\x08\x00data\x00\x00\x00\x00"
+        await transcribe_audio(dummy_webm, language="en")
+    except Exception as e:
+        _log(f"Zia STT warm-up ping (expected result/warmup): {e}")
+
