@@ -330,6 +330,54 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 
 ## backend/db/connection.py
 
+gRPC client for the SQL Service. Forwards `execute_query()` calls to the standalone gRPC SQL Service on port 50052. Re-exports pool lifecycle and write functions from `connection_real.py`.
+
+### _get_grpc_stub
+- **Takes:** nothing
+- **Returns:** (services_pb2_grpc.SQLServiceStub) — per-event-loop gRPC stub for the SQL Service
+- **Raises:** nothing
+
+### close_sql_client
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing
+
+### execute_query
+- **Takes:** sql (str) — SELECT or WITH query to execute, params (tuple) — parameterized query values
+- **Returns:** (list[dict]) — list of row dicts (column_name → value)
+- **Raises:** RuntimeError — when gRPC SQL Service execution fails
+- **Description:** (1) Tries to serve from in-memory lookup cache via `intercept_lookup_query()` first — returns immediately on cache hit. (2) On cache miss, forwards the query to SQL Service via gRPC (localhost:50052). (3) Serializes params to JSON, deserializes rows_json response via orjson. (4) 5-second gRPC timeout.
+
+### create_pool
+- **Takes:** nothing
+- **Returns:** (aiomysql.Pool) — newly created MySQL connection pool
+- **Raises:** ValueError — when required DB env vars are not set, aiomysql.Error — when database connection fails
+- **Description:** Re-exported from `connection_real.py` — creates the actual MySQL connection pool used by the SQL Service.
+
+### close_pool
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing
+- **Description:** Re-exported from `connection_real.py` — closes all pool connections.
+
+### get_pool
+- **Takes:** nothing
+- **Returns:** (aiomysql.Pool) — the existing global connection pool
+- **Raises:** RuntimeError — when pool has not been created yet
+- **Description:** Re-exported from `connection_real.py`.
+
+### execute_write
+- **Takes:** sql (str) — INSERT, UPDATE, or DELETE statement to execute, params (tuple) — parameterized query values
+- **Returns:** (int) — lastrowid for INSERT, rowcount for UPDATE/DELETE
+- **Raises:** ValueError — when sql is a SELECT statement, TimeoutError — when write exceeds 5-second timeout, RuntimeError — when pool has not been created
+- **Description:** Re-exported from `connection_real.py` — executes writes directly against MySQL (not routed through gRPC).
+
+---
+
+## backend/db/connection_real.py
+
+Direct MySQL connection pool and query execution. Used by the SQL gRPC Service (`grpc_server.py`) and for local writes (`execute_write`). This is the "real" connection layer extracted from the original `connection.py`.
+
 ### _normalize_bit_fields
 - **Takes:** row (dict) — a single database row with potential BIT field bytes
 - **Returns:** (dict) — the row with single-byte BIT fields converted to booleans
@@ -340,15 +388,15 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Returns:** nothing
 - **Raises:** ValueError — when SQL statement does not start with SELECT or WITH, or contains forbidden write/DDL keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, REPLACE)
 
-### close_pool
-- **Takes:** nothing
-- **Returns:** nothing
-- **Raises:** nothing
-
 ### create_pool
 - **Takes:** nothing
 - **Returns:** (aiomysql.Pool) — newly created MySQL connection pool
 - **Raises:** ValueError — when required DB env vars are not set, aiomysql.Error — when database connection fails
+
+### get_pool
+- **Takes:** nothing
+- **Returns:** (aiomysql.Pool) — the existing global connection pool
+- **Raises:** RuntimeError — when pool has not been created yet
 
 ### execute_query
 - **Takes:** sql (str) — SELECT or WITH query to execute, params (tuple) — parameterized query values
@@ -356,14 +404,42 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Raises:** ValueError — when sql fails _validate_read_only_sql, TimeoutError — when query exceeds 5-second timeout, RuntimeError — when pool has not been created
 
 ### execute_write
-- **Takes:** sql (str) — INSERT or UPDATE statement to execute,; params (tuple) — parameterized query values; ValueError — when sql is a SELECT statement,; TimeoutError — when write exceeds 5-second timeout
-- **Returns:** (int) — lastrowid for INSERT, rowcount for UPDATE
-- **Raises:** RuntimeError — when pool has not been created,
+- **Takes:** sql (str) — INSERT, UPDATE, or DELETE statement to execute, params (tuple) — parameterized query values
+- **Returns:** (int) — lastrowid for INSERT, rowcount for UPDATE/DELETE
+- **Raises:** ValueError — when sql is a SELECT statement, TimeoutError — when write exceeds 5-second timeout, RuntimeError — when pool has not been created
 
-### get_pool
+### close_pool
 - **Takes:** nothing
-- **Returns:** (aiomysql.Pool) — the existing global connection pool
-- **Raises:** RuntimeError — when pool has not been created yet
+- **Returns:** nothing
+- **Raises:** nothing
+
+---
+
+## backend/db/grpc_server.py
+
+gRPC SQL Service server. Wraps `connection_real.execute_query()` and exposes it over gRPC on port 50052.
+
+### SQLServiceServicer.ExecuteQuery
+- **Takes:** request (services_pb2.ExecuteQueryRequest) — gRPC request with `query` and `params_json` fields, context (grpc.aio.ServicerContext) — gRPC context
+- **Returns:** (services_pb2.ExecuteQueryResponse) — gRPC response with `rows_json` field containing serialized query results
+- **Raises:** nothing — on exception, sets gRPC status code to INTERNAL and returns empty response
+- **Description:** Deserializes params_json, calls `connection_real.execute_query()`, serializes result rows to JSON via orjson with custom `_default_serialize()` handler (converts Decimal to int/float, dates to ISO strings).
+
+### _default_serialize
+- **Takes:** obj (any) — object that orjson.dumps cannot serialize natively
+- **Returns:** (int | float | str) — serialized value
+- **Raises:** nothing — falls back to str() for unknown types
+- **Description:** Converts decimal.Decimal to int (if whole number) or float, datetime/date to ISO string.
+
+### start_sql_grpc_server
+- **Takes:** port (int) — gRPC server port (default 50052)
+- **Returns:** nothing
+- **Raises:** nothing
+
+### stop_sql_grpc_server
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing
 
 ---
 
@@ -565,6 +641,36 @@ In-memory cache for static lookup tables (`Unit`, `CrimeSubHead`, `CaseStatusMas
 
 ## backend/llm/client.py
 
+gRPC client for the LLM Service. Forwards `call_llm()` and `ping_model()` calls to the standalone gRPC LLM Service on port 50051.
+
+### _get_grpc_stub
+- **Takes:** nothing
+- **Returns:** (services_pb2_grpc.LLMServiceStub) — per-event-loop gRPC stub for the LLM Service
+- **Raises:** nothing
+
+### close_llm_client
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing
+
+### ping_model
+- **Takes:** model_key (str) — environment variable name that resolves to the model identifier
+- **Returns:** (bool) — True if model is available, False otherwise
+- **Raises:** nothing (catches all exceptions internally)
+- **Description:** Sends PingModelRequest to LLM Service via gRPC (localhost:50051). Returns response.success. 30-second timeout.
+
+### call_llm
+- **Takes:** model_key (str) — env var name resolving to the model identifier (e.g. "MODEL_SQL"), prompt (str) — user/task prompt to send to the model, system_prompt (str) — system instruction for the model, max_tokens (int) — maximum tokens to generate in the response
+- **Returns:** (str) — the model's non-empty response text
+- **Raises:** LLMError — on gRPC failure or empty response
+- **Description:** Sends CallLLMRequest to LLM Service via gRPC (localhost:50051). Returns response.text. 180-second timeout.
+
+---
+
+## backend/llm/client_real.py
+
+Direct HTTP client for Catalyst QuickML LLM API. Used by the LLM gRPC Service (`grpc_server.py`). This is the "real" LLM client extracted from the original `client.py`.
+
 ### _extract_response_text
 - **Takes:** data (dict) — raw JSON response body from a GLM chat completion endpoint
 - **Returns:** (str) — extracted assistant response text, or empty string if not found
@@ -574,16 +680,44 @@ In-memory cache for static lookup tables (`Unit`, `CrimeSubHead`, `CaseStatusMas
 - **Takes:** nothing
 - **Returns:** (dict) — authorization and content-type headers for Catalyst QuickML API calls
 - **Raises:** ValueError — when required env vars (CATALYST_API_TOKEN, CATALYST_ORG_ID) are not set
+- **Description:** Uses `catalyst_token.get_access_token()` to get a refreshed OAuth token.
 
 ### call_llm
 - **Takes:** model_key (str) — env var name resolving to the model identifier (e.g. "MODEL_SQL"), prompt (str) — user/task prompt to send to the model, system_prompt (str) — system instruction for the model, max_tokens (int) — maximum tokens to generate in the response
 - **Returns:** (str) — the model's non-empty response text
 - **Raises:** LLMError — on network failure, bad HTTP status, invalid JSON, or empty response
+- **Description:** Sends POST to QUICKML_LLM_URL with retry + exponential backoff (up to 3 attempts on 429/408/5xx). 180-second timeout.
 
 ### ping_model
 - **Takes:** model_key (str) — environment variable name that resolves to the model identifier
 - **Returns:** (bool) — True if model responded with non-empty 200, False otherwise
 - **Raises:** nothing (catches all exceptions internally)
+
+---
+
+## backend/llm/grpc_server.py
+
+gRPC LLM Service server. Wraps `client_real.call_llm()` and `client_real.ping_model()` and exposes them over gRPC on port 50051.
+
+### LLMServiceServicer.CallLLM
+- **Takes:** request (services_pb2.CallLLMRequest) — gRPC request with `model_key`, `prompt`, `system_prompt`, `max_tokens` fields, context (grpc.aio.ServicerContext) — gRPC context
+- **Returns:** (services_pb2.CallLLMResponse) — gRPC response with `text` field containing the LLM's response
+- **Raises:** nothing — on exception, sets gRPC status code to INTERNAL and returns empty response
+
+### LLMServiceServicer.PingModel
+- **Takes:** request (services_pb2.PingModelRequest) — gRPC request with `model_key` field, context (grpc.aio.ServicerContext) — gRPC context
+- **Returns:** (services_pb2.PingModelResponse) — gRPC response with `success` field
+- **Raises:** nothing — on exception, sets gRPC status code to INTERNAL and returns success=False
+
+### start_llm_grpc_server
+- **Takes:** port (int) — gRPC server port (default 50051)
+- **Returns:** nothing
+- **Raises:** nothing
+
+### stop_llm_grpc_server
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing
 
 ---
 

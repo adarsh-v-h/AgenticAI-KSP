@@ -27,7 +27,7 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.10 (Catalyst runtime), FastAPI, uvicorn |
+| Backend | Python 3.10 (Catalyst runtime), FastAPI, uvicorn, gRPC (grpcio) |
 | Frontend | React 18, Vite 5 |
 | Relational DB | AWS RDS MySQL 8.0 (ap-south-1 Mumbai) since Catalyst has no right support for it |
 | LLM | Zoho Catalyst QuickML — GLM-4.7-Flash (`crm-di-glm47b_30b_it` and `qwen2.5-7b-vl`) |
@@ -40,20 +40,37 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 
 ## Architecture
 
+**Phase 1 gRPC Migration (Current):** LLM and SQL services have been extracted into standalone gRPC microservices running alongside the FastAPI gateway. This isolates compute-intensive operations, enables independent scaling, and centralizes connection pooling.
+
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Zoho Catalyst (India)                                  │
-│  ┌─────────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │  AppSail    │  │  NoSQL   │  │  QuickML (LLM +   │  │
-│  │  (FastAPI)  │  │ (history)│  │  RAG Knowledge Base)│  │
-│  └──────┬──────┘  └──────────┘  └───────────────────┘  │
-└─────────┼───────────────────────────────────────────────┘
-          │ TCP/MySQL (aiomysql)
-┌─────────▼───────────────────────────────────────────────┐
+│  Zoho Catalyst AppSail (India)                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  FastAPI API Gateway                             │   │
+│  │  (REST/SSE for browser, gRPC client internally) │   │
+│  └─────────┬────────────────────┬───────────────────┘   │
+│            │                    │                        │
+│     gRPC port 50051      gRPC port 50052                │
+│            ▼                    ▼                        │
+│  ┌─────────────────┐  ┌─────────────────┐              │
+│  │ LLM Service     │  │ SQL Service     │              │
+│  │ (gRPC server)   │  │ (gRPC server)   │              │
+│  └────────┬────────┘  └────────┬────────┘              │
+│           │                     │                        │
+│  ┌────────┴─────────────────────┴────────┐             │
+│  │  NoSQL (history)  QuickML (LLM + RAG) │             │
+│  └────────────────────────────────────────┘             │
+└─────────────────────────────────────────────────────────┘
+                        │
+                 TCP/MySQL (aiomysql)
+                        ▼
+┌─────────────────────────────────────────────────────────┐
 │  AWS RDS (ap-south-1 Mumbai)                            │
 │  MySQL 8.0 — 25+ tables, 220 seeded cases              │
 └─────────────────────────────────────────────────────────┘
 ```
+
+The browser-facing API remains REST/SSE. Internal service calls use gRPC for efficiency.
 
 ---
 
@@ -107,8 +124,14 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   ├── setup_db.py              # Create tables + seed (any MySQL target)
 │   ├── config/
 │   │   └── settings.py          # Env var loading and validation
+│   ├── protos/
+│   │   ├── services.proto       # gRPC service definitions (LLM, SQL)
+│   │   ├── services_pb2.py      # Generated Protocol Buffer message classes
+│   │   └── services_pb2_grpc.py # Generated gRPC service stubs
 │   ├── db/
-│   │   ├── connection.py        # MySQL connection pool (aiomysql)
+│   │   ├── connection.py        # gRPC client for SQL Service (execute_query via gRPC)
+│   │   ├── connection_real.py   # Direct MySQL connection pool (used by SQL Service)
+│   │   ├── grpc_server.py       # gRPC SQL Service server (port 50052)
 │   │   ├── schema.sql           # DDL for all tables
 │   │   ├── schema_catalog.py    # Table metadata, schema builder, few-shot examples
 │   │   ├── seed.py              # Synthetic data generator (220 cases)
@@ -116,7 +139,9 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── nosql_client.py      # Centralized Catalyst NoSQL client
 │   │   └── lookup_cache.py      # In-memory lookup tables cache (Unit, CrimeSubHead, CaseStatusMaster)
 │   ├── llm/
-│   │   ├── client.py            # HTTP client for QuickML GLM-4.7-Flash
+│   │   ├── client.py            # gRPC client for LLM Service (call_llm via gRPC)
+│   │   ├── client_real.py       # Direct HTTP client for Catalyst QuickML (used by LLM Service)
+│   │   ├── grpc_server.py       # gRPC LLM Service server (port 50051)
 │   │   ├── sql_generator.py     # SQL generation with self-correction loop
 │   │   ├── answer_formatter.py  # Result formatting + intent router
 │   │   ├── rag_client.py        # RAG retrieval via Catalyst QuickML KB
@@ -210,6 +235,8 @@ source .venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+This includes `grpcio` and `grpcio-tools` for the gRPC services.
 
 ### 4. Provision MySQL on AWS RDS
 
@@ -349,6 +376,12 @@ python backend/kb_sync.py --refresh-token
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
+
+The FastAPI gateway starts on port 8000, and automatically launches two gRPC services:
+- **LLM Service** on port 50051 (handles all QuickML LLM calls)
+- **SQL Service** on port 50052 (handles all MySQL queries)
+
+These gRPC services run as background tasks within the same process and shut down automatically when the FastAPI app stops.
 
 **Verify:**
 

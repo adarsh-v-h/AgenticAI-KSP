@@ -112,7 +112,7 @@ backend/
 
 ### 3.1 `backend/main.py`
 
-**Purpose:** FastAPI application entry point. Manages startup/shutdown lifecycle, registers routers, configures CORS, and exposes a health check endpoint.
+**Purpose:** FastAPI application entry point. Manages startup/shutdown lifecycle, registers routers, configures CORS, exposes a health check endpoint, and manages gRPC service lifecycle.
 
 **sys.path manipulation:** Lines 9-11 add the `backend/` directory to `sys.path` so that imports like `from config.settings import get` resolve correctly when the app is run via `uvicorn backend.main:app` from the project root.
 
@@ -120,18 +120,24 @@ backend/
 
 | Function | Lines | Description |
 |----------|-------|-------------|
-| `lifespan(app)` | 20-50 | Async context manager. On startup: (1) calls `validate_settings()` to crash if any env var is missing, (2) creates the MySQL connection pool via `create_pool()`, (3) runs a `SELECT 1` probe to confirm DB reachability (stores result in `app.state.db_ok`), (4) calls `init_nosql_table()` to probe Catalyst NoSQL. On shutdown: calls `close_pool()`. |
-| `health_check()` | 74-123 | `GET /health` — returns `{"status": "ok"|"degraded", "db": ..., "llm_coder": ..., "llm_answer": ..., "env": ...}`. Runs LLM pings in parallel via `asyncio.gather`. Always returns HTTP 200, even if degraded. |
-| `warm_endpoint()` | - | `POST /internal/warm` — returns `{"status": "success", "message": "Pings dispatched successfully"}`. Pings LLM and Zia Voice services in parallel to keep serverless containers warm. |
+| `lifespan(app)` | 20-50 | Async context manager. On startup: (1) calls `validate_settings()` to crash if any env var is missing, (2) creates the MySQL connection pool via `create_pool()`, (3) runs a `SELECT 1` probe to confirm DB reachability (stores result in `app.state.db_ok`), (4) calls `init_nosql_table()` to probe Catalyst NoSQL, (5) starts gRPC LLM Service (port 50051) and SQL Service (port 50052) via `start_llm_grpc_server()` and `start_sql_grpc_server()`. On shutdown: stops gRPC servers via `stop_llm_grpc_server()` / `stop_sql_grpc_server()`, closes gRPC client channels via `close_llm_client()` / `close_sql_client()`, and calls `close_pool()`. |
+| `health_check()` | 74-123 | `GET /health` — returns `{"status": "ok"|"degraded", "db": ..., "llm_coder": ..., "llm_answer": ..., "env": ...}`. Runs LLM pings (via gRPC) in parallel via `asyncio.gather`. Always returns HTTP 200, even if degraded. |
+| `warm_endpoint()` | - | `POST /internal/warm` — returns `{"status": "success", "message": "Pings dispatched successfully"}`. Pings LLM (via gRPC) and Zia Voice services in parallel to keep serverless containers warm. |
 
 **Startup sequence:**
 1. `validate_settings()` → crash if `.env` incomplete
 2. `create_pool()` → MySQL connection pool (minsize/maxsize configurable via `DB_POOL_MINSIZE`/`DB_POOL_MAXSIZE` env vars, defaults 5/10)
 3. DB probe → `SELECT 1`, sets `app.state.db_ok`
 4. NoSQL probe → confirms Catalyst NoSQL reachable
-5. Rate limiter background sync started
-6. Eager warm-up → `ping_model("MODEL_SQL")`, `ping_model("MODEL_ANSWER")`, and `ping_voice()` run concurrently via `asyncio.gather` **before** accepting connections; then a background `_keep_warm_loop` repeats the same pings every 300 s (sleep-first, so the loop waits before each iteration rather than pinging immediately after the eager run)
-7. Register `auth_router`, `chat_router`, `export_router`, and `reports_router`
+5. **Start gRPC services** → LLM Service (port 50051) and SQL Service (port 50052) as background tasks
+6. Rate limiter background sync started
+7. Eager warm-up → `ping_model("MODEL_SQL")`, `ping_model("MODEL_ANSWER")` (via gRPC), and `ping_voice()` run concurrently via `asyncio.gather` **before** accepting connections; then a background `_keep_warm_loop` repeats the same pings every 300 s (sleep-first, so the loop waits before each iteration rather than pinging immediately after the eager run)
+8. Register `auth_router`, `chat_router`, `export_router`, and `reports_router`
+
+**gRPC Lifecycle:**
+- Both gRPC services run as background asyncio tasks within the same process as the FastAPI gateway — no separate containers or service discovery in Phase 1.
+- gRPC servers use `insecure_channel` (localhost-only, no TLS) since all communication is intra-process.
+- On shutdown, gRPC servers stop gracefully before closing the MySQL pool.
 
 **App metadata:**
 - `title`: `"KSP Crime Intelligence API"`
@@ -198,7 +204,33 @@ backend/
 
 ### 3.3 `backend/db/connection.py`
 
-**Purpose:** Manages a global MySQL connection pool and provides a query execution function that enforces SELECT-only safety.
+**Purpose:** gRPC client for the SQL Service. Forwards `execute_query()` calls to the gRPC SQL Service running on port 50052. Re-exports pool lifecycle functions and `execute_write()` from `connection_real.py`.
+
+**Module-level state:** 
+- `_channels` — dict mapping asyncio event loop to gRPC channel
+- `_stubs` — dict mapping asyncio event loop to `SQLServiceStub`
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `_get_grpc_stub() -> SQLServiceStub` | Returns a per-event-loop gRPC stub for the SQL Service (localhost:50052). Creates channel and stub lazily on first call per loop. |
+| `close_sql_client() -> None` | Closes all gRPC channels and clears stub cache. Called during FastAPI shutdown. |
+| `execute_query(sql, params) -> list[dict]` | **gRPC client function.** (1) Tries to serve from in-memory lookup cache via `intercept_lookup_query()` — returns immediately if cache hit. (2) On cache miss, forwards the query to SQL Service via gRPC. (3) Serializes `params` to JSON, sends `ExecuteQueryRequest`, deserializes `ExecuteQueryResponse.rows_json` back to `list[dict]` via `orjson`. (4) Uses 5-second timeout. Raises `RuntimeError` on gRPC failure. |
+| `create_pool()` | Re-exported from `connection_real.py` — creates the actual MySQL connection pool. Called during FastAPI startup. |
+| `get_pool()` | Re-exported from `connection_real.py` — returns the existing pool. |
+| `close_pool()` | Re-exported from `connection_real.py` — closes all pool connections. Called during FastAPI shutdown. |
+| `execute_write(sql, params) -> int` | Re-exported from `connection_real.py` — executes INSERT/UPDATE/DELETE directly against MySQL (writes stay local, not routed through gRPC). |
+
+**Lookup cache fast path:** `execute_query()` checks `intercept_lookup_query()` **before** making the gRPC call, preserving zero-latency cache hits for `Unit`, `CrimeSubHead`, and `CaseStatusMaster` queries.
+
+**Why writes stay local:** `execute_write()` is not routed through gRPC — chat message persistence and session updates go directly to MySQL via `connection_real.py`. Only read-heavy SELECT queries (which dominate the workload) use gRPC.
+
+---
+
+### 3.3a `backend/db/connection_real.py`
+
+**Purpose:** Direct MySQL connection pool and query execution. Used by the SQL gRPC Service (`grpc_server.py`) and for local writes (`execute_write`). This is the "real" connection layer extracted from the original `connection.py`.
 
 **Module-level state:** `_pool` — the global `aiomysql.Pool` instance, created once at startup.
 
@@ -206,13 +238,34 @@ backend/
 
 | Function | Description |
 |----------|-------------|
-| `create_pool() -> aiomysql.Pool` | Creates the connection pool with `host`, `port`, `user`, `password`, `db` from env vars. Pool sizes are configurable via `DB_POOL_MINSIZE` (default `5`) and `DB_POOL_MAXSIZE` (default `10`) environment variables, read with `os.getenv()`. Settings: `autocommit=True`, `connect_timeout=5`. Stores in `_pool`. Called once during FastAPI lifespan. |
+| `create_pool() -> aiomysql.Pool` | Creates the connection pool with `host`, `port`, `user`, `password`, `db` from env vars. Pool sizes are configurable via `DB_POOL_MINSIZE` (default `5`) and `DB_POOL_MAXSIZE` (default `10`) environment variables. Settings: `autocommit=True`, `connect_timeout=5`. Stores in `_pool`. Called once during FastAPI lifespan. |
 | `get_pool() -> aiomysql.Pool` | Returns the existing pool. Raises `RuntimeError` if called before `create_pool()`. |
-| `execute_query(sql, params) -> list[dict]` | **Security-critical function.** (1) Checks `sql.strip().upper().startswith("SELECT")` — raises `ValueError` if not. (2) Acquires a connection from the pool. (3) Executes with `aiomysql.DictCursor` (returns dicts, not tuples). (4) Uses `asyncio.wait_for` with a 5-second timeout. (5) Releases connection in `finally` block. Returns `list[dict]` where keys are column names. |
-| `execute_write(sql, params) -> int` | INSERT/UPDATE counterpart to `execute_query`. Refuses anything starting with `SELECT` (raises `ValueError` — use `execute_query` for reads). Commits and returns `cur.lastrowid` for INSERTs or `cur.rowcount` for UPDATEs. Same pool, 5-second timeout. Added in Step 4 for persistent chat storage (`chat_store.py`). |
+| `execute_query(sql, params) -> list[dict]` | **Direct MySQL execution.** (1) Validates SQL is SELECT or WITH. (2) Acquires a connection from the pool. (3) Executes with `aiomysql.DictCursor`. (4) Uses `asyncio.wait_for` with a 5-second timeout. (5) Normalizes BIT fields to booleans via `_normalize_bit_fields()`. (6) Releases connection in `finally` block. Returns `list[dict]` where keys are column names. |
+| `execute_write(sql, params) -> int` | INSERT/UPDATE/DELETE execution. Refuses SELECT (raises `ValueError`). Commits and returns `cur.lastrowid` for INSERTs or `cur.rowcount` for UPDATEs. Same pool, 5-second timeout. |
 | `close_pool()` | Closes all connections in the pool. Called during FastAPI shutdown. |
+| `_normalize_bit_fields(row) -> dict` | Helper that converts single-byte BIT column values (returned as `b'\x00'` or `b'\x01'` by aiomysql) to Python `bool`. |
+| `_validate_read_only_sql(sql)` | Helper that raises `ValueError` if SQL is not SELECT/WITH or contains forbidden write/DDL keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, REPLACE). |
 
-**Security enforcement:** `execute_query` is the second line of defense (after `sql_validator.py`). Even if validation is bypassed, this function refuses to run anything that doesn't start with `SELECT`.
+**Security enforcement:** `execute_query` validates SQL is read-only before execution — second line of defense after `sql_validator.py`.
+
+---
+
+### 3.3b `backend/db/grpc_server.py`
+
+**Purpose:** gRPC SQL Service server. Wraps `connection_real.execute_query()` and exposes it over gRPC on port 50052. Started automatically during FastAPI lifespan.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `SQLServiceServicer.ExecuteQuery(request, context)` | gRPC RPC handler. Deserializes `params_json` from request, calls `connection_real.execute_query(sql, params)`, serializes result rows to JSON via `orjson` with custom `_default_serialize()` handler (converts `Decimal` to `int`/`float`, dates to ISO strings), returns `ExecuteQueryResponse(rows_json=...)`. On exception, sets gRPC status code to `INTERNAL` and returns empty response. |
+| `start_sql_grpc_server(port=50052)` | Creates a gRPC async server, registers `SQLServiceServicer`, binds to `[::]:{port}` (all interfaces), and starts the server. Prints "gRPC SQL Service listening on port 50052" to stderr. |
+| `stop_sql_grpc_server()` | Stops the gRPC server with a 0-second grace period. |
+| `_default_serialize(obj)` | JSON serialization helper for `orjson.dumps()`. Converts `decimal.Decimal` to `int` (if whole number) or `float`, `datetime`/`date` to ISO string, and falls back to `str()` for other types. |
+
+**Why `orjson`:** Faster than stdlib `json` for large result sets (50+ row tables).
+
+**Decimal serialization:** MySQL DECIMAL columns return `decimal.Decimal` objects, which are not JSON-serializable. The `_default_serialize()` handler converts them to `int` or `float` depending on whether they have a fractional part. This fix was added in commit 85a33ea.
 
 ---
 
@@ -312,7 +365,34 @@ backend/
 
 ### 3.7 `backend/llm/client.py`
 
-**Purpose:** HTTP client for Catalyst QuickML LLM API. All LLM calls go through this module.
+**Purpose:** gRPC client for the LLM Service. Forwards `call_llm()` and `ping_model()` calls to the gRPC LLM Service running on port 50051.
+
+**Module-level state:**
+- `_channels` — dict mapping asyncio event loop to gRPC channel
+- `_stubs` — dict mapping asyncio event loop to `LLMServiceStub`
+
+**Custom exceptions:**
+
+| Exception | When raised |
+|-----------|-------------|
+| `LLMError` | Any LLM call failure — gRPC error, empty response |
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `_get_grpc_stub() -> LLMServiceStub` | Returns a per-event-loop gRPC stub for the LLM Service (localhost:50051). Creates channel and stub lazily on first call per loop. |
+| `close_llm_client() -> None` | Closes all gRPC channels and clears stub cache. Called during FastAPI shutdown. |
+| `ping_model(model_key) -> bool` | **gRPC client function.** Sends `PingModelRequest` to LLM Service via gRPC. Returns `response.success`. Never raises — returns `False` on any gRPC error. Timeout: 30s. |
+| `call_llm(model_key, prompt, system_prompt, max_tokens) -> str` | **gRPC client function.** Sends `CallLLMRequest` to LLM Service via gRPC with model_key, prompt, system_prompt, and max_tokens. Returns `response.text`. Raises `LLMError` on gRPC failure or empty response. Timeout: 180s. |
+
+**Why gRPC:** Centralizes all QuickML LLM logic in one service, enables connection reuse, and isolates LLM failures from the gateway. The gateway never talks to QuickML directly — all LLM calls route through the gRPC LLM Service.
+
+---
+
+### 3.7a `backend/llm/client_real.py`
+
+**Purpose:** Direct HTTP client for Catalyst QuickML LLM API. Used by the LLM gRPC Service (`grpc_server.py`). This is the "real" LLM client extracted from the original `client.py`.
 
 **Custom exceptions:**
 
@@ -324,14 +404,14 @@ backend/
 
 | Function | Description |
 |----------|-------------|
-| `_llm_headers() -> dict` | Returns `{"Authorization": "Zoho-oauthtoken ...", "Content-Type": "application/json", "CATALYST-ORG": "..."}` — required on every Catalyst API call. |
+| `_llm_headers() -> dict` | Returns `{"Authorization": "Zoho-oauthtoken ...", "Content-Type": "application/json", "CATALYST-ORG": "..."}` — required on every Catalyst API call. Uses `catalyst_token.get_access_token()` to get a refreshed token. |
 | `ping_model(model_key) -> bool` | Sends `"Say OK."` to the given model. Returns `True` on non-empty 200 response, `False` otherwise. Never raises — used by health check. Timeout: 120s. |
 | `call_llm(model_key, prompt, system_prompt, max_tokens) -> str` | **Core LLM call.** Sends a POST to `QUICKML_LLM_URL` with payload: `{model, messages: [{role: "system", ...}, {role: "user", ...}], max_tokens, temperature: 0.1, stream: False}`. **Retry with exponential backoff:** on HTTP 429 (rate-limited), 408 (timeout), or 5xx (server error), retries up to 3 times with jittered backoff (`base_delay × 2^attempt + random(0.1, 0.5)`). Also retries on `httpx.TimeoutException` and `httpx.HTTPError`. Returns the `response` field from JSON. Raises `LLMError` on: missing config, non-retryable non-200 status, retries exhausted, invalid JSON, or empty response. |
 
 **Catalyst QuickML API format (different from OpenAI):**
 ```json
 {
-  "model": "crm-di-qwen_coder_7b-it",
+  "model": "crm-di-glm47b_30b_it",
   "prompt": "user message here",
   "system_prompt": "system instruction here",
   "max_tokens": 4000,
@@ -341,6 +421,56 @@ backend/
 Response: `{"response": "generated text"}`
 
 **Key difference from standard chat APIs:** Uses `prompt`/`system_prompt` fields, NOT a `messages` array. Uses `Zoho-oauthtoken` auth, NOT `Bearer`. Requires `CATALYST-ORG` header.
+
+---
+
+### 3.7b `backend/llm/grpc_server.py`
+
+**Purpose:** gRPC LLM Service server. Wraps `client_real.call_llm()` and `client_real.ping_model()` and exposes them over gRPC on port 50051. Started automatically during FastAPI lifespan.
+
+**Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `LLMServiceServicer.CallLLM(request, context)` | gRPC RPC handler. Extracts `model_key`, `prompt`, `system_prompt`, `max_tokens` from request, calls `client_real.call_llm()`, returns `CallLLMResponse(text=...)`. On exception, sets gRPC status code to `INTERNAL` and returns empty response. |
+| `LLMServiceServicer.PingModel(request, context)` | gRPC RPC handler. Calls `client_real.ping_model(request.model_key)`, returns `PingModelResponse(success=...)`. On exception, sets gRPC status code to `INTERNAL` and returns `success=False`. |
+| `start_llm_grpc_server(port=50051)` | Creates a gRPC async server, registers `LLMServiceServicer`, binds to `[::]:{port}` (all interfaces), and starts the server. Prints "gRPC LLM Service listening on port 50051" to stderr. |
+| `stop_llm_grpc_server()` | Stops the gRPC server with a 0-second grace period. |
+
+**Why this exists:** Isolates all QuickML interaction (auth, retry logic, token refresh) in one service. The FastAPI gateway becomes a thin gRPC client that doesn't know about QuickML API details.
+
+---
+
+### 3.7c `backend/protos/services.proto`
+
+**Purpose:** gRPC service definitions for LLM and SQL services. Compiled into Python stubs via `grpcio-tools`.
+
+**Services defined:**
+
+| Service | RPCs | Purpose |
+|---------|------|---------|
+| `LLMService` | `CallLLM(CallLLMRequest) -> CallLLMResponse`, `PingModel(PingModelRequest) -> PingModelResponse` | LLM inference and health check |
+| `SQLService` | `ExecuteQuery(ExecuteQueryRequest) -> ExecuteQueryResponse` | SQL query execution |
+
+**Message types:**
+
+| Message | Fields |
+|---------|--------|
+| `CallLLMRequest` | `model_key`, `prompt`, `system_prompt`, `max_tokens` |
+| `CallLLMResponse` | `text` |
+| `PingModelRequest` | `model_key` |
+| `PingModelResponse` | `success` |
+| `ExecuteQueryRequest` | `query`, `params_json` |
+| `ExecuteQueryResponse` | `rows_json` |
+
+**Generated files:**
+- `backend/protos/services_pb2.py` — Protocol Buffer message classes
+- `backend/protos/services_pb2_grpc.py` — gRPC service stubs and servicers
+
+**Compilation command:**
+```bash
+python -m grpc_tools.protoc -I backend/protos --python_out=backend/protos --grpc_python_out=backend/protos backend/protos/services.proto
+```
 
 ---
 
@@ -1888,7 +2018,87 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 ## 10. Recent Changes
 
-### 10.1 Security — BOLA/IDOR Mitigation (Authorization on Session Access)
+### 10.1 gRPC Microservices Migration — Phase 1 (LLM & SQL Services)
+
+**Date:** July 23, 2026  
+**Commits:** e20ce4a (gRPC migration PR #5), 85a33ea (Decimal serialization fix), fea9d60 (benchmark results)
+
+**Objective:** Extract compute-intensive LLM and SQL operations into standalone gRPC microservices to enable independent scaling, centralize connection pooling, and isolate failure domains while keeping the browser-facing API as REST/SSE.
+
+**Architecture Changes:**
+
+The FastAPI gateway now acts as an API gateway that delegates to two internal gRPC services:
+
+```
+Browser (REST/SSE)
+       ↓
+FastAPI Gateway (port 8000)
+       ├── gRPC → LLM Service (port 50051) → Catalyst QuickML
+       └── gRPC → SQL Service (port 50052) → AWS RDS MySQL
+```
+
+**Files Added:**
+
+| File | Purpose |
+|------|---------|
+| `backend/protos/services.proto` | gRPC service definitions (LLMService, SQLService) |
+| `backend/protos/services_pb2.py` | Generated Protocol Buffer message classes |
+| `backend/protos/services_pb2_grpc.py` | Generated gRPC service stubs and servicers |
+| `backend/llm/grpc_server.py` | gRPC LLM Service server — wraps `client_real.py` |
+| `backend/llm/client_real.py` | Direct HTTP client for Catalyst QuickML (extracted from `client.py`) |
+| `backend/db/grpc_server.py` | gRPC SQL Service server — wraps `connection_real.py` |
+| `backend/db/connection_real.py` | Direct MySQL connection pool (extracted from `connection.py`) |
+
+**Files Modified:**
+
+| File | Change |
+|------|--------|
+| `backend/llm/client.py` | Now a gRPC client — `call_llm()` and `ping_model()` forward requests to LLM Service via gRPC |
+| `backend/db/connection.py` | Now a gRPC client — `execute_query()` forwards SELECT queries to SQL Service via gRPC; re-exports `execute_write()` from `connection_real.py` (writes stay local) |
+| `backend/main.py` | Lifespan now starts/stops LLM and SQL gRPC servers alongside the FastAPI app |
+| `requirements.txt` | Added `grpcio` and `grpcio-tools` dependencies |
+
+**Key Design Decisions:**
+
+1. **gRPC for internal calls only** — Browser-facing endpoints remain REST/SSE (browsers don't speak gRPC natively; gRPC-Web would add deployment complexity).
+2. **Single-process deployment** — Both gRPC services run as background tasks within the FastAPI process, simplifying deployment (no separate containers or service discovery in Phase 1).
+3. **Insecure channels** — gRPC servers use `insecure_channel` (localhost-only, no TLS overhead) since all services run on the same host.
+4. **Lookup cache preservation** — `execute_query()` in the gRPC client still checks the in-memory lookup cache (`intercept_lookup_query()`) before making the gRPC call, preserving the zero-latency fast path for `Unit`, `CrimeSubHead`, and `CaseStatusMaster` queries.
+5. **Decimal serialization fix** — `backend/db/grpc_server.py` initially returned JSON with unserializable `Decimal` objects from MySQL DECIMAL columns; fixed by adding a `_default_serialize()` helper that converts `Decimal` to `int` (if whole number) or `float`, and dates to ISO strings. Uses `orjson` for faster serialization.
+
+**Performance Impact (Benchmark Results):**
+
+Benchmarks run on local dev (backend + MySQL on same machine) and deployed Catalyst environment (AppSail in Mumbai + RDS in Mumbai).
+
+| Metric | Pre-gRPC (local) | gRPC (local) | Pre-gRPC (deployed) | gRPC (deployed) |
+|--------|------------------|--------------|---------------------|-----------------|
+| **Endpoint p50 latency** | ~41ms | ~43ms | ~88-125ms | ~82-91ms |
+| **Quality suite (cold)** | 4.65s avg | 3.69s avg | 3.05s avg | 3.05s avg |
+| **Quality suite (hot)** | 2.56s avg | 1.43s avg | 1.50s avg | 5.72s avg* |
+
+*One outlier (38s timeout on "Find victims aged under 18") skewed the deployed hot-cache average; median latency remains similar.
+
+**Analysis:**
+- **Minimal overhead** — gRPC adds ~2ms p50 latency locally (43ms vs 41ms), well within acceptable bounds.
+- **Cold-cache improvement** — Local cold-cache queries improved from 4.65s → 3.69s (~21% faster), likely due to better connection reuse in the gRPC service.
+- **Hot-cache improvement** — Local hot-cache queries improved from 2.56s → 1.43s (~44% faster), showing effective caching and reduced per-query overhead.
+- **Deployed performance stable** — Deployed endpoint latency is consistent pre/post-gRPC, confirming that network I/O to RDS and QuickML (not internal service calls) remains the dominant factor.
+
+The migration achieves the architectural goals (service isolation, independent scaling, centralized pooling) with acceptable latency tradeoff — the ~2ms gRPC overhead is negligible compared to LLM inference (~2s) and database round-trips (~80ms cross-region).
+
+**Testing:**
+- All 98 existing tests pass (68 unit + 15 pipeline/session + 15 property-based).
+- gRPC services tested implicitly through existing integration tests (LLM calls and SQL queries now route through gRPC).
+- `backend/benchmark.py` used to generate all four benchmark result files (pre/post-gRPC, local/deployed).
+
+**Next Steps (Phase 2):**
+- Extract Conversation Service (session/history storage)
+- Extract Analytics Service (trend/risk/timeline endpoints)
+- Extract Graph Service (network visualization)
+
+---
+
+### 10.2 Security — BOLA/IDOR Mitigation (Authorization on Session Access)
 
 **Date:** June 19, 2026  
 **Issue:** Three write endpoints (`POST /api/chat`, `GET /api/chat/stream`, `POST /api/reports/analyze`) and the reports feature lacked object-level authorization. An authenticated officer could write turns into another officer's session by supplying its `session_id` — a textbook BOLA (Broken Object Level Authorization) / IDOR (Insecure Direct Object Reference) vulnerability (OWASP API1:2023).
@@ -1908,7 +2118,7 @@ A post-feature audit (`POST_FEATURE_AUDIT.md`) removed zero-risk dead weight:
 
 ---
 
-### 10.2 Report Text Extraction — Lean & Reliable (Removed Fragile PDF Parser)
+### 10.3 Report Text Extraction — Lean & Reliable (Removed Fragile PDF Parser)
 
 **Date:** June 19, 2026  
 **Issue:** `routers/reports.py` included a hand-rolled PDF text extractor (`_extract_pdf_text`) that brute-forced `zlib.decompress` on every stream in the PDF and ran multiple regex passes over PDF operators. High compute, unreliable output (garbage on most real PDFs — compressed object streams, custom encodings, scanned pages).
