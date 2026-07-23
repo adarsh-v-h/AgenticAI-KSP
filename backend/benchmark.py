@@ -192,15 +192,20 @@ async def main():
         for s in stage_results:
             print(f"{s['type']:<20} +{s['gap_ms']}ms")
 
-        print("\n== AI engine quality suite ==")
+        print("\n== AI engine quality suite (First Run / Cache Cold) ==")
         quality_results = await quality_suite(client, args.base_url, token)
         print(f"success rate: {quality_results['success_rate']}   avg latency: {quality_results['avg_elapsed_s']}s")
+
+        print("\n== AI engine quality suite (Second Run / Cache Hot) ==")
+        cache_quality_results = await quality_suite(client, args.base_url, token)
+        print(f"success rate: {cache_quality_results['success_rate']}   avg latency: {cache_quality_results['avg_elapsed_s']}s")
 
         json.dump({
             "endpoint_sweep": endpoint_results,
             "concurrency_ladder": conc_results,
             "pipeline_stages_sample": stage_results,
-            "quality_suite": quality_results,
+            "quality_suite_cold": quality_results,
+            "quality_suite_hot": cache_quality_results,
         }, open(args.out, "w"), indent=2)
         print(f"\nFull results written to {args.out}")
 

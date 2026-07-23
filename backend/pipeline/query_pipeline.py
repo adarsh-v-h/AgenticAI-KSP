@@ -18,6 +18,8 @@ import sys
 import os
 import time
 import re
+import hashlib
+import json
 from dataclasses import dataclass, field
 
 from pipeline.rule_engine import try_rule_response
@@ -37,6 +39,46 @@ from auth.role_guard import ScopeResolutionError
 from pipeline.date_utils import extract_date_predicate, rewrite_date_predicate
 from llm.answer_formatter import format_answer, route_intent, generate_direct_answer, generate_follow_ups
 from llm.client import LLMError
+
+
+class PipelineCache:
+    def __init__(self, capacity=500, ttl_seconds=300):
+        from collections import OrderedDict
+        self._cache = OrderedDict()
+        self._capacity = capacity
+        self._ttl = ttl_seconds
+
+    def get(self, key):
+        if key not in self._cache:
+            return None
+        value, timestamp = self._cache[key]
+        if time.monotonic() - timestamp > self._ttl:
+            del self._cache[key]
+            return None
+        self._cache.move_to_end(key)
+        return value
+
+    def put(self, key, value):
+        if key in self._cache:
+            del self._cache[key]
+        elif len(self._cache) >= self._capacity:
+            self._cache.popitem(last=False)
+        self._cache[key] = (value, time.monotonic())  # Use monotonic clock to avoid system clock changes
+
+_pipeline_cache = PipelineCache(capacity=1000, ttl_seconds=300)
+
+
+def get_pipeline_cache_key(question: str, history: list[dict] | None, officer: dict | None) -> str:
+    q_part = question.strip().lower()
+    hist_part = ""
+    if history:
+        clean_hist = [{"role": h.get("role"), "content": h.get("content")} for h in history if isinstance(h, dict)]
+        hist_part = json.dumps(clean_hist, sort_keys=True)
+    off_part = ""
+    if officer:
+        off_part = f"{officer.get('unit_id')}-{officer.get('role')}"
+    combined = f"{q_part}|||{hist_part}|||{off_part}"
+    return hashlib.md5(combined.encode("utf-8")).hexdigest()
 
 
 _kb_doc_ids_cache: list[str] | None = None
@@ -256,6 +298,17 @@ async def run_pipeline(
     history: list[dict] | None = None,
     officer: dict | None = None,
 ) -> PipelineResponse:
+    # 1. Check pipeline semantic/exact cache
+    cache_key = None
+    try:
+        cache_key = get_pipeline_cache_key(question, history, officer)
+        cached_resp = _pipeline_cache.get(cache_key)
+        if cached_resp is not None:
+            _log(f"Pipeline CACHE HIT for: {question[:50]}...")
+            return cached_resp
+    except Exception as e:
+        _log(f"WARNING: Pipeline cache lookup failed: {e}")
+
     start = time.monotonic()
     response = PipelineResponse()
 
@@ -545,4 +598,12 @@ async def run_pipeline(
         f"Pipeline completed in {elapsed:.1f}s — tables: {tables}, "
         f"rows: {len(results)}"
     )
+
+    # Store in pipeline cache
+    if cache_key and response and not response.error:
+        try:
+            _pipeline_cache.put(cache_key, response)
+        except Exception as e:
+            _log(f"WARNING: Failed to store in pipeline cache: {e}")
+
     return response

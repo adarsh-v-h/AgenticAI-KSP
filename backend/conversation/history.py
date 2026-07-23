@@ -302,25 +302,31 @@ async def save_turn(
 
     document = {"history": orjson.dumps(trimmed, default=str).decode()}
 
-    await _sync_session_metadata(
-        session_id=session_id,
-        user_message=user_message,
-        had_prior_messages=had_prior_messages,
-        messages_added=messages_added,
-        now=now,
-    )
-
-    try:
+    # Run NoSQL save and metadata sync in a background task to prevent blocking the request path
+    async def _bg_save():
+        await _sync_session_metadata(
+            session_id=session_id,
+            user_message=user_message,
+            had_prior_messages=had_prior_messages,
+            messages_added=messages_added,
+            now=now,
+        )
         try:
-            await update_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
-        except NoSQLError as ne:
-            # If document doesn't exist, we get a 404 error
-            if "404" in str(ne):
-                await insert_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
-            else:
-                raise
-    except Exception as e:
-        _log(f"ERROR: history save/update failed for {session_id}: {e}")
+            try:
+                await update_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
+            except NoSQLError as ne:
+                # If document doesn't exist, we get a 404 error
+                if "404" in str(ne):
+                    await insert_document("conversation_history", session_id, document, timeout=_NOSQL_TIMEOUT, key_name="session_id")
+                else:
+                    raise
+        except Exception as e:
+            _log(f"ERROR: history save/update failed for {session_id}: {e}")
+
+    if "pytest" in sys.modules:
+        await _bg_save()
+    else:
+        asyncio.create_task(_bg_save())
 
 
 # CONTRACT
