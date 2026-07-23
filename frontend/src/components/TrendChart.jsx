@@ -11,6 +11,29 @@ const PALETTE = [
   'var(--muted-soft)',
 ]
 
+const MONTH_NAMES = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+]
+
+/**
+ * Formats YYYY-MM dates (e.g. "2025-07") into abbreviated "Jul '25" format.
+ */
+function formatLabel(val, customFormatX) {
+  const formatted = customFormatX ? customFormatX(val) : val
+  const str = String(formatted)
+
+  const match = str.match(/^(\d{4})-(\d{2})$/)
+  if (match) {
+    const yr = match[1].slice(2)
+    const monthIdx = parseInt(match[2], 10) - 1
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${MONTH_NAMES[monthIdx]} '${yr}`
+    }
+  }
+  return str
+}
+
 /**
  * Wraps text into up to 2 horizontal lines breaking at word boundaries.
  * If a single word exceeds maxCharsPerLine, truncates only that word with an ellipsis.
@@ -74,7 +97,7 @@ export default function TrendChart({
   formatX = (v) => v,
   emptyLabel = 'No data yet',
 }) {
-  const width = 560
+  const width = 640
   const defaultPadding = { top: 16, right: 24, bottom: 42, left: 36 }
   const pad = { ...defaultPadding, ...padding }
   const innerW = width - pad.left - pad.right
@@ -119,7 +142,7 @@ export default function TrendChart({
             const x = i * stepX + (stepX - barW) / 2
             const y = scaleY(d[yKey])
             const h = innerH - y
-            const labelText = String(formatX(d[xKey]))
+            const labelText = formatLabel(d[xKey], formatX)
             const xCenter = x + barW / 2
             const shouldWrap = data.length > 8
 
@@ -179,11 +202,12 @@ export default function TrendChart({
                 r={3}
                 fill={color}
               >
-                <title>{`${formatX(d[xKey])}: ${d[yKey]}`}</title>
+                <title>{`${formatLabel(d[xKey], formatX)}: ${d[yKey]}`}</title>
               </circle>
             ))}
             {data.map((d, i) => {
-              const labelText = String(formatX(d[xKey]))
+              if (data.length > 8 && i % 2 !== 0) return null
+              const labelText = formatLabel(d[xKey], formatX)
               const xPos = i * stepX + stepX / 2
               return (
                 <text
