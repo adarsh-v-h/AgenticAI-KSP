@@ -55,6 +55,13 @@ async def lifespan(app: FastAPI):
     # 2. Create DB connection pool
     await create_pool()
 
+    # 2a. Populate in-memory lookup cache for Unit, CrimeSubHead, and CaseStatusMaster
+    try:
+        from db.lookup_cache import init_lookup_cache
+        await init_lookup_cache()
+    except Exception as e:
+        print(f"WARNING: Lookup cache initialization failed: {e}", file=sys.stderr)
+
     # 3. Confirm DB is reachable (run a trivial query)
     # If this fails, print a warning but don't crash â€” DB might not be provisioned yet locally
     # (this lets you still start the server and see the health check)

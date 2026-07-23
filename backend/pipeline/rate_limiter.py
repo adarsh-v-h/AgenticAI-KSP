@@ -161,20 +161,19 @@ def check_and_increment(unit_id: int | None) -> RateLimitResult:
 # raises:  nothing (DB errors are swallowed → caller keeps the old cap)
 async def _compute_cap(unit_id: int) -> int:
     from db.connection import execute_query  # local import avoids load-time cycle
+    from db.lookup_cache import get_descendant_units_mem
 
     try:
-        rows = await execute_query(
-            """WITH RECURSIVE descendants AS (
-                   SELECT UnitID FROM Unit WHERE UnitID = %s
-                   UNION ALL
-                   SELECT u.UnitID FROM Unit u
-                   JOIN descendants d ON u.ParentUnit = d.UnitID
-               )
-               SELECT COUNT(*) AS n FROM Employee
-               WHERE UnitID IN (SELECT UnitID FROM descendants) AND is_active = TRUE""",
-            (unit_id,),
-        )
-        headcount = int(rows[0]["n"]) if rows else 0
+        descendant_ids = get_descendant_units_mem(unit_id)
+        if descendant_ids:
+            placeholders = ",".join(["%s"] * len(descendant_ids))
+            rows = await execute_query(
+                f"SELECT COUNT(*) AS n FROM Employee WHERE UnitID IN ({placeholders}) AND is_active = TRUE",
+                tuple(descendant_ids),
+            )
+            headcount = int(rows[0]["n"]) if rows else 0
+        else:
+            headcount = 0
     except Exception:
         try:
             rows = await execute_query(

@@ -49,17 +49,8 @@ async def get_scoped_unit_ids(officer: dict) -> list[int] | None:
 
     if role == "supervisor" and unit_id:
         try:
-            rows = await execute_query(
-                """WITH RECURSIVE descendants AS (
-                       SELECT UnitID FROM Unit WHERE UnitID = %s
-                       UNION ALL
-                       SELECT u.UnitID FROM Unit u
-                       JOIN descendants d ON u.ParentUnit = d.UnitID
-                   )
-                   SELECT UnitID FROM descendants""",
-                (unit_id,)
-            )
-            return [r["UnitID"] for r in rows]
+            from db.lookup_cache import get_descendant_units_mem
+            return get_descendant_units_mem(unit_id)
         except Exception as e:
             logger.error(
                 "Failed to resolve scoped unit IDs for supervisor unit_id=%s: %s",

@@ -597,3 +597,46 @@ class TestSociologicalAnalytics:
         result = asyncio.run(get_demographic_risk_profile())
         assert result[0]["age_group"] == "36-50"
         assert result[0]["count"] == 20
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION: Lookup Cache
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import db.lookup_cache as lc
+
+class TestLookupCache:
+    def test_intercept_lookup_query(self):
+        # Setup mock cache state
+        lc._units = {1: {"UnitID": 1, "UnitName": "Station A", "ParentUnit": None}}
+        lc._units_list = [{"UnitID": 1, "UnitName": "Station A", "ParentUnit": None}]
+        
+        # Test Unit Name Match
+        res = lc.intercept_lookup_query("SELECT UnitID FROM Unit WHERE UnitName = %s", ("Station A",))
+        assert res == [{"UnitID": 1}]
+
+        # Test Unit ID Match
+        res = lc.intercept_lookup_query("SELECT UnitID FROM Unit WHERE UnitID = %s", (1,))
+        assert res == [{"UnitID": 1}]
+
+        # Test List all
+        res = lc.intercept_lookup_query("SELECT UnitID FROM Unit")
+        assert res == [{"UnitID": 1}]
+
+        # Test no match fallback
+        res = lc.intercept_lookup_query("SELECT * FROM CaseMaster")
+        assert res is None
+
+    def test_get_descendant_units_mem(self):
+        lc._units = {
+            1: {"UnitID": 1, "UnitName": "HQ", "ParentUnit": None},
+            2: {"UnitID": 2, "UnitName": "Station A", "ParentUnit": 1},
+            3: {"UnitID": 3, "UnitName": "Substation B", "ParentUnit": 2},
+        }
+        
+        desc = lc.get_descendant_units_mem(1)
+        assert set(desc) == {1, 2, 3}
+
+        desc = lc.get_descendant_units_mem(2)
+        assert set(desc) == {2, 3}
+
