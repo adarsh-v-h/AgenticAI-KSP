@@ -162,8 +162,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 xKey="month"
                 yKey="count"
                 type="line"
-                height={250}
-                padding={{ top: 16, right: 28, bottom: 55, left: 55 }}
+                height={240}
+                padding={{ top: 16, right: 24, bottom: 36, left: 36 }}
                 emptyLabel="No cases registered in this window"
               />
             )}
@@ -180,8 +180,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 xKey="crime_type"
                 yKey="count"
                 type="bar"
-                height={260}
-                padding={{ top: 16, right: 28, bottom: 70, left: 70 }}
+                height={240}
+                padding={{ top: 16, right: 24, bottom: 42, left: 36 }}
               />
             )}
           </Panel>
@@ -200,8 +200,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 xKey="station"
                 yKey="count"
                 type="bar"
-                height={250}
-                padding={{ top: 16, right: 28, bottom: 65, left: 65 }}
+                height={240}
+                padding={{ top: 16, right: 24, bottom: 42, left: 36 }}
                 onBarClick={handleStationClick}
               />
             )}
@@ -299,8 +299,8 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
                 xKey="occupation"
                 yKey="count"
                 type="bar"
-                height={260}
-                padding={{ top: 16, right: 28, bottom: 70, left: 70 }}
+                height={240}
+                padding={{ top: 16, right: 24, bottom: 42, left: 36 }}
               />
             )}
           </Panel>
@@ -445,7 +445,14 @@ export default function AnalyticsDashboard({ onAuthExpired, onClose }) {
           {drilldownLoading ? (
             <div className="analytics-panel__state">Loading…</div>
           ) : (
-            <TrendChart data={drilldown} xKey="crime_type" yKey="count" type="bar" />
+            <TrendChart
+              data={drilldown}
+              xKey="crime_type"
+              yKey="count"
+              type="bar"
+              height={240}
+              padding={{ top: 16, right: 24, bottom: 42, left: 36 }}
+            />
           )}
         </div>
       )}
