@@ -3,126 +3,130 @@
     {
       "name": "/api/chat/sessions",
       "n": 20,
-      "min_ms": 1.7,
-      "p50_ms": 2.8,
-      "p95_ms": 43.7,
-      "max_ms": 45.7
+      "min_ms": 1.2,
+      "p50_ms": 2.7,
+      "p95_ms": 159.8,
+      "max_ms": 168.0
     },
     {
       "name": "/api/analytics/trends/monthly?months_back=12",
       "n": 20,
-      "min_ms": 38.7,
-      "p50_ms": 42.6,
-      "p95_ms": 47.6,
-      "max_ms": 47.6
+      "min_ms": 37.7,
+      "p50_ms": 41.3,
+      "p95_ms": 91.0,
+      "max_ms": 93.3
     },
     {
       "name": "/api/analytics/trends/crime-type",
       "n": 20,
-      "min_ms": 36.7,
-      "p50_ms": 41.0,
-      "p95_ms": 46.7,
-      "max_ms": 46.7
+      "min_ms": 36.3,
+      "p50_ms": 40.8,
+      "p95_ms": 85.3,
+      "max_ms": 85.6
     },
     {
       "name": "/api/analytics/trends/stations?limit=10",
       "n": 20,
-      "min_ms": 39.0,
-      "p50_ms": 41.7,
-      "p95_ms": 47.7,
-      "max_ms": 47.8
+      "min_ms": 36.1,
+      "p50_ms": 41.0,
+      "p95_ms": 205.9,
+      "max_ms": 213.1
     },
     {
       "name": "/api/analytics/status-breakdown",
       "n": 20,
-      "min_ms": 37.3,
-      "p50_ms": 39.1,
-      "p95_ms": 42.8,
-      "max_ms": 42.8
+      "min_ms": 40.5,
+      "p50_ms": 62.9,
+      "p95_ms": 109.7,
+      "max_ms": 110.3
     },
     {
       "name": "/api/analytics/mo-clusters?min_occurrences=2",
       "n": 20,
-      "min_ms": 41.1,
-      "p50_ms": 44.9,
-      "p95_ms": 59.1,
-      "max_ms": 59.3
+      "min_ms": 37.8,
+      "p50_ms": 45.0,
+      "p95_ms": 126.5,
+      "max_ms": 126.9
     },
     {
       "name": "/api/analytics/seasonal",
       "n": 20,
-      "min_ms": 36.3,
-      "p50_ms": 41.9,
-      "p95_ms": 48.5,
-      "max_ms": 48.5
+      "min_ms": 38.0,
+      "p50_ms": 59.2,
+      "p95_ms": 115.6,
+      "max_ms": 116.5
     },
     {
       "name": "/api/profiling/top-risk?limit=10",
       "n": 20,
-      "min_ms": 36.3,
-      "p50_ms": 41.3,
-      "p95_ms": 98.2,
-      "max_ms": 98.3
+      "min_ms": 36.7,
+      "p50_ms": 41.1,
+      "p95_ms": 136.5,
+      "max_ms": 137.3
     },
     {
       "name": "/api/decision-support/similar-cases/2",
       "n": 20,
-      "min_ms": 36.8,
-      "p50_ms": 39.9,
-      "p95_ms": 70.7,
-      "max_ms": 72.2
+      "min_ms": 34.2,
+      "p50_ms": 38.7,
+      "p95_ms": 44.5,
+      "max_ms": 44.6
     },
     {
       "name": "/api/decision-support/timeline/2",
       "n": 20,
-      "min_ms": 36.6,
-      "p50_ms": 40.1,
-      "p95_ms": 43.0,
-      "max_ms": 43.0
+      "min_ms": 36.8,
+      "p50_ms": 38.7,
+      "p95_ms": 98.2,
+      "max_ms": 98.6
     }
   ],
   "concurrency_ladder": [
     {
       "concurrency": 1,
       "wall_s": 0.04,
-      "throughput_rps": 22.6,
-      "p50_ms": 43.9,
-      "p95_ms": 43.9,
+      "throughput_rps": 22.4,
+      "p50_ms": 44.5,
+      "p95_ms": 44.5,
       "errors": 0
     },
     {
       "concurrency": 5,
       "wall_s": 0.05,
-      "throughput_rps": 107.7,
-      "p50_ms": 44.9,
-      "p95_ms": 45.2,
+      "throughput_rps": 91.3,
+      "p50_ms": 44.7,
+      "p95_ms": 58.1,
       "errors": 0
     },
     {
       "concurrency": 10,
       "wall_s": 0.2,
-      "throughput_rps": 49.9,
-      "p50_ms": 181.3,
-      "p95_ms": 199.8,
+      "throughput_rps": 50.9,
+      "p50_ms": 174.9,
+      "p95_ms": 195.2,
       "errors": 0
     },
     {
       "concurrency": 20,
-      "wall_s": 0.31,
-      "throughput_rps": 65.4,
-      "p50_ms": 267.9,
-      "p95_ms": 300.3,
+      "wall_s": 0.38,
+      "throughput_rps": 53.2,
+      "p50_ms": 311.1,
+      "p95_ms": 373.3,
       "errors": 0
     }
   ],
   "pipeline_stages_sample": [
     {
       "type": "sql",
-      "gap_ms": 8089.3
+      "gap_ms": 2660.1
     },
     {
       "type": "token",
-      "gap_ms": 0.4
+      "gap_ms": 0.1
+    },
+    {
+      "type": "token",
+      "gap_ms": 30.9
     },
     {
       "type": "token",
@@ -130,15 +134,19 @@
     },
     {
       "type": "token",
-      "gap_ms": 31.0
+      "gap_ms": 30.4
     },
     {
       "type": "token",
-      "gap_ms": 30.0
+      "gap_ms": 30.7
     },
     {
       "type": "token",
-      "gap_ms": 31.3
+      "gap_ms": 31.1
+    },
+    {
+      "type": "token",
+      "gap_ms": 29.9
     },
     {
       "type": "token",
@@ -146,19 +154,31 @@
     },
     {
       "type": "token",
-      "gap_ms": 30.9
+      "gap_ms": 30.8
+    },
+    {
+      "type": "token",
+      "gap_ms": 30.7
+    },
+    {
+      "type": "token",
+      "gap_ms": 29.7
+    },
+    {
+      "type": "token",
+      "gap_ms": 30.4
     },
     {
       "type": "table",
-      "gap_ms": 31.4
+      "gap_ms": 30.6
     },
     {
       "type": "suggested_follow_ups",
-      "gap_ms": 0.7
+      "gap_ms": 0.3
     },
     {
       "type": "done",
-      "gap_ms": 411.3
+      "gap_ms": 1161.3
     }
   ],
   "quality_suite_cold": {
@@ -166,7 +186,7 @@
       {
         "question": "Show me the last 5 cases registered",
         "status": 200,
-        "elapsed_s": 14.9,
+        "elapsed_s": 6.29,
         "had_sql": true,
         "row_count": 5,
         "error": null
@@ -174,7 +194,7 @@
       {
         "question": "How many open cases are there in total?",
         "status": 200,
-        "elapsed_s": 0.59,
+        "elapsed_s": 2.87,
         "had_sql": true,
         "row_count": 1,
         "error": null
@@ -182,7 +202,117 @@
       {
         "question": "List all police stations",
         "status": 200,
-        "elapsed_s": 5.04,
+        "elapsed_s": 3.71,
+        "had_sql": false,
+        "row_count": 0,
+        "error": "Could not generate a valid query for this question."
+      },
+      {
+        "question": "How many cases were registered in 2024?",
+        "status": 200,
+        "elapsed_s": 2.56,
+        "had_sql": true,
+        "row_count": 1,
+        "error": null
+      },
+      {
+        "question": "Show all theft cases registered in 2024",
+        "status": 200,
+        "elapsed_s": 8.1,
+        "had_sql": true,
+        "row_count": 1,
+        "error": null
+      },
+      {
+        "question": "Find all cases involving an accused named Mahesh G",
+        "status": 200,
+        "elapsed_s": 5.15,
+        "had_sql": true,
+        "row_count": 1,
+        "error": null
+      },
+      {
+        "question": "Which officer is investigating the highest number ",
+        "status": 200,
+        "elapsed_s": 5.08,
+        "had_sql": false,
+        "row_count": 0,
+        "error": "Could not generate a valid query for this question."
+      },
+      {
+        "question": "List all accused persons who have not been arreste",
+        "status": 200,
+        "elapsed_s": 5.43,
+        "had_sql": true,
+        "row_count": 26,
+        "error": null
+      },
+      {
+        "question": "Find top 5 crime subheads with the highest number ",
+        "status": 200,
+        "elapsed_s": 4.84,
+        "had_sql": true,
+        "row_count": 5,
+        "error": null
+      },
+      {
+        "question": "Show monthly breakdown of crime cases registered i",
+        "status": 200,
+        "elapsed_s": 3.57,
+        "had_sql": true,
+        "row_count": 9,
+        "error": null
+      },
+      {
+        "question": "List offenders who are accused in more than 1 case",
+        "status": 200,
+        "elapsed_s": 3.82,
+        "had_sql": true,
+        "row_count": 2,
+        "error": null
+      },
+      {
+        "question": "Find all victims aged under 18",
+        "status": 200,
+        "elapsed_s": 3.87,
+        "had_sql": true,
+        "row_count": 0,
+        "error": "I couldn't run that query. Try rephrasing."
+      },
+      {
+        "question": "Show distribution of cases across different police",
+        "status": 200,
+        "elapsed_s": 5.17,
+        "had_sql": true,
+        "row_count": 4,
+        "error": null
+      }
+    ],
+    "success_rate": "10/13",
+    "avg_elapsed_s": 4.65
+  },
+  "quality_suite_hot": {
+    "results": [
+      {
+        "question": "Show me the last 5 cases registered",
+        "status": 200,
+        "elapsed_s": 1.47,
+        "had_sql": true,
+        "row_count": 5,
+        "error": null
+      },
+      {
+        "question": "How many open cases are there in total?",
+        "status": 200,
+        "elapsed_s": 0.53,
+        "had_sql": true,
+        "row_count": 1,
+        "error": null
+      },
+      {
+        "question": "List all police stations",
+        "status": 200,
+        "elapsed_s": 0.64,
         "had_sql": true,
         "row_count": 0,
         "error": "station_scope_enforcement_failed"
@@ -190,7 +320,7 @@
       {
         "question": "How many cases were registered in 2024?",
         "status": 200,
-        "elapsed_s": 11.23,
+        "elapsed_s": 0.98,
         "had_sql": true,
         "row_count": 1,
         "error": null
@@ -198,7 +328,7 @@
       {
         "question": "Show all theft cases registered in 2024",
         "status": 200,
-        "elapsed_s": 4.21,
+        "elapsed_s": 0.94,
         "had_sql": true,
         "row_count": 1,
         "error": null
@@ -206,7 +336,7 @@
       {
         "question": "Find all cases involving an accused named Mahesh G",
         "status": 200,
-        "elapsed_s": 10.11,
+        "elapsed_s": 0.96,
         "had_sql": true,
         "row_count": 1,
         "error": null
@@ -214,7 +344,7 @@
       {
         "question": "Which officer is investigating the highest number ",
         "status": 200,
-        "elapsed_s": 23.53,
+        "elapsed_s": 5.93,
         "had_sql": false,
         "row_count": 0,
         "error": "Could not generate a valid query for this question."
@@ -222,7 +352,7 @@
       {
         "question": "List all accused persons who have not been arreste",
         "status": 200,
-        "elapsed_s": 3.94,
+        "elapsed_s": 3.33,
         "had_sql": true,
         "row_count": 26,
         "error": null
@@ -230,7 +360,7 @@
       {
         "question": "Find top 5 crime subheads with the highest number ",
         "status": 200,
-        "elapsed_s": 23.51,
+        "elapsed_s": 1.15,
         "had_sql": true,
         "row_count": 5,
         "error": null
@@ -238,7 +368,7 @@
       {
         "question": "Show monthly breakdown of crime cases registered i",
         "status": 200,
-        "elapsed_s": 3.92,
+        "elapsed_s": 0.99,
         "had_sql": true,
         "row_count": 9,
         "error": null
@@ -246,7 +376,7 @@
       {
         "question": "List offenders who are accused in more than 1 case",
         "status": 200,
-        "elapsed_s": 4.1,
+        "elapsed_s": 0.87,
         "had_sql": true,
         "row_count": 2,
         "error": null
@@ -254,7 +384,7 @@
       {
         "question": "Find all victims aged under 18",
         "status": 200,
-        "elapsed_s": 11.25,
+        "elapsed_s": 4.61,
         "had_sql": true,
         "row_count": 0,
         "error": "I couldn't run that query. Try rephrasing."
@@ -262,123 +392,13 @@
       {
         "question": "Show distribution of cases across different police",
         "status": 200,
-        "elapsed_s": 27.59,
+        "elapsed_s": 10.87,
         "had_sql": true,
         "row_count": 4,
         "error": null
       }
     ],
     "success_rate": "10/13",
-    "avg_elapsed_s": 11.07
-  },
-  "quality_suite_hot": {
-    "results": [
-      {
-        "question": "Show me the last 5 cases registered",
-        "status": 200,
-        "elapsed_s": 0.62,
-        "had_sql": true,
-        "row_count": 5,
-        "error": null
-      },
-      {
-        "question": "How many open cases are there in total?",
-        "status": 200,
-        "elapsed_s": 0.49,
-        "had_sql": true,
-        "row_count": 1,
-        "error": null
-      },
-      {
-        "question": "List all police stations",
-        "status": 200,
-        "elapsed_s": 3.66,
-        "had_sql": false,
-        "row_count": 0,
-        "error": "Could not generate a valid query for this question."
-      },
-      {
-        "question": "How many cases were registered in 2024?",
-        "status": 200,
-        "elapsed_s": 1.17,
-        "had_sql": true,
-        "row_count": 1,
-        "error": null
-      },
-      {
-        "question": "Show all theft cases registered in 2024",
-        "status": 200,
-        "elapsed_s": 0.49,
-        "had_sql": true,
-        "row_count": 1,
-        "error": null
-      },
-      {
-        "question": "Find all cases involving an accused named Mahesh G",
-        "status": 200,
-        "elapsed_s": 0.51,
-        "had_sql": true,
-        "row_count": 1,
-        "error": null
-      },
-      {
-        "question": "Which officer is investigating the highest number ",
-        "status": 200,
-        "elapsed_s": 4.43,
-        "had_sql": false,
-        "row_count": 0,
-        "error": "Could not generate a valid query for this question."
-      },
-      {
-        "question": "List all accused persons who have not been arreste",
-        "status": 200,
-        "elapsed_s": 0.52,
-        "had_sql": true,
-        "row_count": 26,
-        "error": null
-      },
-      {
-        "question": "Find top 5 crime subheads with the highest number ",
-        "status": 200,
-        "elapsed_s": 0.54,
-        "had_sql": true,
-        "row_count": 5,
-        "error": null
-      },
-      {
-        "question": "Show monthly breakdown of crime cases registered i",
-        "status": 200,
-        "elapsed_s": 0.51,
-        "had_sql": true,
-        "row_count": 9,
-        "error": null
-      },
-      {
-        "question": "List offenders who are accused in more than 1 case",
-        "status": 200,
-        "elapsed_s": 0.5,
-        "had_sql": true,
-        "row_count": 2,
-        "error": null
-      },
-      {
-        "question": "Find all victims aged under 18",
-        "status": 200,
-        "elapsed_s": 12.7,
-        "had_sql": true,
-        "row_count": 0,
-        "error": "I couldn't run that query. Try rephrasing."
-      },
-      {
-        "question": "Show distribution of cases across different police",
-        "status": 200,
-        "elapsed_s": 0.48,
-        "had_sql": true,
-        "row_count": 4,
-        "error": null
-      }
-    ],
-    "success_rate": "10/13",
-    "avg_elapsed_s": 2.05
+    "avg_elapsed_s": 2.56
   }
 }
