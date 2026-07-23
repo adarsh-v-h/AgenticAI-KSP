@@ -25,14 +25,18 @@ async def create_pool() -> aiomysql.Pool:
     password = get("DB_PASSWORD")
     db = get("DB_NAME")
     
+    import os
+    max_size = int(os.getenv("DB_POOL_MAXSIZE", "50"))
+    min_size = int(os.getenv("DB_POOL_MINSIZE", "5"))
+
     _pool = await aiomysql.create_pool(
         host=host,
         port=port,
         user=user,
         password=password,
         db=db,
-        minsize=3,
-        maxsize=10,
+        minsize=min_size,
+        maxsize=max_size,
         autocommit=True,
         connect_timeout=5
     )
