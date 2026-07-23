@@ -15,3 +15,7 @@ python-multipart==0.0.12
 # Testing
 pytest==8.3.3
 hypothesis==6.112.1
+
+# gRPC
+grpcio==1.83.0
+grpcio-tools==1.83.0
