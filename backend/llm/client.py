@@ -3,7 +3,7 @@ import httpx
 from config.settings import get
 from config.catalyst_token import get_access_token
 from http_client import get_http_client
-
+import asyncio
 
 class LLMError(Exception):
     """Raised when an LLM call fails or returns an unexpected response."""
