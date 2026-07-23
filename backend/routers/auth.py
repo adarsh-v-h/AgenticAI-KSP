@@ -4,12 +4,15 @@ route via auth.simple_auth.get_current_officer.
 """
 
 import sys
+import asyncio
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from auth.login_rate_limiter import check_login_attempt, reset_login_attempts
 from auth.simple_auth import login
+from llm.client import ping_model
+from voice.zia_voice import ping_voice
 
 router = APIRouter()
 
@@ -73,6 +76,12 @@ async def login_route(request: LoginRequest) -> LoginResponse:
         raise HTTPException(status_code=503, detail="Login service unavailable.")
 
     reset_login_attempts(request.badge_number)
+
+    # Pre-warm LLM models and Zia voice services non-blockingly (fire-and-forget)
+    asyncio.create_task(ping_model("MODEL_SQL"))
+    asyncio.create_task(ping_model("MODEL_ANSWER"))
+    asyncio.create_task(ping_voice())
+
     return LoginResponse(
         access_token=result["access_token"],
         officer=OfficerInfo(**result["officer"]),
