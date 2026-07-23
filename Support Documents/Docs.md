@@ -52,13 +52,14 @@ backend/
 ├── setup_db.py                # Create tables + seed from .env (any MySQL target)
 ├── config/
 │   └── settings.py            # Environment variable loading and validation
-├── db/
-│   ├── connection.py          # MySQL connection pool (aiomysql) + execute_query / execute_write
-│   ├── schema.sql             # DDL for all tables (incl. chat_sessions, chat_messages)
-│   ├── seed.py                # Synthetic data generator (200+ FIRs)
-│   ├── chat_store.py          # Persistent sessions + messages (MySQL) + rich data (NoSQL)
-│   ├── nosql_client.py        # Centralized Catalyst NoSQL client wrapper
-│   └── schema_catalog.py      # Table metadata, schema builder, few-shot bank
+    ├── db/
+    │   ├── connection.py          # MySQL connection pool (aiomysql) + execute_query / execute_write
+    │   ├── schema.sql             # DDL for all tables (incl. chat_sessions, chat_messages)
+    │   ├── seed.py                # Synthetic data generator (200+ FIRs)
+    │   ├── chat_store.py          # Persistent sessions + messages (MySQL) + rich data (NoSQL)
+    │   ├── nosql_client.py        # Centralized Catalyst NoSQL client wrapper
+    │   ├── schema_catalog.py      # Table metadata, schema builder, few-shot bank
+    │   └── lookup_cache.py        # In-memory lookup tables cache (Unit, CrimeSubHead, CaseStatusMaster)
 ├── llm/
 │   ├── client.py              # HTTP client for Catalyst QuickML (GLM-4.7-Flash)
 │   ├── sql_generator.py       # SQL generation with retry loop
@@ -2711,3 +2712,25 @@ The following files at the project root are one-time local MySQL migration artif
    Added a `POST /internal/warm` endpoint to `main.py` which executes the LLM and Voice warm-up pings in parallel. This can be pointed to by Catalyst Job Scheduling or external cron jobs to maintain container warmth.
 
 **Verified:** The full test suite was verified and all 138 unit/integration tests pass cleanly.
+
+
+---
+
+### 10.29 In-Memory Lookup Cache (Unit, CrimeSubHead, CaseStatusMaster)
+
+**Date:** July 23, 2026
+**What:** Implemented in-memory caching of the static lookup tables (`Unit`, `CrimeSubHead`, and `CaseStatusMaster`) in Python application state. This eliminates recursive database queries and joins against static metadata tables, speeding up key operational paths.
+
+**Implementation Details:**
+1. **New Cache Module (`db/lookup_cache.py`):**
+   - Created `init_lookup_cache()` to fetch all lookup rows from the database once during application startup.
+   - Implemented `get_descendant_units_mem(unit_id)` to recursively resolve descendant units entirely in-memory, replacing recursive SQL CTEs.
+   - Implemented `intercept_lookup_query(sql, params)` to transparently catch and serve simple select queries on `Unit`, `CrimeSubHead`, and `CaseStatusMaster` from cache.
+2. **FastAPI Lifespan Startup:**
+   - Modified `main.py` to trigger cache initialization immediately after DB connection pool setup.
+3. **Query Interception (`db/connection.py`):**
+   - Integrated `intercept_lookup_query` into the start of `execute_query(sql, params)` to intercept lookup queries, returning dict results instantly and bypassing RDS entirely.
+4. **Optimized Scopes & Caps:**
+   - Updated `auth/role_guard.py` (supervisor scope check) and `pipeline/rate_limiter.py` (active headcount headcount calculation) to resolve descendants via `get_descendant_units_mem()`, removing recursive CTE queries.
+
+**Verified:** The test suite was extended with `TestLookupCache` covering lookups and descendant hierarchy resolution. All 140 tests pass cleanly.

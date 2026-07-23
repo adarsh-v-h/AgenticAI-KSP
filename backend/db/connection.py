@@ -102,6 +102,16 @@ async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
     - Raises ValueError if sql does not start with SELECT or WITH
     - Releases connection back to pool in finally block always
     """
+    # 1. Try to serve from local in-memory lookup cache first
+    try:
+        from db.lookup_cache import intercept_lookup_query
+        cached_result = intercept_lookup_query(sql, params)
+        if cached_result is not None:
+            return cached_result
+    except Exception as e:
+        import sys
+        print(f"WARNING: Lookup cache interception failed: {e}", file=sys.stderr)
+
     if _pool is None:
         raise RuntimeError("Database connection pool has not been created yet.")
         
