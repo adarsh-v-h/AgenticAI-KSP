@@ -1,6 +1,6 @@
 # Function Contracts
 
-288 functions across 64 backend files + 37 frontend files.
+290 functions across 64 backend files + 37 frontend files.
 
 ---
 
@@ -1533,6 +1533,20 @@ Return object for run_pipeline containing: answer_text (str), table_data (list[d
 ### formatCell
 - **Takes:** value (any) — raw cell value from a table row
 - **Returns:** ({text: string, full: string}) — formatted display text and full value for tooltip (empty if not truncated)
+- **Raises:** never
+
+---
+
+## frontend/src/components/TrendChart.jsx
+
+### wrapLabel
+- **Takes:** text (string) — raw label string to wrap; maxCharsPerLine (number, default 10) — maximum characters per line before wrapping
+- **Returns:** (string[]) — array of 1–2 line strings, split at word boundaries; single overlong words truncated with '…'
+- **Raises:** never
+
+### formatLabel
+- **Takes:** val (any) — raw axis value; customFormatX (function|undefined) — optional user-supplied formatter applied before date detection
+- **Returns:** (string) — if val matches YYYY-MM pattern, returns abbreviated "Mon 'YY" (e.g. "Jul '25"); otherwise returns String(formatted)
 - **Raises:** never
 
 ---
