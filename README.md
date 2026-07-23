@@ -112,7 +112,8 @@ Multi-turn conversation is supported — follow-up questions use previous contex
 │   │   ├── schema_catalog.py    # Table metadata, schema builder, few-shot examples
 │   │   ├── seed.py              # Synthetic data generator (220 cases)
 │   │   ├── chat_store.py        # Chat session/message persistence (MySQL)
-│   │   └── nosql_client.py      # Centralized Catalyst NoSQL client
+│   │   ├── nosql_client.py      # Centralized Catalyst NoSQL client
+│   │   └── lookup_cache.py      # In-memory lookup tables cache (Unit, CrimeSubHead, CaseStatusMaster)
 │   ├── llm/
 │   │   ├── client.py            # HTTP client for QuickML GLM-4.7-Flash
 │   │   ├── sql_generator.py     # SQL generation with self-correction loop

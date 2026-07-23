@@ -1,6 +1,6 @@
 # Function Contracts
 
-266 functions across 63 backend files + 37 frontend files.
+288 functions across 64 backend files + 37 frontend files.
 
 ---
 
@@ -364,6 +364,28 @@ Thin async wrapper over the Catalyst Cache REST API. Backs the station rate limi
 - **Takes:** nothing
 - **Returns:** (aiomysql.Pool) — the existing global connection pool
 - **Raises:** RuntimeError — when pool has not been created yet
+
+---
+
+## backend/db/lookup_cache.py
+
+In-memory cache for static lookup tables (`Unit`, `CrimeSubHead`, `CaseStatusMaster`). Bypasses RDS queries and eliminates recursive CTEs.
+
+### init_lookup_cache
+- **Takes:** nothing
+- **Returns:** nothing
+- **Raises:** nothing (catches and logs warning to stderr if lookup caching fails during startup)
+
+### get_descendant_units_mem
+- **Takes:** unit_id (int) — root UnitID to resolve hierarchy for
+- **Returns:** (list[int]) — list of descendant UnitIDs including the unit itself
+- **Raises:** nothing
+
+### intercept_lookup_query
+- **Takes:** sql (str) — SQL query string, params (tuple) — SQL parameters (default empty tuple)
+- **Returns:** (list[dict] | None) — list of row dicts if cache hit, or None if query shape is unrecognized (cache miss)
+- **Description:** Serves a fixed set of known query shapes (matched via normalized SQL string patterns) and falls through to None (cache miss, not an error) for any query shape it doesn't recognize.
+- **Raises:** nothing
 
 ---
 
