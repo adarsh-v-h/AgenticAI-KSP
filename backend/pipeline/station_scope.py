@@ -167,6 +167,9 @@ async def enforce_station_scope(sql: str, officer: dict, question: str = "") -> 
         raise StationScopeError(
             "Could not locate CaseMaster or Employee in generated SQL to apply station scope"
         )
+    # If the LLM already included the exact scoped condition/placeholders, don't duplicate it
+    if placeholders in sql and (f"{emp_alias}.UnitID" in sql or f"{cm_alias}.PoliceStationID" in sql):
+        return sql, True, False
 
     clause_name, idx = _find_top_level_clause(sql)
 

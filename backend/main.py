@@ -80,6 +80,13 @@ async def lifespan(app: FastAPI):
         try:
             # 2a. Populate in-memory lookup cache for Unit, CrimeSubHead, and CaseStatusMaster
             try:
+                from db.seed_station_demo import ensure_hierarchy, assign_officers
+                circle_id, station_ids = await ensure_hierarchy()
+                await assign_officers(circle_id, station_ids)
+            except Exception as e:
+                print(f"WARNING: Station hierarchy seeding failed: {e}", file=sys.stderr)
+
+            try:
                 from db.lookup_cache import init_lookup_cache
                 await init_lookup_cache()
             except Exception as e:
