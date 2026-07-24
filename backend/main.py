@@ -454,3 +454,12 @@ async def warm_endpoint():
     )
     return {"status": "success", "message": "Pings dispatched successfully"}
 
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("X_ZOHO_CATALYST_LISTEN_PORT", 9000))
+    # CRITICAL: host must be 0.0.0.0 for AppSail to reach the container
+    uvicorn.run("main:app", host="0.0.0.0", port=port, workers=2, loop="uvloop")
+
+
