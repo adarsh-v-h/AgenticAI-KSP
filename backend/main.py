@@ -100,18 +100,18 @@ async def lifespan(app: FastAPI):
         print(f"WARNING: rate limiter failed to start (rate limiting disabled): {e}", file=sys.stderr)
 
     # 6. Start LLM & Voice keep-warm background task to avoid serverless cold starts
-    # Run the first warm-up ping eagerly at startup before accepting connections.
-    try:
-        await asyncio.gather(
-            ping_model("MODEL_SQL"),
-            ping_model("MODEL_ANSWER"),
-            ping_voice(),
-            return_exceptions=True
-        )
-    except Exception as e:
-        print(f"WARNING: Eager warm-up failed: {e}", file=sys.stderr)
-
+    # Run the first warm-up ping in the background so it doesn't block startup.
     async def _keep_warm_loop():
+        try:
+            await asyncio.gather(
+                ping_model("MODEL_SQL"),
+                ping_model("MODEL_ANSWER"),
+                ping_voice(),
+                return_exceptions=True
+            )
+        except Exception as e:
+            print(f"WARNING: Eager background warm-up failed: {e}", file=sys.stderr)
+
         while True:
             await asyncio.sleep(300)
             try:

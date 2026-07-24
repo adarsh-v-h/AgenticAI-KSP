@@ -1,5 +1,5 @@
 {
-  "command": "python3 -m uvicorn main:app --host 0.0.0.0 --port 9000 --workers 2 --loop uvloop",
+  "command": "python3 -m uvicorn main:app --host 0.0.0.0 --port $X_ZOHO_CATALYST_LISTEN_PORT --workers 2 --loop uvloop",
   "buildPath": ".",
   "stack": "python_3_10",
   "env_variables": {},
