@@ -56,11 +56,16 @@ def get_descendant_units_mem(unit_id: int) -> list[int]:
     Recursively compute descendant unit IDs from the in-memory cache.
     Replaces recursive CTE queries on the Unit table.
     """
-    if not _units or unit_id not in _units:
-        return [unit_id]
+    try:
+        uid = int(unit_id)
+    except (ValueError, TypeError):
+        uid = unit_id
+
+    if not _units or uid not in _units:
+        return [uid]
 
     descendants = []
-    queue = [unit_id]
+    queue = [uid]
     visited = set()
 
     while queue:
@@ -71,8 +76,18 @@ def get_descendant_units_mem(unit_id: int) -> list[int]:
         descendants.append(curr)
 
         for u_id, u_data in _units.items():
-            if u_data.get("ParentUnit") == curr:
-                queue.append(u_id)
+            # Support ParentUnit comparison as int robustly
+            try:
+                parent = int(u_data.get("ParentUnit")) if u_data.get("ParentUnit") is not None else None
+            except (ValueError, TypeError):
+                parent = u_data.get("ParentUnit")
+
+            if parent == curr:
+                try:
+                    u_id_int = int(u_id)
+                except (ValueError, TypeError):
+                    u_id_int = u_id
+                queue.append(u_id_int)
 
     return descendants
 
