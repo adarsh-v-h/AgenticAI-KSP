@@ -122,6 +122,31 @@ function stripMarkdownTable(text) {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
+// CONTRACT
+// takes:  text (string|null) — raw text with markdown bold markers
+// returns: (React.ReactNode) — elements with <strong> tags for bold text
+// throws:  never
+function renderMarkdown(text) {
+  if (!text || typeof text !== 'string') return text
+
+  const lines = text.split('\n')
+  return lines.map((line, lineIdx) => {
+    const parts = line.split('**')
+    const elements = parts.map((part, partIdx) => {
+      if (partIdx % 2 === 1) {
+        return <strong key={partIdx}>{part}</strong>
+      }
+      return part
+    })
+
+    return (
+      <div key={lineIdx} style={{ marginBottom: lineIdx < lines.length - 1 ? '0.75rem' : '0' }}>
+        {elements}
+      </div>
+    )
+  })
+}
+
 export default function MessageBubble({
   role,
   content,
@@ -182,7 +207,7 @@ export default function MessageBubble({
         {showStatusIndicator ? (
           <StatusIndicator />
         ) : (
-          renderedContent
+          renderMarkdown(renderedContent)
         )}
         {isStreaming && renderedContent && renderedContent.length > 0 ? (
           <span className="message__caret">■</span>
