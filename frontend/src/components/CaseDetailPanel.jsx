@@ -40,7 +40,10 @@ function CaseCard({ caseId, onAuthExpired }) {
       setCache((c) => ({ ...c, [tab]: data }))
     } catch (err) {
       if (err instanceof AuthError) { onAuthExpired?.(); return }
-      setError((e) => ({ ...e, [tab]: true }))
+      const msg = err?.message?.includes('404')
+        ? 'This case is outside your station scope'
+        : 'Could not load this tab'
+      setError((e) => ({ ...e, [tab]: msg }))
     } finally {
       setLoading((s) => ({ ...s, [tab]: false }))
     }
@@ -70,7 +73,9 @@ function CaseCard({ caseId, onAuthExpired }) {
       <div className="case-detail-panel__body">
         {loading[activeTab] && <div className="analytics-panel__state">Loading…</div>}
         {error[activeTab] && (
-          <div className="analytics-panel__state analytics-panel__state--error">Could not load this tab</div>
+          <div className={`analytics-panel__state${error[activeTab].includes('scope') ? ' analytics-panel__state--muted' : ' analytics-panel__state--error'}`}>
+            {error[activeTab]}
+          </div>
         )}
 
         {!loading[activeTab] && !error[activeTab] && activeTab === 'Timeline' && (

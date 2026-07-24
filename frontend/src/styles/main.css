@@ -2565,6 +2565,11 @@ textarea {
   color: var(--error);
 }
 
+.analytics-panel__state--muted {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 /* Table within MO clusters panel */
 .analytics-table {
   width: 100%;
