@@ -1,4 +1,4 @@
-﻿"""
+"""
 Simple JWT auth for local development.
 REPLACE with Catalyst Authentication before production deployment.
 
@@ -187,6 +187,7 @@ async def login(badge_number: str, password: str) -> dict:
             "badge_number": employee["KGID"],
             "full_name": employee["FirstName"],
             "rank": employee["rank"] or "",
+            "role": employee.get("role") or "",
             "unit_id": employee.get("UnitID"),
             "unit_name": employee.get("UnitName") or "",
         },

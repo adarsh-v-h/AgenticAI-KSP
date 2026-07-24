@@ -27,6 +27,9 @@ class OfficerInfo(BaseModel):
     badge_number: str
     full_name: str
     rank: str
+    role: str = ""
+    unit_id: int | None = None
+    unit_name: str = ""
 
 
 class LoginResponse(BaseModel):

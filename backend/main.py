@@ -24,6 +24,7 @@ from routers.governance import router as governance_router
 from routers.analytics import router as analytics_router
 from routers.decision_support import router as decision_support_router
 from routers.profiling import router as profiling_router
+from routers.ticker import router as ticker_router
 from conversation.history import init_nosql_table
 from pipeline.rate_limiter import start_rate_limiter, stop_rate_limiter
 from config.catalyst_token import get_access_token
@@ -125,6 +126,26 @@ async def lifespan(app: FastAPI):
 
     keep_warm_task = asyncio.create_task(_keep_warm_loop())
 
+    # 7. Build intelligence ticker cache (fire-and-forget; non-fatal)
+    #    Also starts a 2-hour background refresh loop so the ticker stays
+    #    current without a restart.
+    async def _ticker_loop():
+        try:
+            from pipeline.intelligence_ticker import build_intelligence_cache
+            await build_intelligence_cache()
+        except Exception as e:
+            print(f"WARNING: Initial intelligence cache build failed: {e}", file=sys.stderr)
+        # Refresh every 2 hours
+        while True:
+            await asyncio.sleep(2 * 60 * 60)
+            try:
+                from pipeline.intelligence_ticker import build_intelligence_cache
+                await build_intelligence_cache()
+            except Exception as e:
+                print(f"WARNING: Intelligence cache refresh failed: {e}", file=sys.stderr)
+
+    ticker_task = asyncio.create_task(_ticker_loop())
+
     # This is the dividing line between startup and shutdown.
     # Everything before yield runs when the app starts.
     yield
@@ -132,8 +153,13 @@ async def lifespan(app: FastAPI):
 
     # ── SHUTDOWN ──
     keep_warm_task.cancel()
+    ticker_task.cancel()
     try:
         await keep_warm_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await ticker_task
     except asyncio.CancelledError:
         pass
 
@@ -359,6 +385,7 @@ app.include_router(governance_router)
 app.include_router(analytics_router)
 app.include_router(decision_support_router)
 app.include_router(profiling_router)
+app.include_router(ticker_router)
 
 
 @app.get("/health")

@@ -540,7 +540,91 @@ textarea {
   margin-top: 12px;
 }
 
-/* Suggestion chips row */
+/* ---------- Intelligence Ticker ---------- */
+
+.intelligence-ticker {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: 560px;
+  width: 100%;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  margin-top: 20px;
+  margin-bottom: 4px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.intelligence-ticker__badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px 0 14px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--hairline);
+  height: 100%;
+  background: var(--surface-cream-strong);
+}
+
+.intelligence-ticker__dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: ticker-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ticker-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+
+.intelligence-ticker__label {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  color: var(--primary);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.intelligence-ticker__track {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.intelligence-ticker__text {
+  display: inline-block;
+  white-space: nowrap;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 0 20px;
+  animation: ticker-scroll linear infinite;
+  will-change: transform;
+}
+
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Pause on hover so the officer can read it */
+.intelligence-ticker:hover .intelligence-ticker__text {
+  animation-play-state: paused;
+}
+
 .suggestion-chips {
   display: flex;
   flex-wrap: wrap;
