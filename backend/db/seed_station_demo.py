@@ -14,7 +14,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from db.connection import create_pool, execute_query, execute_write, close_pool
+from db.connection_real import create_pool, execute_query, execute_write, close_pool
 
 DEMO_STATIONS = [
     "Koramangala PS", "Indiranagar PS", "HSR Layout PS",
@@ -77,26 +77,18 @@ async def assign_officers(circle_id, station_ids):
         print("No officers found -- run the main seed.py first.")
         return
 
-    # First supervisor found → assign to the circle
-    supervisor = next((o for o in officers if o["role"] == "supervisor"), None)
-    if supervisor:
+    # Assign ALL supervisor-role officers to the parent circle unit
+    supervisors = [o for o in officers if o["role"] == "supervisor"]
+    supervisor_ids = {s["EmployeeID"] for s in supervisors}
+    for sup in supervisors:
         await execute_write(
             "UPDATE Employee SET UnitID = %s WHERE EmployeeID = %s",
-            (circle_id, supervisor["EmployeeID"])
+            (circle_id, sup["EmployeeID"])
         )
-        print(f"Assigned supervisor '{supervisor['FirstName']}' (ID={supervisor['EmployeeID']}) to circle UnitID={circle_id}")
-    else:
-        # Fallback: assign the first officer as supervisor at the circle
-        first = officers[0]
-        await execute_write(
-            "UPDATE Employee SET UnitID = %s, role = 'supervisor' WHERE EmployeeID = %s",
-            (circle_id, first["EmployeeID"])
-        )
-        print(f"Promoted '{first['FirstName']}' (ID={first['EmployeeID']}) to supervisor at circle UnitID={circle_id}")
+        print(f"Assigned supervisor '{sup['FirstName']}' (ID={sup['EmployeeID']}) to circle UnitID={circle_id}")
 
-    # Distribute remaining officers (non-supervisor) across stations
-    supervisor_id = supervisor["EmployeeID"] if supervisor else officers[0]["EmployeeID"]
-    investigators = [o for o in officers if o["EmployeeID"] != supervisor_id]
+    # Distribute remaining non-supervisor officers across stations
+    investigators = [o for o in officers if o["EmployeeID"] not in supervisor_ids]
     for i, officer in enumerate(investigators):
         station_id = station_ids[i % len(station_ids)]
         await execute_write(
