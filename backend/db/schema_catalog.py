@@ -98,7 +98,7 @@ SCHEMA_CATALOG = {
         },
         "keywords": ["designation", "designation name", "role title"]
     },
-    "`Rank`": {
+    "Rank": {
         "description": "Police ranks (escaped with backticks).",
         "columns": {
             "RankID": "INT PRIMARY KEY",
@@ -270,10 +270,11 @@ SCHEMA_CATALOG = {
 # raises:  nothing
 def _format_table(name: str, meta: dict, max_col_chars: int | None = None) -> str:
     """Build the per-table block for a schema string."""
-    lines = [f"TABLE: {name}", f"Description: {meta['description']}", "Columns:"]
+    header_name = f"`{name}`" if name == "Rank" else name
+    lines = [f"TABLE: {header_name}", f"Description: {meta['description']}", "Columns:"]
     for col_name, col_desc in meta["columns"].items():
         if max_col_chars is not None and len(col_desc) > max_col_chars:
-            col_desc = col_desc[: max_col_chars - 1].rstrip() + "â€¦"
+            col_desc = col_desc[: max_col_chars - 1].rstrip() + "…"
         lines.append(f"  - {col_name}: {col_desc}")
     return "\n".join(lines)
 

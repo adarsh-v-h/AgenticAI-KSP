@@ -92,6 +92,11 @@ def select_relevant_tables(question: str) -> tuple[list[str], list[str]]:
             break
         out.append(name)
 
+    if "Employee" in out:
+        for dep in ("Rank", "Designation"):
+            if dep in SCHEMA_CATALOG and dep not in out and len(out) < _MAX_TABLES:
+                out.append(dep)
+
     return out, assumptions
 
 
