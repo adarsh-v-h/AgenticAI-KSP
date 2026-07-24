@@ -73,7 +73,7 @@ async def _cleanup_history(session_id: str):
 
 @pytest.fixture(autouse=True)
 def mock_nosql():
-    """Patch all NoSQL network calls to no-op AsyncMocks."""
+    """Patch all NoSQL and Cache network calls to no-op AsyncMocks."""
     patches = [
         patch("conversation.session_store.insert_document", AsyncMock(return_value=True)),
         patch("conversation.session_store.update_document", AsyncMock(return_value=True)),
@@ -82,6 +82,8 @@ def mock_nosql():
         patch("conversation.history.get_document", AsyncMock(return_value=None)),
         patch("conversation.history.update_document", AsyncMock(return_value=True)),
         patch("conversation.history.insert_document", AsyncMock(return_value=True)),
+        patch("db.cache_client.get_value", AsyncMock(return_value=None)),
+        patch("db.cache_client.put_value", AsyncMock(return_value=True)),
     ]
     for p in patches:
         p.start()

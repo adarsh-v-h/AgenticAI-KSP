@@ -427,6 +427,12 @@ class TestVoiceHelpers:
 
 
 class TestVoiceTranscribe:
+    @pytest.fixture(autouse=True)
+    def _mock_token(self, monkeypatch):
+        # Mock get_access_token to return a dummy token so tests can run in environments without Zoho secrets (CI/CD)
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr("voice.zia_voice.get_access_token", AsyncMock(return_value="mocked_access_token"))
+
     class _FakeResp:
         def __init__(self, status_code=200, json_data=None, content=b"", text=""):
             self.status_code = status_code

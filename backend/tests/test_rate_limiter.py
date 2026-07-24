@@ -8,9 +8,12 @@ Run: pytest backend/tests/test_rate_limiter.py -v
 """
 
 import asyncio
+import os
 from unittest.mock import AsyncMock, patch
 # pyrefly: ignore [missing-import]
 import pytest
+
+os.environ["APP_SECRET_KEY"] = "test_secret_key_for_testing_purposes"
 
 from pipeline import rate_limiter as rl
 
