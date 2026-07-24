@@ -72,6 +72,7 @@ async def generate_sql(
         SQLGenerationError: validation failed on every attempt.
         LLMError: underlying LLM API call itself failed.
     """
+    schema = get_schema_for_tables(table_names)
     officer_role = (officer.get("role") or "").lower() if officer else None
     few_shots = get_few_shot_examples(
         table_names, question=question, officer_role=officer_role
