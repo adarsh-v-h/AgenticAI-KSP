@@ -100,19 +100,43 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 print(f"WARNING: NoSQL init failed (history will use in-memory store): {e}", file=sys.stderr)
 
-            # 6. Eager background warm-up
-            await asyncio.gather(
-                ping_model("MODEL_SQL"),
-                ping_model("MODEL_ANSWER"),
-                ping_voice(),
-                return_exceptions=True
-            )
+            # 6. Eager background warm-up (coordinated)
+            try:
+                from db.cache_client import get_value as cache_get, put_value as cache_put
+                import time
+                now_sec = int(time.time())
+                last_ping = await cache_get("last_warm_ping")
+                if last_ping is not None and now_sec - int(last_ping) < 240:
+                    pass
+                else:
+                    await cache_put("last_warm_ping", str(now_sec), expiry_in_hours=1)
+                    await asyncio.gather(
+                        ping_model("MODEL_SQL"),
+                        ping_model("MODEL_ANSWER"),
+                        ping_voice(),
+                        return_exceptions=True
+                    )
+            except Exception as e:
+                # Fail-open: ping anyway if cache fails
+                await asyncio.gather(
+                    ping_model("MODEL_SQL"),
+                    ping_model("MODEL_ANSWER"),
+                    ping_voice(),
+                    return_exceptions=True
+                )
         except Exception as e:
             print(f"WARNING: Eager background warm-up failed: {e}", file=sys.stderr)
 
         while True:
             await asyncio.sleep(300)
             try:
+                from db.cache_client import get_value as cache_get, put_value as cache_put
+                import time
+                now_sec = int(time.time())
+                last_ping = await cache_get("last_warm_ping")
+                if last_ping is not None and now_sec - int(last_ping) < 240:
+                    continue
+                await cache_put("last_warm_ping", str(now_sec), expiry_in_hours=1)
                 await asyncio.gather(
                     ping_model("MODEL_SQL"),
                     ping_model("MODEL_ANSWER"),

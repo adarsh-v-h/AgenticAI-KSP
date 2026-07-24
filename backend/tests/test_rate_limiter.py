@@ -99,40 +99,24 @@ class TestFlush:
         async def scenario():
             ws = rl._current_window_start()
             entry = {"count": 5, "unflushed": 5, "cap": 100, "window_start": ws}
-            # Shared cache already has 10 from other instances.
-            with patch.object(rl, "get", return_value="seg-1"), \
-                 patch.object(rl, "get_value", new=AsyncMock(return_value="10")), \
-                 patch.object(rl, "put_value", new=AsyncMock(return_value=True)) as p:
+            with patch("db.connection.execute_write", new=AsyncMock(return_value=1)) as pw, \
+                 patch("db.connection.execute_query", new=AsyncMock(return_value=[{"count": 15}])):
                 await rl._flush_unit(1, entry)
-            # new shared = 10 + 5 = 15; local adopts it, unflushed cleared.
+            # new shared = 15; local adopts it, unflushed cleared.
             assert entry["count"] == 15
             assert entry["unflushed"] == 0
-            p.assert_awaited_once()
+            pw.assert_awaited_once()
 
         asyncio.run(scenario())
 
-    def test_flush_fails_open_on_cache_error(self):
+    def test_flush_fails_open_on_db_error(self):
         async def scenario():
             ws = rl._current_window_start()
             entry = {"count": 5, "unflushed": 5, "cap": 100, "window_start": ws}
-            with patch.object(rl, "get", return_value="seg-1"), \
-                 patch.object(rl, "get_value", new=AsyncMock(side_effect=rl.CacheError("down"))):
+            with patch("db.connection.execute_write", new=AsyncMock(side_effect=Exception("down"))):
                 await rl._flush_unit(1, entry)
             # Unflushed delta preserved for retry; nothing crashed.
             assert entry["unflushed"] == 5
-
-        asyncio.run(scenario())
-
-    def test_flush_noop_when_segment_unset(self):
-        async def scenario():
-            ws = rl._current_window_start()
-            entry = {"count": 5, "unflushed": 5, "cap": 100, "window_start": ws}
-            # Empty CACHE_SEGMENT_ID → skip cache entirely (per-instance only).
-            with patch.object(rl, "get", return_value=""), \
-                 patch.object(rl, "get_value", new=AsyncMock()) as g:
-                await rl._flush_unit(1, entry)
-            g.assert_not_awaited()
-            assert entry["unflushed"] == 5  # untouched
 
         asyncio.run(scenario())
 

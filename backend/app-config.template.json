@@ -2,7 +2,10 @@
   "command": "python3 main.py",
   "buildPath": ".",
   "stack": "python_3_10",
-  "env_variables": {},
+  "env_variables": {
+    "DB_POOL_MAXSIZE": "15",
+    "DB_POOL_MINSIZE": "5"
+  },
   "memory": 512,
   "scripts": {
     "predeploy": "python3 -m pip install -r requirements.txt -t . --upgrade"

@@ -113,6 +113,14 @@ def _log(msg: str) -> None:
 # returns: (list[dict]) — last MAX_TURNS messages from in-memory store
 # raises:  nothing
 async def _local_get(session_id: str) -> list[dict]:
+    try:
+        from db.cache_client import get_value as cache_get
+        val = await cache_get(f"fallback_history:{session_id}")
+        if val is not None:
+            return orjson.loads(val)
+    except Exception as e:
+        _log(f"WARNING: Cache GET failed for history fallback (using local memory): {e}")
+
     async with _local_lock:
         return list(_local_history.get(session_id, []))[-MAX_TURNS:]
 
@@ -122,6 +130,12 @@ async def _local_get(session_id: str) -> list[dict]:
 # returns: nothing
 # raises:  nothing
 async def _local_set(session_id: str, turns: list[dict]) -> None:
+    try:
+        from db.cache_client import put_value as cache_put
+        await cache_put(f"fallback_history:{session_id}", orjson.dumps(turns).decode(), expiry_in_hours=24)
+    except Exception as e:
+        _log(f"WARNING: Cache PUT failed for history fallback (using local memory): {e}")
+
     async with _local_lock:
         _local_history[session_id] = turns[-MAX_TURNS:]
 
@@ -131,6 +145,12 @@ async def _local_set(session_id: str, turns: list[dict]) -> None:
 # returns: nothing
 # raises:  nothing
 async def _local_clear(session_id: str) -> None:
+    try:
+        from db.cache_client import put_value as cache_put
+        await cache_put(f"fallback_history:{session_id}", "[]", expiry_in_hours=1)
+    except Exception:
+        pass
+
     async with _local_lock:
         _local_history.pop(session_id, None)
 

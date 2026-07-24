@@ -195,42 +195,42 @@ async def _compute_cap(unit_id: int) -> int:
 # CONTRACT
 # takes:  unit_id (int), entry (dict) — the in-memory counter for that station
 # returns: nothing (mutates entry in place)
-# raises:  nothing (Cache failures are logged; state left intact → fail-open)
+# raises:  nothing (failures are logged; state left intact → fail-open)
 async def _flush_unit(unit_id: int, entry: dict) -> None:
     """
-    Converge one station's counter with the shared Cache total for its window.
+    Converge one station's counter with the shared MySQL total for its window.
 
-    read shared → new_shared = shared + local_unflushed → write back → adopt as
-    the new local baseline. Best-effort: any CacheError leaves `unflushed`
-    untouched so the delta is retried next cycle (and the request path keeps
-    serving off the local count meanwhile).
+    Performs an atomic INSERT ... ON DUPLICATE KEY UPDATE in MySQL to prevent
+    concurrency race conditions / lost updates when multiple instances flush
+    simultaneously.
     """
-    # No cache segment configured → run purely per-instance (fail-open). Skip
-    # quietly so we don't spam the logs every sync cycle.
-    try:
-        if not get("CACHE_SEGMENT_ID"):
-            return
-    except Exception:
-        return
+    from db.connection import execute_query, execute_write
 
     window_start = entry["window_start"]
     unflushed = entry["unflushed"]
-    key = _cache_key(unit_id, window_start)
 
     try:
-        raw = await get_value(key)
-        shared = int(raw) if raw is not None and str(raw).isdigit() else 0
-        new_shared = shared + unflushed
-        if unflushed > 0 or raw is None:
-            await put_value(key, str(new_shared), expiry_in_hours=CACHE_EXPIRY_HOURS)
-        # Adopt the converged total. Any increments that landed while we awaited
-        # are preserved because we only subtract the amount we actually flushed.
-        entry["count"] = new_shared + (entry["unflushed"] - unflushed)
-        entry["unflushed"] -= unflushed
-    except CacheError as e:
-        print(f"WARNING: rate_limiter cache flush failed for unit {unit_id}: {e}", file=sys.stderr)
-    except Exception as e:  # noqa: BLE001 — never let sync crash the loop
-        print(f"WARNING: rate_limiter flush error for unit {unit_id}: {e}", file=sys.stderr)
+        if unflushed > 0:
+            await execute_write(
+                """INSERT INTO rate_limits (unit_id, window_start, count)
+                   VALUES (%s, %s, %s)
+                   ON DUPLICATE KEY UPDATE count = count + VALUES(count)""",
+                (unit_id, window_start, unflushed)
+            )
+            # Subtract only what we flushed successfully
+            entry["unflushed"] -= unflushed
+
+        # Fetch the shared database total for this station+window
+        rows = await execute_query(
+            "SELECT count FROM rate_limits WHERE unit_id = %s AND window_start = %s",
+            (unit_id, window_start)
+        )
+        shared = int(rows[0]["count"]) if rows else 0
+
+        # Update local count to be the database baseline + any unflushed increments
+        entry["count"] = shared + entry["unflushed"]
+    except Exception as e:
+        print(f"WARNING: rate_limiter DB flush failed for unit {unit_id}: {e}", file=sys.stderr)
 
 
 # CONTRACT
@@ -294,8 +294,24 @@ def start_rate_limiter() -> None:
     global _task, _stop_event
     if _task is not None and not _task.done():
         return
+
+    async def _init_and_start():
+        from db.connection import execute_write
+        try:
+            await execute_write(
+                """CREATE TABLE IF NOT EXISTS rate_limits (
+                    unit_id INT NOT NULL,
+                    window_start INT NOT NULL,
+                    count INT NOT NULL,
+                    PRIMARY KEY (unit_id, window_start)
+                )"""
+            )
+        except Exception as e:
+            print(f"WARNING: Failed to initialize rate_limits table: {e}", file=sys.stderr)
+        await _sync_loop()
+
     _stop_event = asyncio.Event()
-    _task = asyncio.create_task(_sync_loop())
+    _task = asyncio.create_task(_init_and_start())
 
 
 # CONTRACT

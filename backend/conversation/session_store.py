@@ -56,6 +56,15 @@ def _log(msg: str) -> None:
 # returns: (dict | None) — session metadata document from in-memory store, or None
 # raises:  nothing
 async def _local_get(session_id: str) -> dict | None:
+    try:
+        from db.cache_client import get_value as cache_get
+        import orjson
+        val = await cache_get(f"fallback_session:{session_id}")
+        if val is not None:
+            return orjson.loads(val)
+    except Exception as e:
+        _log(f"WARNING: Cache GET failed for session fallback (using local memory): {e}")
+
     async with _local_lock:
         doc = _local_sessions.get(session_id)
         return dict(doc) if doc is not None else None
@@ -66,6 +75,24 @@ async def _local_get(session_id: str) -> dict | None:
 # returns: nothing
 # raises:  nothing
 async def _local_set(session_id: str, document: dict) -> None:
+    try:
+        from db.cache_client import get_value as cache_get, put_value as cache_put
+        import orjson
+        # Store document
+        await cache_put(f"fallback_session:{session_id}", orjson.dumps(document).decode(), expiry_in_hours=24)
+        
+        # Track session ID in officer's session index key
+        officer_id = document.get("officer_id")
+        if officer_id is not None:
+            list_key = f"fallback_officer_sessions:{officer_id}"
+            raw_list = await cache_get(list_key)
+            session_ids = orjson.loads(raw_list) if raw_list else []
+            if session_id not in session_ids:
+                session_ids.append(session_id)
+                await cache_put(list_key, orjson.dumps(session_ids).decode(), expiry_in_hours=24)
+    except Exception as e:
+        _log(f"WARNING: Cache PUT failed for session fallback (using local memory): {e}")
+
     async with _local_lock:
         _local_sessions[session_id] = dict(document)
 
@@ -75,6 +102,23 @@ async def _local_set(session_id: str, document: dict) -> None:
 # returns: (list[dict]) — all matching session documents from in-memory store
 # raises:  nothing
 async def _local_list(officer_id: int | None = None) -> list[dict]:
+    if officer_id is not None:
+        try:
+            from db.cache_client import get_value as cache_get
+            import orjson
+            list_key = f"fallback_officer_sessions:{officer_id}"
+            raw_list = await cache_get(list_key)
+            if raw_list:
+                session_ids = orjson.loads(raw_list)
+                docs = []
+                for sid in session_ids:
+                    raw_doc = await cache_get(f"fallback_session:{sid}")
+                    if raw_doc:
+                        docs.append(orjson.loads(raw_doc))
+                return docs
+        except Exception as e:
+            _log(f"WARNING: Cache list failed for session fallback (using local memory): {e}")
+
     async with _local_lock:
         docs = [dict(d) for d in _local_sessions.values()]
     return [d for d in docs if d.get("officer_id") == officer_id] if officer_id is not None else docs
