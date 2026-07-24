@@ -46,6 +46,25 @@ function firstFirId(tableData) {
   return match ? Number(match.CaseMasterID) : null
 }
 
+// Extract all unique CaseMasterIDs from table rows, in order.
+// CONTRACT
+// takes:  tableData (Array<object>|any) — structured table rows from the chat response
+// returns: (number[]) — ordered list of all unique valid CaseMasterIDs, or [] if none found
+// throws:  never
+function allFirIds(tableData) {
+  if (!Array.isArray(tableData)) return []
+  const seen = new Set()
+  const ids = []
+  for (const row of tableData) {
+    const id = Number(row?.CaseMasterID)
+    if (Number.isFinite(id) && !seen.has(id)) {
+      seen.add(id)
+      ids.push(id)
+    }
+  }
+  return ids
+}
+
 // CONTRACT
 // takes:  tableData (Array<object>|any) — structured table rows from the chat response
 // returns: (number|null) — the first valid AccusedMasterID as a number, or null if none found
@@ -245,7 +264,7 @@ export default function MessageBubble({
           <button
             type="button"
             className="message-action-btn"
-            onClick={() => onCaseDetailRequest?.(firstFirId(tableData))}
+            onClick={() => onCaseDetailRequest?.(allFirIds(tableData))}
           >
             View case details
           </button>

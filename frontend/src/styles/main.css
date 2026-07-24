@@ -2858,6 +2858,42 @@ textarea {
   padding: 20px 24px;
 }
 
+/* Scrollable container when rendering multiple case cards */
+.case-detail-panel__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+
+/* Individual case card — one per CaseMasterID, stacked vertically */
+.case-card {
+  border-bottom: 2px solid var(--hairline, #ddd);
+  margin-bottom: 0;
+  padding-bottom: 8px;
+}
+
+.case-card:last-child {
+  border-bottom: none;
+}
+
+.case-card__title {
+  margin: 0;
+  padding: 16px 24px 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.case-card .case-detail-panel__tabs {
+  padding: 0 24px;
+}
+
+.case-card .case-detail-panel__body {
+  flex: none;
+  overflow-y: visible;
+  padding: 12px 24px 20px;
+}
+
 .case-timeline {
   list-style: none;
   padding: 0;

@@ -1,13 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fetchCaseTimeline, fetchCaseSummary, fetchSimilarCases, AuthError } from '../api/decisionSupport'
 
 const TABS = ['Timeline', 'Summary', 'Similar Cases']
 
-export default function CaseDetailPanel({ caseId, onClose, onAuthExpired }) {
+// Single case card — self-contained tab loader for one caseId
+function CaseCard({ caseId, onAuthExpired }) {
   const [activeTab, setActiveTab] = useState('Timeline')
   const [cache, setCache] = useState({})
   const [loading, setLoading] = useState({})
   const [error, setError] = useState({})
+  const cardRef = useRef(null)
+  const [visible, setVisible] = useState(false)
+
+  // Trigger initial Timeline load only when the card scrolls into view
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true) },
+      { threshold: 0.1 }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (visible) loadTab('Timeline')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible])
 
   async function loadTab(tab) {
     if (cache[tab] !== undefined || loading[tab]) return
@@ -31,17 +51,9 @@ export default function CaseDetailPanel({ caseId, onClose, onAuthExpired }) {
     loadTab(tab)
   }
 
-  useEffect(() => {
-    loadTab('Timeline')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caseId])
-
   return (
-    <div className="case-detail-panel">
-      <header className="case-detail-panel__header">
-        <h2>Case #{caseId}</h2>
-        <button onClick={onClose} aria-label="Close case details">×</button>
-      </header>
+    <div className="case-card" ref={cardRef}>
+      <h3 className="case-card__title">Case #{caseId}</h3>
 
       <nav className="case-detail-panel__tabs">
         {TABS.map((tab) => (
@@ -96,6 +108,33 @@ export default function CaseDetailPanel({ caseId, onClose, onAuthExpired }) {
             <div className="analytics-panel__state">No similar cases found in your station's DB or crime records</div>
           )
         )}
+      </div>
+    </div>
+  )
+}
+
+// CONTRACT
+// takes:  caseIds (number[]) — ordered list of all CaseMasterIDs to display
+//         onClose (function) — called when user closes the panel
+//         onAuthExpired (function) — called on 401 responses
+// returns: JSX — a scrollable panel rendering one CaseCard per caseId, stacked vertically
+// throws:  never
+export default function CaseDetailPanel({ caseIds = [], onClose, onAuthExpired }) {
+  return (
+    <div className="case-detail-panel">
+      <header className="case-detail-panel__header">
+        <h2>
+          {caseIds.length === 1
+            ? `Case #${caseIds[0]}`
+            : `${caseIds.length} Cases`}
+        </h2>
+        <button onClick={onClose} aria-label="Close case details">×</button>
+      </header>
+
+      <div className="case-detail-panel__scroll">
+        {caseIds.map((id) => (
+          <CaseCard key={id} caseId={id} onAuthExpired={onAuthExpired} />
+        ))}
       </div>
     </div>
   )

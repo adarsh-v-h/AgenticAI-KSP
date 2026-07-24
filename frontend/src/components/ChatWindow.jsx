@@ -86,7 +86,7 @@ export default function ChatWindow({ officer, onLogout }) {
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
   // Case detail panel state
   const [caseDetailOpen, setCaseDetailOpen] = useState(false)
-  const [caseDetailId, setCaseDetailId] = useState(null)
+  const [caseDetailIds, setCaseDetailIds] = useState([])
 
   const [sessionError, setSessionError] = useState(null)
   const [sessionsError, setSessionsError] = useState(null)
@@ -670,7 +670,7 @@ export default function ChatWindow({ officer, onLogout }) {
                     mediaAttachments={m.mediaAttachments}
                     graphAvailable={m.graphAvailable}
                     onOpenGraph={setGraphTarget}
-                    onCaseDetailRequest={(caseId) => { setCaseDetailId(caseId); setCaseDetailOpen(true) }}
+                    onCaseDetailRequest={(ids) => { setCaseDetailIds(ids); setCaseDetailOpen(true) }}
                     messageId={m.messageId}
                     onAuthExpired={onLogout}
                     suggestedFollowUps={m.suggestedFollowUps}
@@ -716,10 +716,10 @@ export default function ChatWindow({ officer, onLogout }) {
         </Suspense>
       )}
 
-      {caseDetailOpen && caseDetailId && (
+      {caseDetailOpen && caseDetailIds.length > 0 && (
         <Suspense fallback={<div className="modal-loading">Loading case details…</div>}>
           <CaseDetailPanel
-            caseId={caseDetailId}
+            caseIds={caseDetailIds}
             onClose={() => setCaseDetailOpen(false)}
             onAuthExpired={onLogout}
           />
