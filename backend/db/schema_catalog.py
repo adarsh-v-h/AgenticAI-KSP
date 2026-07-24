@@ -88,7 +88,15 @@ SCHEMA_CATALOG = {
             "role": "ENUM('investigator', 'analyst', 'supervisor', 'policymaker')",
             "is_active": "BOOLEAN"
         },
-        "keywords": ["employee", "officer", "inspector", "constable", "si", "pi", "asi", "dysp", "assigned", "investigating", "staff", "head constable"]
+        "keywords": ["employee", "officer", "officers", "inspector", "constable", "si", "pi", "asi", "dysp", "assigned", "investigating", "staff", "head constable", "my station", "police station", "list officers", "who is", "personnel"]
+    },
+    "Designation": {
+        "description": "Officer designations (e.g., Investigating Officer, SHO, Beat Officer).",
+        "columns": {
+            "DesignationID": "INT PRIMARY KEY",
+            "DesignationName": "VARCHAR(100)"
+        },
+        "keywords": ["designation", "designation name", "role title"]
     },
     "`Rank`": {
         "description": "Police ranks (escaped with backticks).",
@@ -439,6 +447,19 @@ _FEW_SHOT_BANK: list[dict] = [
             "JOIN Employee AS e ON e.EmployeeID = cm.PolicePersonID\n"
             "WHERE e.FirstName LIKE '%Harish Kumar%'\n"
             "ORDER BY cm.CrimeRegisteredDate DESC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "tables": {"Employee", "Unit", "`Rank`", "Designation"},
+        "q": "List all officers in my police station.",
+        "sql": (
+            "SELECT e.EmployeeID, e.FirstName, r.RankName, d.DesignationName, e.KGID, e.role\n"
+            "FROM Employee AS e\n"
+            "LEFT JOIN `Rank` AS r ON r.RankID = e.RankID\n"
+            "LEFT JOIN Designation AS d ON d.DesignationID = e.DesignationID\n"
+            "WHERE e.UnitID IN ({station_ids}) AND e.is_active = TRUE\n"
+            "ORDER BY r.Hierarchy ASC, e.FirstName ASC\n"
             "LIMIT 50"
         ),
     },
