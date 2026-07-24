@@ -6,6 +6,71 @@
 import { getToken } from './auth.js'
 import { API_BASE } from '../config.js'
 
+// Convert WebM audio blob to WAV format using AudioContext and DataView.
+async function convertWebmToWav(webmBlob) {
+  if (typeof window === 'undefined') return webmBlob
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextClass) return webmBlob
+
+  const audioContext = new AudioContextClass()
+  const arrayBuffer = await webmBlob.arrayBuffer()
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+
+  const numOfChan = audioBuffer.numberOfChannels
+  const sampleRate = audioBuffer.sampleRate
+  const format = 1 // Raw PCM
+  const bitDepth = 16
+
+  let result
+  if (numOfChan === 2) {
+    const l = audioBuffer.getChannelData(0)
+    const r = audioBuffer.getChannelData(1)
+    result = new Float32Array(l.length + r.length)
+    let index = 0
+    let inputIndex = 0
+    while (index < result.length) {
+      result[index++] = l[inputIndex]
+      result[index++] = r[inputIndex]
+      inputIndex++
+    }
+  } else {
+    result = audioBuffer.getChannelData(0)
+  }
+
+  const bufferLength = result.length * 2
+  const fileLength = bufferLength + 44
+  const ab = new ArrayBuffer(fileLength)
+  const view = new DataView(ab)
+
+  const writeString = (v, offset, string) => {
+    for (let i = 0; i < string.length; i++) {
+      v.setUint8(offset + i, string.charCodeAt(i))
+    }
+  }
+
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, fileLength - 8, true)
+  writeString(view, 8, 'WAVE')
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, format, true)
+  view.setUint16(22, numOfChan, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true)
+  view.setUint16(32, numOfChan * (bitDepth / 8), true)
+  view.setUint16(34, bitDepth, true)
+  writeString(view, 36, 'data')
+  view.setUint32(40, bufferLength, true)
+
+  const offset = 44
+  for (let i = 0; i < result.length; i++) {
+    const s = Math.max(-1, Math.min(1, result[i]))
+    view.setInt16(offset + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+
+  return new Blob([view], { type: 'audio/wav' })
+}
+
 // CONTRACT
 // takes:  audioBlob (Blob) — recorded audio in webm format, language ('en'|'kn') — spoken language code
 // returns: (Promise<{transcript: string, translated: string|null}>) — transcription result
@@ -22,8 +87,16 @@ import { API_BASE } from '../config.js'
  */
 export async function recordAndTranscribe(audioBlob, language = 'en') {
   const token = getToken()
+  
+  let processedBlob = audioBlob
+  try {
+    processedBlob = await convertWebmToWav(audioBlob)
+  } catch (e) {
+    console.error('WAV conversion failed, uploading raw audio', e)
+  }
+
   const formData = new FormData()
-  formData.append('audio', audioBlob, 'recording.webm')
+  formData.append('audio', processedBlob, 'recording.wav')
   formData.append('language', language)
 
   let res

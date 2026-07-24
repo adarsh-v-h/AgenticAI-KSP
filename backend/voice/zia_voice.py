@@ -117,7 +117,7 @@ async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     except ValueError as e:
         raise VoiceError(f"STT not configured: {e}") from e
 
-    files = {"file": ("audio.webm", audio_bytes, "audio/webm")}
+    files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
     data = {"language": language}
 
     try:
