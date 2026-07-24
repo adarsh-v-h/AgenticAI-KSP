@@ -65,31 +65,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"WARNING: gRPC servers startup failed: {e}", file=sys.stderr)
 
-    # 2a. Populate in-memory lookup cache for Unit, CrimeSubHead, and CaseStatusMaster
-    try:
-        from db.lookup_cache import init_lookup_cache
-        await init_lookup_cache()
-    except Exception as e:
-        print(f"WARNING: Lookup cache initialization failed: {e}", file=sys.stderr)
-
-    # 3. Confirm DB is reachable (run a trivial query)
-    # If this fails, print a warning but don't crash â€” DB might not be provisioned yet locally
-    # (this lets you still start the server and see the health check)
-    try:
-        from db.connection import execute_query
-        await execute_query("SELECT 1")
-        app.state.db_ok = True
-    except Exception as e:
-        print(f"WARNING: DB connection check failed: {e}", file=sys.stderr)
-        app.state.db_ok = False
-
-    # 4. Probe Catalyst NoSQL so we surface auth/path issues at startup.
-    # Failure is non-fatal â€” history.py falls back to in-memory storage.
-    try:
-        await init_nosql_table()
-    except Exception as e:
-        print(f"WARNING: NoSQL init failed (history will use in-memory store): {e}", file=sys.stderr)
-
     # 5. Start the station rate-limiter background sync loop. It flushes local
     # request counts to Catalyst Cache and refreshes per-station caps from
     # MySQL every ~30s. Failure here must not crash startup — the limiter fails
@@ -100,9 +75,32 @@ async def lifespan(app: FastAPI):
         print(f"WARNING: rate limiter failed to start (rate limiting disabled): {e}", file=sys.stderr)
 
     # 6. Start LLM & Voice keep-warm background task to avoid serverless cold starts
-    # Run the first warm-up ping in the background so it doesn't block startup.
+    # Run the first warm-up ping and initialization in the background so it doesn't block startup.
     async def _keep_warm_loop():
         try:
+            # 2a. Populate in-memory lookup cache for Unit, CrimeSubHead, and CaseStatusMaster
+            try:
+                from db.lookup_cache import init_lookup_cache
+                await init_lookup_cache()
+            except Exception as e:
+                print(f"WARNING: Lookup cache initialization failed: {e}", file=sys.stderr)
+
+            # 3. Confirm DB is reachable (run a trivial query)
+            try:
+                from db.connection import execute_query
+                await execute_query("SELECT 1")
+                app.state.db_ok = True
+            except Exception as e:
+                print(f"WARNING: DB connection check failed: {e}", file=sys.stderr)
+                app.state.db_ok = False
+
+            # 4. Probe Catalyst NoSQL so we surface auth/path issues at startup.
+            try:
+                await init_nosql_table()
+            except Exception as e:
+                print(f"WARNING: NoSQL init failed (history will use in-memory store): {e}", file=sys.stderr)
+
+            # 6. Eager background warm-up
             await asyncio.gather(
                 ping_model("MODEL_SQL"),
                 ping_model("MODEL_ANSWER"),
