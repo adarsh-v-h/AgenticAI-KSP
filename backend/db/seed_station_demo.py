@@ -14,7 +14,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from db.connection_real import create_pool, execute_query, execute_write, close_pool
+from db.connection import execute_query, execute_write
 
 DEMO_STATIONS = [
     "Koramangala PS", "Indiranagar PS", "HSR Layout PS",
@@ -123,6 +123,7 @@ async def assign_cases(station_ids):
 # returns: nothing
 # raises:  nothing (exceptions caught and printed)
 async def main():
+    from db.connection import create_pool, close_pool
     try:
         await create_pool()
         print("DB pool created.")
