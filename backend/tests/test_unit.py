@@ -640,3 +640,31 @@ class TestLookupCache:
         desc = lc.get_descendant_units_mem(2)
         assert set(desc) == {2, 3}
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION: Rule Engine
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from pipeline.rule_engine import try_rule_response
+
+class TestRuleEngine:
+    def test_greetings_exclusive(self):
+        assert try_rule_response("hi") is not None
+        assert try_rule_response("hii...") is not None
+        assert try_rule_response("hello!") is not None
+        assert try_rule_response("good morning") is not None
+        
+        # Mixed intents should NOT match (fall through to LLM)
+        assert try_rule_response("hi, show me cases of my station") is None
+        assert try_rule_response("hii there, who is Mahesh Gowda?") is None
+
+    def test_thanks_exclusive(self):
+        assert try_rule_response("thanks") is not None
+        assert try_rule_response("thank you!") is not None
+        assert try_rule_response("thanks, what about the other case?") is None
+
+    def test_help_exclusive(self):
+        assert try_rule_response("help") is not None
+        assert try_rule_response("help me query cases") is None
+
+

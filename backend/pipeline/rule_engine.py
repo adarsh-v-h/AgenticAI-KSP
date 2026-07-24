@@ -7,23 +7,23 @@ import re
 # Pattern → response pairs. Checked in order, first match wins.
 _RULES = [
     # Greetings
-    (r"^(hi+|hello+|hey+|good\s*(morning|afternoon|evening)|namaste)\b",
+    (r"^(hi+|hello+|hey+|good\s*(morning|afternoon|evening)|namaste)[!.,?\s]*$",
      "Hello! I'm your crime intelligence assistant. Ask me about cases, accused persons, crime trends, or anything from the KSP database."),
 
     # Thanks
-    (r"^(thanks?|thank\s*you|thx|cheers|great|perfect|ok\s*thanks)\b",
+    (r"^(thanks?|thank\s*you|thx|cheers|great|perfect|ok\s*thanks)[!.,?\s]*$",
      "You're welcome. Let me know if you need anything else."),
 
     # Help / capabilities
-    (r"^(help|what\s*can\s*you\s*do|capabilities|features)\b",
-     "I can help you with:\n• Query crime records (FIRs, accused, victims)\n• Crime trend analytics and patterns\n• Offender risk profiling\n• Case timelines and summaries\n• Finding similar cases\n• Voice input in English and Kannada\n\nJust ask a question in natural language."),
+    (r"^(help|what\s*can\s*you\s*do|capabilities|features)[!.,?\s]*$",
+     "I can help you with:\n• Query crime records (FIRs, accused, victims)\n• Crime trend analytics and patterns\n• Modus operandi clusters\n• Case timelines and summaries\n• Finding similar cases\n• Voice input in English and Kannada\n\nJust ask a question in natural language."),
 
     # Who are you
-    (r"^(who\s*are\s*you|what\s*are\s*you)\b",
+    (r"^(who\s*are\s*you|what\s*are\s*you)[!.,?\s]*$",
      "I'm the KSP Crime Intelligence Assistant — a natural language interface to the Karnataka State Police crime database."),
 
     # Bye
-    (r"^(bye|goodbye|see\s*you|quit|exit)\b",
+    (r"^(bye|goodbye|see\s*you|quit|exit)[!.,?\s]*$",
      "Goodbye! Stay safe."),
 ]
 
