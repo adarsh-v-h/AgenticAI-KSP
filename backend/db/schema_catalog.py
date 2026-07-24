@@ -458,7 +458,7 @@ _FEW_SHOT_BANK: list[dict] = [
             "FROM Employee AS e\n"
             "LEFT JOIN `Rank` AS r ON r.RankID = e.RankID\n"
             "LEFT JOIN Designation AS d ON d.DesignationID = e.DesignationID\n"
-            "WHERE e.UnitID IN ({station_ids}) AND e.is_active = TRUE\n"
+            "WHERE e.UnitID = 1 AND e.is_active = TRUE\n"
             "ORDER BY r.Hierarchy ASC, e.FirstName ASC\n"
             "LIMIT 50"
         ),
