@@ -1,13 +1,24 @@
-// Auth API. Token lives in memory only — never localStorage / sessionStorage.
+// Auth API. Token is persisted in localStorage to survive page refreshes.
 
 import { API_BASE } from '../config.js'
 
-let _token = null
+let _token = typeof window !== 'undefined' ? localStorage.getItem('ksp_auth_token') : null
 let _officer = null
+
+if (typeof window !== 'undefined') {
+  try {
+    const raw = localStorage.getItem('ksp_officer_profile')
+    if (raw) {
+      _officer = JSON.parse(raw)
+    }
+  } catch (e) {
+    // ignore parsing errors
+  }
+}
 
 // CONTRACT
 // takes:  nothing
-// returns: (string|null) — the current JWT access token held in memory
+// returns: (string|null) — the current JWT access token
 // throws:  never
 export function getToken() {
   return _token
@@ -28,6 +39,18 @@ export function getOfficer() {
 export function setToken(token, officer) {
   _token = token || null
   _officer = officer || null
+  if (typeof window !== 'undefined') {
+    if (_token) {
+      localStorage.setItem('ksp_auth_token', _token)
+    } else {
+      localStorage.removeItem('ksp_auth_token')
+    }
+    if (_officer) {
+      localStorage.setItem('ksp_officer_profile', JSON.stringify(_officer))
+    } else {
+      localStorage.removeItem('ksp_officer_profile')
+    }
+  }
 }
 
 // CONTRACT
@@ -37,11 +60,15 @@ export function setToken(token, officer) {
 export function clearToken() {
   _token = null
   _officer = null
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('ksp_auth_token')
+    localStorage.removeItem('ksp_officer_profile')
+  }
 }
 
 // CONTRACT
 // takes:  nothing
-// returns: (boolean) — true if a token is currently held in memory
+// returns: (boolean) — true if a token is currently held
 // throws:  never
 export function isLoggedIn() {
   return _token !== null
