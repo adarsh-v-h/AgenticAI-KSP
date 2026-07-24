@@ -318,8 +318,10 @@ def get_schema_for_tables(table_names: list[str]) -> str:
         if len(out) <= _MAX_SCHEMA_CHARS:
             return out
 
-    # Last resort: hard-truncate.
-    re# Few-shot bank — (relevant_tables_set, question, sql) tuples with optional for_role tag.
+    return out[:_MAX_SCHEMA_CHARS]
+
+
+# Few-shot bank — (relevant_tables_set, question, sql) tuples with optional for_role tag.
 # `relevant_tables` lists which tables in the question's selected set make this example useful.
 # `for_role` specifies "supervisor", "other", or "all" (default).
 _FEW_SHOT_BANK: list[dict] = [
@@ -438,7 +440,7 @@ _FEW_SHOT_BANK: list[dict] = [
         "sql": (
             "SELECT e.FirstName, r.RankName, COUNT(cm.CaseMasterID) AS case_count\n"
             "FROM Employee AS e\n"
-            "LEFT JOIN `Rank` AS r ON e.RankID = e.RankID\n"
+            "LEFT JOIN `Rank` AS r ON r.RankID = e.RankID\n"
             "JOIN CaseMaster AS cm ON cm.PolicePersonID = e.EmployeeID\n"
             "GROUP BY e.EmployeeID, e.FirstName, r.RankName\n"
             "ORDER BY case_count DESC\n"

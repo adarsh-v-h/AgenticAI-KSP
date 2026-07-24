@@ -200,7 +200,7 @@ def _format_officer_for_prompt(officer: dict | None) -> str:
     role = (officer.get("role") or "").strip().lower()
 
     if role == "supervisor" and unit_id:
-        scoped_ids = get_descendant_units_mem(unit_id) or [unit_id]
+        scoped_ids = officer.get("scoped_unit_ids") or get_descendant_units_mem(unit_id) or [unit_id]
         scoped_str = ", ".join(str(i) for i in scoped_ids)
         return (
             "Current officer context:\n"
