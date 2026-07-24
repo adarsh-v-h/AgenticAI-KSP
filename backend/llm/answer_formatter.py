@@ -156,6 +156,31 @@ async def route_intent(
     raises — on any failure it defaults to "SQL" so the pipeline behaves exactly
     as before when routing is unavailable.
     """
+    # Deterministic heuristic routing for obvious follow-ups when we have recent data
+    if has_recent_data:
+        import re
+        q_lower = question.lower()
+        referential_patterns = (
+            r"\bthis\s+(?:record|case|incident|row|data|result|crime)\b",
+            r"\bthat\s+(?:record|case|incident|row|data|result|crime)\b",
+            r"\bfor\s+this\b",
+            r"\bfor\s+that\b",
+            r"\bhandling\s+this\b",
+            r"\bhandling\s+that\b",
+            r"\bdetails?\s+of\s+(?:this|that|it)\b",
+            r"\bwho\s+is\s+(?:the\s+)?officer\b",
+            r"\bname\s+of\s+the\s+officer\b",
+            r"\bwhat\s+is\s+the\s+casemasterid\b",
+            r"\bwhat\s+is\s+the\s+crime\s*no\b",
+            r"\bwho\s+is\s+the\s+accused\s+in\s+this\b",
+            r"\bwho\s+is\s+the\s+accused\s+in\s+it\b",
+            r"\bwhen\s+did\s+it\s+happen\b",
+            r"\bwhere\s+did\s+it\s+happen\b",
+        )
+        if any(re.search(pat, q_lower) for pat in referential_patterns):
+            _log("Heuristic matched follow-up: routing to DIRECT")
+            return "DIRECT"
+
     try:
         system_prompt, user_prompt = build_router_prompt(
             question=question, history=history, has_recent_data=has_recent_data

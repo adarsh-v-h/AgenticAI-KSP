@@ -453,6 +453,15 @@ RULES:
 7. If you genuinely cannot answer from the context provided, give the best answer you can based on what you have — do NOT tell the officer to re-ask or rephrase."""
 
 
+def _most_recent_table(history: list[dict]) -> list[dict]:
+    return next(
+        (turn["table"] for turn in reversed(history or [])
+         if (turn.get("role") or "").lower() == "assistant"
+         and isinstance(turn.get("table"), list) and turn.get("table")),
+        []
+    )
+
+
 # CONTRACT
 # takes:  question (str) — officer's latest message, history (list[dict] | None) — conversation history, has_recent_data (bool) — whether recent query results are in context
 # returns: (tuple[str, str]) — (system_prompt, user_prompt) for intent router classification
@@ -470,10 +479,17 @@ def build_router_prompt(
     parts = []
     if history_block:
         parts.append(f"Recent conversation:\n{history_block}\n")
-    parts.append(
-        f"Recent query results are available in context: "
-        f"{'yes' if has_recent_data else 'no'}\n"
-    )
+    
+    if has_recent_data:
+        recent_table = _most_recent_table(history)
+        if recent_table:
+            keys = list(recent_table[0].keys())
+            parts.append(f"Recent query returned columns: {', '.join(keys)}\n")
+        else:
+            parts.append("Recent query results are available in context: yes\n")
+    else:
+        parts.append("Recent query results are available in context: no\n")
+
     parts.append(f"Officer's latest message: {question}\n")
     parts.append("Answer with one word — SQL or DIRECT:")
     return ROUTER_SYSTEM_PROMPT, "\n".join(parts)
