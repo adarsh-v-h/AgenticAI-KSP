@@ -7,7 +7,7 @@ import re
 # Pattern → response pairs. Checked in order, first match wins.
 _RULES = [
     # Greetings
-    (r"^(hi|hello|hey|good\s*(morning|afternoon|evening)|namaste)\b",
+    (r"^(hi+|hello+|hey+|good\s*(morning|afternoon|evening)|namaste)\b",
      "Hello! I'm your crime intelligence assistant. Ask me about cases, accused persons, crime trends, or anything from the KSP database."),
 
     # Thanks

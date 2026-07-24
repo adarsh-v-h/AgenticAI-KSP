@@ -293,6 +293,39 @@ async def _retry_with_latest_date(sql: str, officer: dict | None, question: str 
 
 
 # CONTRACT
+# takes:  question (str) — user question, history (list[dict] | None) — history, recent_table (list[dict]) — recent result table, start (float) — start time, fallback_type (str) — label for logging
+# returns: (PipelineResponse) — direct/RAG fallback response
+# raises:  nothing
+async def _fallback_rag_direct(
+    question: str,
+    history: list[dict] | None,
+    recent_table: list[dict],
+    start: float,
+    fallback_type: str,
+) -> PipelineResponse:
+    try:
+        rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
+        rag_result = await rag_session.ask(question)
+    except Exception as e:
+        _log(f"RAG fallback attempt failed ({fallback_type}): {e}")
+        rag_result = {"grounded": False}
+
+    if rag_result.get("grounded"):
+        elapsed = time.monotonic() - start
+        _log(f"Pipeline completed in {elapsed:.1f}s -- RAG ({fallback_type})")
+        response = PipelineResponse()
+        response.answer_text = rag_result["response"]
+        response.suggested_follow_ups = rag_result.get("suggested_follow_ups", [])
+        return response
+
+    _log(f"RAG also ungrounded -- falling back to DIRECT answer ({fallback_type})")
+    direct = await _run_direct(question, history or [], recent_table)
+    elapsed = time.monotonic() - start
+    _log(f"Pipeline completed in {elapsed:.1f}s -- DIRECT ({fallback_type})")
+    return direct
+
+
+# CONTRACT
 # takes:  question (str) — natural language user question, history (list[dict] | None) — prior conversation turns, officer (dict | None) — authenticated officer identity
 # returns: (PipelineResponse) — complete pipeline response object
 # raises:  nothing (never raises — error details captured in PipelineResponse)
@@ -383,25 +416,13 @@ async def run_pipeline(
         )
     except CannotAnswerError:
         _log("SQL chain returned CANNOT_ANSWER -- trying RAG before DIRECT fallback")
-        try:
-            rag_session = RagSession(document_ids=_get_kb_document_ids(), history=history)
-            rag_result = await rag_session.ask(question)
-        except Exception as e:
-            _log(f"RAG fallback attempt failed: {e}")
-            rag_result = {"grounded": False}
-
-        if rag_result.get("grounded"):
-            elapsed = time.monotonic() - start
-            _log(f"Pipeline completed in {elapsed:.1f}s -- RAG (CANNOT_ANSWER fallback)")
-            response.answer_text = rag_result["response"]
-            response.suggested_follow_ups = rag_result.get("suggested_follow_ups", [])
-            return response
-
-        _log("RAG also ungrounded -- falling back to DIRECT answer")
-        direct = await _run_direct(question, history, recent_table)
-        elapsed = time.monotonic() - start
-        _log(f"Pipeline completed in {elapsed:.1f}s — DIRECT (CANNOT_ANSWER fallback)")
-        return direct
+        return await _fallback_rag_direct(
+            question=question,
+            history=history,
+            recent_table=recent_table,
+            start=start,
+            fallback_type="CANNOT_ANSWER fallback",
+        )
     except SQLGenerationError as e:
         _log(f"sql generation failed: {e}")
         response.error = "Could not generate a valid query for this question."
@@ -453,14 +474,14 @@ async def run_pipeline(
             response.answer_text = "Unable to determine your station access scope. Please contact an administrator."
             return response
         except StationScopeError:
-            _log(f"Station scope enforcement failed for query (cannot determine CaseMaster alias)")
-            response.error = "station_scope_enforcement_failed"
-            response.answer_text = (
-                "I couldn't safely restrict that query to your station's data, "
-                "so I didn't run it. Try rephrasing, or ask a supervisor if you "
-                "need cross-station data."
+            _log("Station scope enforcement failed for query (cannot determine CaseMaster alias) -- trying RAG before DIRECT fallback")
+            return await _fallback_rag_direct(
+                question=question,
+                history=history,
+                recent_table=recent_table,
+                start=start,
+                fallback_type="StationScopeError fallback",
             )
-            return response
 
     # 3. Execute SQL
     results = None
@@ -497,10 +518,14 @@ async def run_pipeline(
                 if was_scoped:
                     response.sql_generated = corrected_sql
             except StationScopeError:
-                _log(f"Station scope enforcement failed for corrected query")
-                response.error = "station_scope_enforcement_failed"
-                response.answer_text = "I couldn't safely restrict that query to your station's data, so I didn't run it."
-                return response
+                _log("Station scope enforcement failed for corrected query -- trying RAG before DIRECT fallback")
+                return await _fallback_rag_direct(
+                    question=question,
+                    history=history,
+                    recent_table=recent_table,
+                    start=start,
+                    fallback_type="StationScopeError corrected fallback",
+                )
 
         try:
             results = await execute_query(corrected_sql)

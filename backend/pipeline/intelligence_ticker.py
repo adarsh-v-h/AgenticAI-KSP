@@ -64,18 +64,18 @@ async def build_intelligence_cache() -> None:
     try:
         station_rows = await execute_query(
             """
-            SELECT cm.UnitID, cm.CrimeNo, cs.CrimeHeadName, cm.DateOfRegistration,
+            SELECT cm.PoliceStationID AS UnitID, cm.CrimeNo, cs.CrimeHeadName, cm.CrimeRegisteredDate AS DateOfRegistration,
                    LEFT(cm.BriefFacts, 160) AS BriefFacts,
                    u.UnitName
             FROM CaseMaster cm
-            JOIN CrimeSubHead cs ON cm.CrimeSubHeadID = cs.CrimeSubHeadID
-            JOIN Unit u ON u.UnitID = cm.UnitID
+            JOIN CrimeSubHead cs ON cm.CrimeMinorHeadID = cs.CrimeSubHeadID
+            JOIN Unit u ON u.UnitID = cm.PoliceStationID
             WHERE cm.CaseMasterID IN (
                 SELECT MAX(cm2.CaseMasterID)
                 FROM CaseMaster cm2
-                GROUP BY cm2.UnitID
+                GROUP BY cm2.PoliceStationID
             )
-            ORDER BY cm.UnitID
+            ORDER BY cm.PoliceStationID
             """
         )
     except Exception as e:
@@ -118,10 +118,10 @@ async def build_intelligence_cache() -> None:
             # Open case count across sub-stations
             count_rows = await execute_query(
                 f"""
-                SELECT COUNT(*) AS open_count, COUNT(DISTINCT cm.UnitID) AS station_count
+                SELECT COUNT(*) AS open_count, COUNT(DISTINCT cm.PoliceStationID) AS station_count
                 FROM CaseMaster cm
                 JOIN CaseStatusMaster csm ON cm.CaseStatusID = csm.CaseStatusID
-                WHERE cm.UnitID IN ({placeholders})
+                WHERE cm.PoliceStationID IN ({placeholders})
                   AND csm.CaseStatusName IN ('Open', 'Under Investigation')
                 """,
                 tuple(descendant_ids),
@@ -132,12 +132,12 @@ async def build_intelligence_cache() -> None:
             # Most recent case across sub-stations
             recent_rows = await execute_query(
                 f"""
-                SELECT cm.CrimeNo, cs.CrimeHeadName, u.UnitName, cm.DateOfRegistration
+                SELECT cm.CrimeNo, cs.CrimeHeadName, u.UnitName, cm.CrimeRegisteredDate AS DateOfRegistration
                 FROM CaseMaster cm
-                JOIN CrimeSubHead cs ON cm.CrimeSubHeadID = cs.CrimeSubHeadID
-                JOIN Unit u ON u.UnitID = cm.UnitID
-                WHERE cm.UnitID IN ({placeholders})
-                ORDER BY cm.DateOfRegistration DESC, cm.CaseMasterID DESC
+                JOIN CrimeSubHead cs ON cm.CrimeMinorHeadID = cs.CrimeSubHeadID
+                JOIN Unit u ON u.UnitID = cm.PoliceStationID
+                WHERE cm.PoliceStationID IN ({placeholders})
+                ORDER BY cm.CrimeRegisteredDate DESC, cm.CaseMasterID DESC
                 LIMIT 1
                 """,
                 tuple(descendant_ids),
@@ -170,7 +170,7 @@ async def build_intelligence_cache() -> None:
         policy_rows = await execute_query(
             """
             SELECT COUNT(*) AS total_cases FROM CaseMaster
-            WHERE DateOfRegistration >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            WHERE CrimeRegisteredDate >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             """
         )
         total_cases = policy_rows[0]["total_cases"] if policy_rows else 0
@@ -179,8 +179,8 @@ async def build_intelligence_cache() -> None:
             """
             SELECT cs.CrimeHeadName, COUNT(*) AS cnt
             FROM CaseMaster cm
-            JOIN CrimeSubHead cs ON cm.CrimeSubHeadID = cs.CrimeSubHeadID
-            WHERE cm.DateOfRegistration >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            JOIN CrimeSubHead cs ON cm.CrimeMinorHeadID = cs.CrimeSubHeadID
+            WHERE cm.CrimeRegisteredDate >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             GROUP BY cs.CrimeHeadName
             ORDER BY cnt DESC LIMIT 1
             """
@@ -192,8 +192,8 @@ async def build_intelligence_cache() -> None:
             """
             SELECT u.UnitName, COUNT(*) AS cnt
             FROM CaseMaster cm
-            JOIN Unit u ON cm.UnitID = u.UnitID
-            WHERE cm.DateOfRegistration >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            JOIN Unit u ON cm.PoliceStationID = u.UnitID
+            WHERE cm.CrimeRegisteredDate >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             GROUP BY u.UnitID, u.UnitName
             ORDER BY cnt DESC LIMIT 1
             """
