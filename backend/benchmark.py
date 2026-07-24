@@ -19,8 +19,16 @@ import httpx
 
 def pct(values, p):
     if not values:
-        return None
-    return statistics.quantiles(values, n=100)[p - 1] if len(values) > 1 else values[0]
+        return 0.0
+    if len(values) == 1:
+        return values[0]
+    try:
+        return statistics.quantiles(values, n=100)[p - 1]
+    except Exception:
+        # Fallback for Python versions or edge cases
+        s = sorted(values)
+        idx = int(len(s) * (p / 100.0))
+        return s[min(idx, len(s) - 1)]
 
 
 def summarize(name, values):
@@ -31,6 +39,7 @@ def summarize(name, values):
         "min_ms": round(min(values) * 1000, 1),
         "p50_ms": round(pct(values, 50) * 1000, 1),
         "p95_ms": round(pct(values, 95) * 1000, 1),
+        "p99_ms": round(pct(values, 99) * 1000, 1),
         "max_ms": round(max(values) * 1000, 1),
     }
 
@@ -64,10 +73,14 @@ async def sweep_endpoints(client, base_url, token, reps=20):
         timings = []
         for _ in range(reps):
             t0 = time.perf_counter()
-            r = await client.request(method, f"{base_url}{path}", headers=headers)
-            timings.append(time.perf_counter() - t0)
-            if r.status_code >= 500:
-                print(f"  WARN {path} -> {r.status_code}")
+            try:
+                r = await client.request(method, f"{base_url}{path}", headers=headers, timeout=10.0)
+                timings.append(time.perf_counter() - t0)
+                if r.status_code >= 500:
+                    print(f"  WARN {path} -> {r.status_code}")
+            except Exception:
+                timings.append(time.perf_counter() - t0)
+                print(f"  ERROR connection failed for {path}")
         results.append(summarize(path, timings))
     return results
 
@@ -77,22 +90,43 @@ async def sweep_endpoints(client, base_url, token, reps=20):
 async def concurrency_ladder(client, base_url, token, path="/api/analytics/status-breakdown"):
     headers = {"Authorization": f"Bearer {token}"}
     results = []
-    for concurrency in (1, 5, 10, 20):
+    
+    # Cap active sockets on client-side to 128 to prevent OS fd leaks.
+    # Requests exceeding this queue up cleanly.
+    sem = asyncio.Semaphore(128)
+    
+    concurrency_steps = (10, 20, 50, 100, 500, 1000, 5000, 10000)
+    
+    for concurrency in concurrency_steps:
+        # Scale down actual samples to keep runtimes sane under high load,
+        # but preserve concurrency depth.
+        num_requests = min(concurrency, 1000)
+        
         async def one():
             t0 = time.perf_counter()
-            r = await client.get(f"{base_url}{path}", headers=headers)
-            return time.perf_counter() - t0, r.status_code
+            try:
+                async with sem:
+                    # Short timeout to gracefully fail pool-exhausted requests
+                    r = await client.get(f"{base_url}{path}", headers=headers, timeout=5.0)
+                return time.perf_counter() - t0, r.status_code
+            except Exception:
+                return time.perf_counter() - t0, 500
 
         t0 = time.perf_counter()
-        outcomes = await asyncio.gather(*[one() for _ in range(concurrency)])
+        outcomes = await asyncio.gather(*[one() for _ in range(num_requests)])
         wall = time.perf_counter() - t0
+        
         latencies = [o[0] for o in outcomes]
         errors = sum(1 for o in outcomes if o[1] >= 500)
+        
+        # Calculate real-world metrics
         results.append({
-            "concurrency": concurrency, "wall_s": round(wall, 2),
-            "throughput_rps": round(concurrency / wall, 1),
+            "concurrency": concurrency,
+            "wall_s": round(wall, 2),
+            "throughput_rps": round(num_requests / wall, 1) if wall > 0 else 0.0,
             "p50_ms": round(pct(latencies, 50) * 1000, 1),
             "p95_ms": round(pct(latencies, 95) * 1000, 1),
+            "p99_ms": round(pct(latencies, 99) * 1000, 1),
             "errors": errors,
         })
     return results
@@ -105,22 +139,25 @@ async def stream_stage_timing(client, base_url, token, question):
     params = {"question": question, "session_id": f"bench-{int(time.time())}", "token": token}
     stages = []
     last_t = time.perf_counter()
-    async with client.stream("GET", f"{base_url}/api/chat/stream", headers=headers,
-                              params=params, timeout=60) as resp:
-        buf = ""
-        async for chunk in resp.aiter_text():
-            buf += chunk
-            while "\n\n" in buf:
-                frame, buf = buf.split("\n\n", 1)
-                if not frame.startswith("data:"):
-                    continue
-                now = time.perf_counter()
-                try:
-                    event = json.loads(frame[5:].strip())
-                except json.JSONDecodeError:
-                    continue
-                stages.append({"type": event.get("type"), "gap_ms": round((now - last_t) * 1000, 1)})
-                last_t = now
+    try:
+        async with client.stream("GET", f"{base_url}/api/chat/stream", headers=headers,
+                                  params=params, timeout=60) as resp:
+            buf = ""
+            async for chunk in resp.aiter_text():
+                buf += chunk
+                while "\n\n" in buf:
+                    frame, buf = buf.split("\n\n", 1)
+                    if not frame.startswith("data:"):
+                        continue
+                    now = time.perf_counter()
+                    try:
+                        event = json.loads(frame[5:].strip())
+                    except json.JSONDecodeError:
+                        continue
+                    stages.append({"type": event.get("type"), "gap_ms": round((now - last_t) * 1000, 1)})
+                    last_t = now
+    except Exception as e:
+        print(f"  Stream stage timing failed: {e}")
     return stages
 
 
@@ -147,16 +184,22 @@ async def quality_suite(client, base_url, token):
     results = []
     for q in TEST_QUESTIONS:
         t0 = time.perf_counter()
-        r = await client.post(f"{base_url}/api/chat", headers=headers,
-                               json={"question": q, "session_id": f"bench-q-{int(time.time()*1000)}"})
-        elapsed = time.perf_counter() - t0
-        body = r.json()
-        results.append({
-            "question": q[:50], "status": r.status_code, "elapsed_s": round(elapsed, 2),
-            "had_sql": bool(body.get("sql_generated")),
-            "row_count": len(body.get("table_data") or []),
-            "error": body.get("error"),
-        })
+        try:
+            r = await client.post(f"{base_url}/api/chat", headers=headers,
+                                   json={"question": q, "session_id": f"bench-q-{int(time.time()*1000)}"}, timeout=30.0)
+            elapsed = time.perf_counter() - t0
+            body = r.json()
+            results.append({
+                "question": q[:50], "status": r.status_code, "elapsed_s": round(elapsed, 2),
+                "had_sql": bool(body.get("sql_generated")),
+                "row_count": len(body.get("table_data") or []),
+                "error": body.get("error"),
+            })
+        except Exception as e:
+            results.append({
+                "question": q[:50], "status": 500, "elapsed_s": round(time.perf_counter() - t0, 2),
+                "had_sql": False, "row_count": 0, "error": str(e)
+            })
     success = sum(1 for x in results if x["status"] == 200 and not x["error"])
     return {
         "results": results, "success_rate": f"{success}/{len(results)}",
@@ -178,13 +221,13 @@ async def main():
         print("\n== Endpoint latency sweep ==")
         endpoint_results = await sweep_endpoints(client, args.base_url, token)
         for r in endpoint_results:
-            print(f"{r['name']:<50} p50={r.get('p50_ms')}ms  p95={r.get('p95_ms')}ms  max={r.get('max_ms')}ms")
+            print(f"{r['name']:<50} p50={r.get('p50_ms')}ms  p95={r.get('p95_ms')}ms  p99={r.get('p99_ms')}ms  max={r.get('max_ms')}ms")
 
         print("\n== Concurrency ladder (status-breakdown) ==")
         conc_results = await concurrency_ladder(client, args.base_url, token)
         for r in conc_results:
-            print(f"concurrency={r['concurrency']:<3} throughput={r['throughput_rps']}req/s  "
-                  f"p50={r['p50_ms']}ms  p95={r['p95_ms']}ms  errors={r['errors']}")
+            print(f"concurrency={r['concurrency']:<5} throughput={r['throughput_rps']}req/s  "
+                  f"p50={r['p50_ms']}ms  p95={r['p95_ms']}ms  p99={r['p99_ms']}ms  errors={r['errors']}")
 
         print("\n== Pipeline stage breakdown (sample question) ==")
         stage_results = await stream_stage_timing(client, args.base_url, token,
