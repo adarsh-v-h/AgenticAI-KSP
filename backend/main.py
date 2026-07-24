@@ -55,6 +55,13 @@ async def lifespan(app: FastAPI):
 
     # 2. Create DB connection pool
     await create_pool()
+    try:
+        from db.connection import execute_query
+        await execute_query("SELECT 1")
+        app.state.db_ok = True
+    except Exception as e:
+        print(f"WARNING: Initial DB ping failed: {e}", file=sys.stderr)
+        app.state.db_ok = False
 
     # 2b. Start standalone gRPC servers for LLM and SQL services
     try:
@@ -438,8 +445,14 @@ async def health_check():
     Never return 500 from health check.
     Run LLM pings in parallel using asyncio.gather.
     """
-    # 1. Check DB connectivity
-    db_ok = getattr(app.state, "db_ok", False)
+    # 1. Check DB connectivity via live probe
+    try:
+        from db.connection import execute_query
+        await execute_query("SELECT 1")
+        db_ok = True
+        app.state.db_ok = True
+    except Exception:
+        db_ok = getattr(app.state, "db_ok", False)
 
     # 2. Run LLM pings in parallel
     coder_ok, answer_ok = await asyncio.gather(
