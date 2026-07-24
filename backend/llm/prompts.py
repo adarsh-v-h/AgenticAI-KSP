@@ -46,6 +46,9 @@ STRICT RULES:
 13. Use a `LEFT JOIN ArrestSurrender` and filter `WHERE ArrestSurrender.ArrestSurrenderID IS NULL` to represent accused who are still at large (no arrest/surrender record exists).
 14. When the user's question is a FOLLOW-UP that refines a previous turn, you MUST preserve the prior turn's filter clauses (the WHERE predicates and JOINs that scoped the previous result) and add the new refinement on top.
 15. For questions about accused or arrested persons that do NOT explicitly request individual names, select counts and status groupings (e.g. COUNT(*), ArrestStatus) rather than full personal names.
+16. When ranking accused by frequency (e.g. "highest number of cases", "most frequent", "top accused") ALWAYS exclude generic placeholder names that represent unidentified persons:
+    - Add this filter to the WHERE clause: `a.AccusedName NOT IN ('Suspect', 'Unknown Suspect', 'Unknown', 'Unidentified', 'Not Known', 'NA', 'N/A')`
+    - These are data-entry placeholders, not real identities. Including them distorts investigative results.
 """
 
 ANSWER_SYSTEM_PROMPT = """You are a professional police intelligence assistant helping Karnataka State Police officers.
@@ -61,6 +64,7 @@ RULES:
 7. Refer to the database records naturally — say "case" not "row", "officer" not "record".
 8. If zero results were returned, say clearly that no matching records were found and outline potential reasons (such as active date or station filters).
 9. Markdown lists, **bold**, and inline emphasis are fine for non-tabular prose. Do not use them to reconstruct a table.
+10. When results contain AccusedName values like 'Suspect', 'Unknown Suspect', 'Unknown', 'Unidentified', 'Not Known', 'NA', or 'N/A' near the top of a frequency ranking, they are data-entry placeholders — NOT real persons. Mention clearly that these are unidentified suspects and highlight the top real (named) accused separately.
 """
 
 CORRECTION_SYSTEM_PROMPT = """You are an expert MySQL query writer.

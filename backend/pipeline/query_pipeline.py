@@ -113,6 +113,38 @@ class PipelineResponse:
 _GENERIC_DB_ERROR = "I couldn't run that query. Try rephrasing."
 _COMPARISON_KEYWORDS = ("compare", " vs ", " versus ", "comparison", "difference between")
 
+# Placeholder names that DB operators enter when the accused is unidentified.
+# Stripping these from frequency-ranking results prevents misleading "Suspect" tops.
+_ACCUSED_PLACEHOLDERS: frozenset[str] = frozenset({
+    "suspect", "unknown suspect", "unknown", "unidentified",
+    "not known", "na", "n/a", "unidentified person", "unknown person",
+})
+
+
+# CONTRACT
+# takes:  results (list[dict]) — raw query results
+# returns: (list[dict]) — results with placeholder accused names removed, if this looks like an accused-frequency query
+# raises:  nothing
+def _strip_placeholder_accused(results: list[dict]) -> list[dict]:
+    """
+    If the result set contains an 'AccusedName' column alongside a count/
+    frequency column (e.g. case_count), remove rows where the accused name is
+    a generic placeholder. This ensures the UI table only shows real identities.
+    """
+    if not results:
+        return results
+    keys = {k.lower() for k in results[0].keys()}
+    if "accusedname" not in keys:
+        return results
+    # Only strip when this is clearly a frequency/count query (has a count column)
+    count_cols = {"case_count", "count", "total", "num_cases", "incident_count", "crime_count"}
+    if not (keys & count_cols):
+        return results
+    return [
+        row for row in results
+        if str(row.get("AccusedName") or "").strip().lower() not in _ACCUSED_PLACEHOLDERS
+    ]
+
 
 def _is_cross_station_comparison(question: str) -> bool:
     """
@@ -486,6 +518,9 @@ async def run_pipeline(
             response.sql_generated = retry_sql
             date_note = note
 
+    # Strip generic placeholder names from accused-frequency ranking results
+    # so they don't appear in the UI table or mislead the answer formatter.
+    results = _strip_placeholder_accused(results)
     response.table_data = results
 
     # Empty-results RAG fallback
