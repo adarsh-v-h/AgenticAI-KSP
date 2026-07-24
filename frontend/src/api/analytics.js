@@ -18,10 +18,35 @@ function authHeaders() {
 // returns: (Promise<object>) — parsed JSON response from the analytics endpoint
 // raises:  AuthError — when session has expired (401), Error — when request fails
 async function get(path) {
+  const cacheKey = `ksp_analytics_cache_${path}`
+  if (typeof window !== 'undefined') {
+    const cached = localStorage.getItem(cacheKey)
+    if (cached) {
+      try {
+        const { data, timestamp } = JSON.parse(cached)
+        // 5-minute cache TTL
+        if (Date.now() - timestamp < 5 * 60 * 1000) {
+          return data
+        }
+      } catch (e) {
+        // ignore parsing/stale cache errors
+      }
+    }
+  }
+
   const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
   if (res.status === 401) throw new AuthError('Session expired')
   if (!res.ok) throw new Error(`Analytics request failed: ${res.status}`)
-  return res.json()
+  
+  const data = await res.json()
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }))
+    } catch (e) {
+      // ignore storage quota full exceptions
+    }
+  }
+  return data
 }
 
 // Note: Response keys match existing backend API

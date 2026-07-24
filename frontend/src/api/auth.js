@@ -63,6 +63,13 @@ export function clearToken() {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('ksp_auth_token')
     localStorage.removeItem('ksp_officer_profile')
+    // Clear cached analytics data on logout
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('ksp_analytics_cache_')) {
+        localStorage.removeItem(key)
+      }
+    }
   }
 }
 
