@@ -72,20 +72,33 @@ async def get_scoped_unit_ids(officer: dict) -> list[int] | None:
 async def officer_can_access_case(officer: dict, case_master_id: int) -> bool:
     """
     Check whether the officer is permitted to access a specific case by its
-    CaseMasterID. Uses get_scoped_unit_ids() to determine allowed stations.
+    CaseMasterID.
+
+    An officer may access a case if EITHER:
+      1. The case's PoliceStationID is within the officer's scoped stations
+         (their home station for investigators; home + descendants for supervisors).
+      2. The case is directly assigned to this officer as the investigating officer
+         (CaseMaster.PolicePersonID = officer's EmployeeID). An officer assigned
+         to a case always has a legitimate need to view that case's details, even
+         if it was registered at a different station (cross-station assignments).
     """
     scoped_ids = await get_scoped_unit_ids(officer)
     if scoped_ids is None:
         return True  # unrestricted role
     if not scoped_ids:
         return False  # officer has no assigned station
+
+    officer_id = officer.get("officer_id")
+
     try:
         placeholders = ",".join(str(int(i)) for i in scoped_ids)
         rows = await execute_query(
-            "SELECT 1 FROM CaseMaster WHERE CaseMasterID = %s AND PoliceStationID IN ({})".format(
+            """SELECT 1 FROM CaseMaster
+               WHERE CaseMasterID = %s
+                 AND (PoliceStationID IN ({}) OR PolicePersonID = %s)""".format(
                 placeholders
             ),
-            (case_master_id,)
+            (case_master_id, officer_id)
         )
         return len(rows) > 0
     except Exception:
