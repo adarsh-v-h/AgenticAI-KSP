@@ -15,7 +15,7 @@ if _BACKEND_DIR not in sys.path:
 
 from db.schema_catalog import SCHEMA_CATALOG  # noqa: E402
 
-_MAX_TABLES = 5
+_MAX_TABLES = 6
 
 _FUZZY_ASSUMPTIONS = [
     ("vehicle", "Assuming 'vehicle' refers to CrimeSubHead 'Vehicle Theft'"),

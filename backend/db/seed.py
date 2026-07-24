@@ -252,7 +252,7 @@ async def seed_employees(conn, lookups):
     officers_data = [
         {"name": "Manjunath Patil", "rank": "Inspector", "badge": "3254123", "role": "supervisor", "desg": "SHO"},
         {"name": "Venkatesh Gowda", "rank": "PI", "badge": "4167892", "role": "supervisor", "desg": "Circle Inspector"},
-        {"name": "Ramesh Naik", "rank": "SI", "badge": "5823641", "role": "investigator", "desg": "Investigating Officer"},
+        {"name": "Ramesh Naik", "rank":"SI", "badge": "5823641", "role": "investigator", "desg": "Investigating Officer"},
         {"name": "Sandeep Hegde", "rank": "SI", "badge": "6741028", "role": "investigator", "desg": "Investigating Officer"},
         {"name": "Harish Kumar", "rank": "ASI", "badge": "7295834", "role": "investigator", "desg": "Investigating Officer"},
         {"name": "Vijay Raghavendra", "rank": "ASI", "badge": "8412567", "role": "investigator", "desg": "Investigating Officer"},

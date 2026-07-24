@@ -319,14 +319,12 @@ def get_schema_for_tables(table_names: list[str]) -> str:
             return out
 
     # Last resort: hard-truncate.
-    return out[:_MAX_SCHEMA_CHARS]
-
-
-# Few-shot bank â€” (relevant_tables_set, question, sql) tuples.
-# `relevant_tables` lists which tables in the question's selected set make this
-# example useful. We always score against the user's table set.
+    re# Few-shot bank — (relevant_tables_set, question, sql) tuples with optional for_role tag.
+# `relevant_tables` lists which tables in the question's selected set make this example useful.
+# `for_role` specifies "supervisor", "other", or "all" (default).
 _FEW_SHOT_BANK: list[dict] = [
     {
+        "for_role": "all",
         "tables": {"CaseMaster"},
         "q": "How many cases are open?",
         "sql": (
@@ -337,6 +335,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster"},
         "q": "Show me the last 5 cases registered.",
         "sql": (
@@ -347,6 +346,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster"},
         "q": "How many cases were registered in 2024?",
         "sql": (
@@ -356,6 +356,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "CrimeSubHead"},
         "q": "How many theft cases are still open?",
         "sql": (
@@ -367,6 +368,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "CrimeSubHead"},
         "q": "List theft cases.",
         "sql": (
@@ -379,6 +381,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "Accused"},
         "q": "Show me all cases involving Mahesh Gowda.",
         "sql": (
@@ -391,6 +394,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"Accused"},
         "q": "Who are the top 5 accused with the most cases?",
         "sql": (
@@ -403,6 +407,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "Accused", "ArrestSurrender"},
         "q": "Which accused are still at large?",
         "sql": (
@@ -415,6 +420,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "ActSectionAssociation", "Section"},
         "q": "What sections were charged in case CrimeNo FIR/2024/KOR/0042?",
         "sql": (
@@ -426,12 +432,13 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "Employee", "`Rank`"},
         "q": "Which officer is investigating the most cases?",
         "sql": (
             "SELECT e.FirstName, r.RankName, COUNT(cm.CaseMasterID) AS case_count\n"
             "FROM Employee AS e\n"
-            "LEFT JOIN `Rank` AS r ON e.RankID = r.RankID\n"
+            "LEFT JOIN `Rank` AS r ON e.RankID = e.RankID\n"
             "JOIN CaseMaster AS cm ON cm.PolicePersonID = e.EmployeeID\n"
             "GROUP BY e.EmployeeID, e.FirstName, r.RankName\n"
             "ORDER BY case_count DESC\n"
@@ -439,6 +446,7 @@ _FEW_SHOT_BANK: list[dict] = [
         ),
     },
     {
+        "for_role": "all",
         "tables": {"CaseMaster", "Employee"},
         "q": "Give me cases handled by Harish Kumar.",
         "sql": (
@@ -450,7 +458,65 @@ _FEW_SHOT_BANK: list[dict] = [
             "LIMIT 50"
         ),
     },
+    # ── SUPERVISOR SPECIFIC EXAMPLES ──────────────────────────────────────────
     {
+        "for_role": "supervisor",
+        "tables": {"Employee", "Unit", "`Rank`", "Designation"},
+        "q": "List all officers in my station or circle under my supervision.",
+        "sql": (
+            "SELECT e.EmployeeID, e.FirstName, r.RankName, d.DesignationName, e.KGID, e.role, u.UnitName\n"
+            "FROM Employee AS e\n"
+            "LEFT JOIN `Rank` AS r ON r.RankID = e.RankID\n"
+            "LEFT JOIN Designation AS d ON d.DesignationID = e.DesignationID\n"
+            "LEFT JOIN Unit AS u ON u.UnitID = e.UnitID\n"
+            "WHERE e.UnitID IN (18, 19, 20, 21, 22, 23, 24) AND e.is_active = TRUE\n"
+            "ORDER BY r.Hierarchy ASC, e.FirstName ASC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "for_role": "supervisor",
+        "tables": {"Employee", "Unit"},
+        "q": "How many officers are assigned to each police station under my supervision?",
+        "sql": (
+            "SELECT u.UnitName AS station_name, COUNT(e.EmployeeID) AS officer_count\n"
+            "FROM Unit AS u\n"
+            "JOIN Employee AS e ON e.UnitID = u.UnitID\n"
+            "WHERE e.UnitID IN (18, 19, 20, 21, 22, 23, 24) AND e.is_active = TRUE\n"
+            "GROUP BY u.UnitID, u.UnitName\n"
+            "ORDER BY officer_count DESC"
+        ),
+    },
+    {
+        "for_role": "supervisor",
+        "tables": {"CaseMaster", "Unit"},
+        "q": "Show me all cases registered across stations under my supervision.",
+        "sql": (
+            "SELECT cm.CaseMasterID, cm.CrimeNo, cm.BriefFacts, u.UnitName, cm.CrimeRegisteredDate\n"
+            "FROM CaseMaster AS cm\n"
+            "LEFT JOIN Unit AS u ON u.UnitID = cm.PoliceStationID\n"
+            "WHERE cm.PoliceStationID IN (18, 19, 20, 21, 22, 23, 24)\n"
+            "ORDER BY cm.CrimeRegisteredDate DESC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "for_role": "supervisor",
+        "tables": {"CaseMaster", "Unit", "CaseStatusMaster"},
+        "q": "Breakdown of open cases by police station in my circle.",
+        "sql": (
+            "SELECT u.UnitName AS station_name, COUNT(cm.CaseMasterID) AS open_cases\n"
+            "FROM CaseMaster AS cm\n"
+            "JOIN Unit AS u ON u.UnitID = cm.PoliceStationID\n"
+            "JOIN CaseStatusMaster AS csm ON csm.CaseStatusID = cm.CaseStatusID\n"
+            "WHERE cm.PoliceStationID IN (18, 19, 20, 21, 22, 23, 24) AND csm.CaseStatusName = 'Open'\n"
+            "GROUP BY u.UnitID, u.UnitName\n"
+            "ORDER BY open_cases DESC"
+        ),
+    },
+    # ── NON-SUPERVISOR SPECIFIC EXAMPLES ─────────────────────────────────────
+    {
+        "for_role": "other",
         "tables": {"Employee", "Unit", "`Rank`", "Designation"},
         "q": "List all officers in my police station.",
         "sql": (
@@ -460,6 +526,18 @@ _FEW_SHOT_BANK: list[dict] = [
             "LEFT JOIN Designation AS d ON d.DesignationID = e.DesignationID\n"
             "WHERE e.UnitID = 1 AND e.is_active = TRUE\n"
             "ORDER BY r.Hierarchy ASC, e.FirstName ASC\n"
+            "LIMIT 50"
+        ),
+    },
+    {
+        "for_role": "other",
+        "tables": {"CaseMaster"},
+        "q": "List cases at my station.",
+        "sql": (
+            "SELECT cm.CaseMasterID, cm.CrimeNo, cm.BriefFacts, cm.CrimeRegisteredDate\n"
+            "FROM CaseMaster AS cm\n"
+            "WHERE cm.PoliceStationID = 1\n"
+            "ORDER BY cm.CrimeRegisteredDate DESC\n"
             "LIMIT 50"
         ),
     },
@@ -484,33 +562,45 @@ def _question_similarity(q1: str, q2: str) -> float:
 
 # CONTRACT
 # takes:  table_names (list[str]) — selected table names to score examples against,
-#          question (str) — the user’s natural-language question (default "")
-# returns: (str) — formatted string with up to 3 relevant NL->SQL example pairs
+#          question (str) — the user’s natural-language question (default ""),
+#          officer_role (str | None) — authenticated officer's role (e.g. 'supervisor', 'investigator')
+# returns: (str) — formatted string with up to 4 relevant NL->SQL example pairs
 # raises:  nothing
-def get_few_shot_examples(table_names: list[str], question: str = "") -> str:
+def get_few_shot_examples(
+    table_names: list[str],
+    question: str = "",
+    officer_role: str | None = None,
+) -> str:
     """
-    Return exactly 3 example NL->SQL pairs relevant to the selected tables
-    and the user's question.
+    Return up to 4 example NL->SQL pairs relevant to the selected tables,
+    the user's question, and the officer's role ('supervisor' vs other).
 
-    Scoring: combines table overlap (40%) with question similarity (60%).
-    Ties broken by example order in the bank (stable).
+    Scoring: combines table overlap (30%), question similarity (50%), and role match (20%).
     """
     selected = set(table_names) | {"CaseMaster"}
+    is_supervisor = (officer_role or "").lower() == "supervisor"
 
     scored = []
     for idx, ex in enumerate(_FEW_SHOT_BANK):
+        ex_role = ex.get("for_role", "all")
+        if is_supervisor and ex_role == "other":
+            continue  # Skip non-supervisor single-station examples for supervisors
+        elif not is_supervisor and ex_role == "supervisor":
+            continue  # Skip supervisor multi-station examples for non-supervisors
+
         table_score = len(ex["tables"] & selected)
-        # Penalize examples that reference tables NOT selected — those would
-        # confuse the LLM into using tables we didn't include in the schema.
         unknown = ex["tables"] - selected
         if unknown:
             table_score -= len(unknown)
+
         q_score = _question_similarity(question, ex["q"]) if question else 0.0
-        combined = (table_score * 0.4) + (q_score * 5.0 * 0.6)
+        role_boost = 1.0 if ((is_supervisor and ex_role == "supervisor") or (not is_supervisor and ex_role == "other")) else 0.0
+
+        combined = (table_score * 0.3) + (q_score * 5.0 * 0.5) + (role_boost * 2.0 * 0.2)
         scored.append((combined, idx, ex))
 
     scored.sort(key=lambda x: (-x[0], x[1]))
-    chosen = [ex for _score, _idx, ex in scored[:3]]
+    chosen = [ex for _score, _idx, ex in scored[:4]]
 
     blocks = []
     for ex in chosen:

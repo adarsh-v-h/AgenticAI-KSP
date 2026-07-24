@@ -4,11 +4,12 @@ Keep prompts in one place so they're easy to tune in one pass.
 """
 
 import orjson
+from db.lookup_cache import get_descendant_units_mem
 
 BEHAVIOR_RULES = [
     "If asked about 'my cases', 'my station', or any first-person phrasing, filter results by the officer's own EmployeeID or unit.",
     "If a scoped (non-policymaker) officer's question implies scope beyond their own station (e.g. mentions a district, state, 'all stations', 'statewide'), explicitly disclose that the answer is limited to their own station before presenting results -- never present a station-only count as if it were the full answer.",
-    "If asked to list or describe officers, restrict results to the officer's own unit unless the requester is a policymaker.",
+    "If asked to list or describe officers, restrict results to the officer's own unit unless the requester is a policymaker or supervisor.",
     "Policymakers see unrestricted results across all stations and districts, with no scope disclosure needed.",
     "If asked about 'cases I'm handling' or 'my active cases', filter by cases where the officer is listed as the assigned investigator, not just cases at their station -- including cases assigned to them at a different station.",
     "If a scoped officer asks to compare their station against another named station, decline to show the other station's data and explain that cross-station comparisons are only available to policymakers.",
@@ -50,6 +51,9 @@ STRICT RULES:
     - Add this filter to the WHERE clause: `a.AccusedName NOT IN ('Suspect', 'Unknown Suspect', 'Unknown', 'Unidentified', 'Not Known', 'NA', 'N/A')`
     - These are data-entry placeholders, not real identities. Including them distorts investigative results.
 17. When asked to list or get details of officers/personnel at a station (e.g., "details of all officers in my station"), query the `Employee` table directly (`FROM Employee AS e ... WHERE e.UnitID = ...`). Do NOT join or query `CaseMaster` unless the user explicitly asks about cases.
+18. SUPERVISOR vs NON-SUPERVISOR QUERY SCOPING:
+    - If the logged-in officer is a SUPERVISOR: query across ALL subordinate stations using `WHERE e.UnitID IN (...)` or `WHERE cm.PoliceStationID IN (...)`. ALWAYS LEFT JOIN `Unit AS u ON u.UnitID = ...` and select `u.UnitName` in the SELECT columns so the station name is displayed for each officer/case.
+    - If non-supervisor: query only their single assigned UnitID (`WHERE e.UnitID = ...`).
 """
 
 ANSWER_SYSTEM_PROMPT = """You are a professional police intelligence assistant helping Karnataka State Police officers.
@@ -66,6 +70,7 @@ RULES:
 8. If zero results were returned, say clearly that no matching records were found and outline potential reasons (such as active date or station filters).
 9. Markdown lists, **bold**, and inline emphasis are fine for non-tabular prose. Do not use them to reconstruct a table.
 10. When results contain AccusedName values like 'Suspect', 'Unknown Suspect', 'Unknown', 'Unidentified', 'Not Known', 'NA', or 'N/A' near the top of a frequency ranking, they are data-entry placeholders — NOT real persons. Mention clearly that these are unidentified suspects and highlight the top real (named) accused separately.
+11. When the requesting officer is a SUPERVISOR querying staff or cases across their station/circle, open your 1–2 sentence prose summary acknowledging their supervisor role: "As a supervisor overseeing [Station/Circle Name] and its subordinate stations, here are the details of the officers across your station and child units:" (or similar professional supervisor phrasing) before summarizing the totals and key details.
 """
 
 CORRECTION_SYSTEM_PROMPT = """You are an expert MySQL query writer.
@@ -192,15 +197,32 @@ def _format_officer_for_prompt(officer: dict | None) -> str:
     who = f" ({descriptor})" if descriptor else ""
     unit_name = (officer.get("unit_name") or "").strip()
     unit_id = officer.get("unit_id")
+    role = (officer.get("role") or "").strip().lower()
+
+    if role == "supervisor" and unit_id:
+        scoped_ids = get_descendant_units_mem(unit_id) or [unit_id]
+        scoped_str = ", ".join(str(i) for i in scoped_ids)
+        return (
+            "Current officer context:\n"
+            f"The logged-in employee is EmployeeID = {employee_id}{who}.\n"
+            f"Role: SUPERVISOR overseeing '{unit_name}' (UnitID = {unit_id}) and subordinate stations [{scoped_str}].\n"
+            "CRITICAL INSTRUCTIONS FOR SUPERVISOR QUESTIONS:\n"
+            f"- As a SUPERVISOR, when asked for officers, personnel, or staff at 'my station', 'my circle', or 'under my supervision', query the Employee table across ALL supervised stations: `WHERE e.UnitID IN ({scoped_str}) AND e.is_active = TRUE`. ALWAYS LEFT JOIN Unit AS u ON u.UnitID = e.UnitID and include `u.UnitName` in the SELECT columns so the station name is displayed for each officer.\n"
+            f"- When asked for cases at 'my station' or 'in my circle', query CaseMaster across ALL supervised stations: `WHERE cm.PoliceStationID IN ({scoped_str})`. ALWAYS LEFT JOIN Unit AS u ON u.UnitID = cm.PoliceStationID to include `u.UnitName`.\n"
+            f"- When asking about 'cases assigned to me' as an investigator, query CaseMaster: `WHERE CaseMaster.PolicePersonID = {employee_id}`.\n"
+            "If the question names a DIFFERENT person (e.g. \"cases handled by Harish Kumar\"), IGNORE this officer ID and match that person by name instead."
+        )
+
     station_info = ""
     if unit_name:
         station_info = f"The logged-in officer is assigned to '{unit_name}' (UnitID = {unit_id}). "
     elif unit_id:
         station_info = f"The logged-in officer is assigned to UnitID = {unit_id}. "
+
     return (
         "Current officer context:\n"
         f"The logged-in employee is EmployeeID = {employee_id}{who}.\n"
-        f"{station_info}"
+        f"Role: {role.upper() if role else 'OFFICER'} assigned to '{unit_name}' (UnitID = {unit_id}).\n"
         "Instructions for first-person ('my', 'I', 'me') questions:\n"
         f"- When asking about officers, personnel, or colleagues at 'my station' (e.g. 'details of all officers in my station', 'who works at my station'), query the Employee table: `WHERE Employee.UnitID = {unit_id}` (or `e.UnitID = {unit_id}`). Do NOT query CaseMaster unless cases are explicitly requested.\n"
         f"- When asking about 'cases assigned to me' or 'my cases', query CaseMaster: `WHERE CaseMaster.PolicePersonID = {employee_id}`.\n"
