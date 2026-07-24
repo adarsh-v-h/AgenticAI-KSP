@@ -974,7 +974,7 @@ Frontend LoginPage.jsx
           → if password != badge_number + "123": HTTP 401
           → auth/simple_auth.py: create_access_token(officer_id, badge_number)
           → returns {access_token, officer}
-    → api/auth.js: setToken(token, officer)  // stored in module-level variable, NOT localStorage
+    → api/auth.js: setToken(token, officer)  // stored in localStorage to survive page refreshes
   → hooks/useAuth.js: setIsAuthenticated(true)
   → App.jsx renders ChatWindow
 ```
@@ -1387,11 +1387,11 @@ No routing library — just conditional rendering based on auth and navigation s
 
 ### 6.3 `frontend/src/api/auth.js`
 
-**Purpose:** Token management and auth API calls. Token lives in a module-level variable (`_token`) — **never** in localStorage or sessionStorage.
+**Purpose:** Token management and auth API calls. Token and officer profile details are persisted in `localStorage` to survive page refreshes.
 
-**Module-level state:**
-- `_token: string | null` — the JWT
-- `_officer: object | null` — officer info from login response
+**Module-level state / persistence:**
+- `_token: string | null` — the JWT (backed by `ksp_auth_token` in localStorage)
+- `_officer: object | null` — officer info (backed by `ksp_officer_profile` in localStorage)
 
 **Functions:**
 
@@ -2627,7 +2627,7 @@ The following files at the project root are one-time local MySQL migration artif
 
 **4. Frontend Implementation**
 - **Files Created:**
-  - `frontend/src/api/analytics.js` — 7 fetch functions: `fetchMonthlyTrend()`, `fetchCrimeTypeTrend()`, `fetchStationTrend()`, `fetchStationBreakdown()`, `fetchStatusBreakdown()`, `fetchMoClusters()`, `fetchSeasonalPattern()`. Reuses existing `getToken()` from `auth.js` and `AuthError` from `chat.js` (no duplication).
+  - `frontend/src/api/analytics.js` — fetch functions for trends, demographics, and forecasting. Reuses existing `getToken()` from `auth.js` and `AuthError` from `chat.js`. To optimize performance and reduce database load, responses are cached in `localStorage` with a 5-minute TTL (`ksp_analytics_cache_${path}`). All cached analytics keys are automatically purged upon logout (`clearToken`) to prevent security/state leaks.
   - `frontend/src/components/TrendChart.jsx` — Dependency-free SVG chart component (640×240 viewBox) supporting bar and line modes, with optional click handlers for drill-down, empty-state handling, and custom axis formatters. Includes `wrapLabel()` for horizontal 2-line word-wrapped labels on bar charts with ≥8 categories (replacing earlier −45° rotation), `formatLabel()` for abbreviating YYYY-MM dates to "Mon 'YY" format, and tick-skipping for line charts with >8 points (every 2nd label hidden, all data dots retained). Accepts `height` and `padding` props for per-chart layout overrides.
   - `frontend/src/components/AnalyticsDashboard.jsx` — 6-panel grid dashboard with lazy data fetching, per-panel error isolation via `Promise.allSettled()`, and a drill-down modal for station crime-type breakdown. Passes explicit `height` and `padding` props to each `TrendChart` instance.
   - `IconAnalytics` added to `frontend/src/components/Icons.jsx` (bar-chart icon, matching existing icon conventions).
