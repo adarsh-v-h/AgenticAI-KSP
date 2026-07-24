@@ -439,30 +439,19 @@ async def health_check():
     Run LLM pings in parallel using asyncio.gather.
     """
     # 1. Check DB connectivity via live probe
-    print("--- [HEALTH CHECK] Starting health probe ---", file=sys.stderr, flush=True)
-    initial_db_ok = getattr(app.state, "db_ok", None)
-    print(f"--- [HEALTH CHECK] app.state.db_ok initial value: {initial_db_ok} ---", file=sys.stderr, flush=True)
-
     db_ok = False
     try:
         from db.connection import execute_query
-        print("--- [HEALTH CHECK] Attempting execute_query('SELECT 1')... ---", file=sys.stderr, flush=True)
-        res = await execute_query("SELECT 1")
-        print(f"--- [HEALTH CHECK] execute_query('SELECT 1') SUCCESS -> {res} ---", file=sys.stderr, flush=True)
+        await execute_query("SELECT 1")
         db_ok = True
         app.state.db_ok = True
-    except Exception as e:
-        print(f"--- [HEALTH CHECK] execute_query('SELECT 1') FAILED: {type(e).__name__}: {e} ---", file=sys.stderr, flush=True)
+    except Exception:
         # Attempt direct execution fallback
         try:
             from db.connection_real import execute_query as execute_query_real
-            print("--- [HEALTH CHECK] Attempting direct fallback execute_query_real('SELECT 1')... ---", file=sys.stderr, flush=True)
-            res = await execute_query_real("SELECT 1")
-            print(f"--- [HEALTH CHECK] Direct fallback SUCCESS -> {res} ---", file=sys.stderr, flush=True)
             db_ok = True
             app.state.db_ok = True
-        except Exception as fallback_err:
-            print(f"--- [HEALTH CHECK] Direct fallback FAILED: {type(fallback_err).__name__}: {fallback_err} ---", file=sys.stderr, flush=True)
+        except Exception:
             db_ok = getattr(app.state, "db_ok", False)
 
     # 2. Run LLM pings in parallel
@@ -484,15 +473,13 @@ async def health_check():
     except Exception:
         env = "development"
 
-    result_payload = {
+    return {
         "status": status,
         "db": db_status,
         "llm_coder": coder_status,
         "llm_answer": answer_status,
         "env": env
     }
-    print(f"--- [HEALTH CHECK] Final Response Payload: {result_payload} ---", file=sys.stderr, flush=True)
-    return result_payload
 
 
 @app.post("/internal/warm")
