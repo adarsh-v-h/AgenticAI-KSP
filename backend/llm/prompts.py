@@ -49,6 +49,7 @@ STRICT RULES:
 16. When ranking accused by frequency (e.g. "highest number of cases", "most frequent", "top accused") ALWAYS exclude generic placeholder names that represent unidentified persons:
     - Add this filter to the WHERE clause: `a.AccusedName NOT IN ('Suspect', 'Unknown Suspect', 'Unknown', 'Unidentified', 'Not Known', 'NA', 'N/A')`
     - These are data-entry placeholders, not real identities. Including them distorts investigative results.
+17. When asked to list or get details of officers/personnel at a station (e.g., "details of all officers in my station"), query the `Employee` table directly (`FROM Employee AS e ... WHERE e.UnitID = ...`). Do NOT join or query `CaseMaster` unless the user explicitly asks about cases.
 """
 
 ANSWER_SYSTEM_PROMPT = """You are a professional police intelligence assistant helping Karnataka State Police officers.
@@ -200,16 +201,11 @@ def _format_officer_for_prompt(officer: dict | None) -> str:
         "Current officer context:\n"
         f"The logged-in employee is EmployeeID = {employee_id}{who}.\n"
         f"{station_info}"
-        "ONLY use this id when the question refers to the logged-in officer/employee in "
-        "the FIRST PERSON (\"I\", \"me\", \"my\", \"cases I am handling\", "
-        "\"assigned to me\"): filter on "
-        f"CaseMaster.PolicePersonID = {employee_id} and never emit a "
-        "placeholder like <current_employee_id>.\n"
-        "When the question refers to cases related to this officer's station, use "
-        "CaseMaster.PoliceStationID to filter by their assigned UnitID. "
-        "If the question names a DIFFERENT person (e.g. \"cases handled by "
-        "Harish Kumar\"), IGNORE this id and match that person by name instead "
-        "(join Employee and filter e.FirstName LIKE '%name%')."
+        "Instructions for first-person ('my', 'I', 'me') questions:\n"
+        f"- When asking about officers, personnel, or colleagues at 'my station' (e.g. 'details of all officers in my station', 'who works at my station'), query the Employee table: `WHERE Employee.UnitID = {unit_id}` (or `e.UnitID = {unit_id}`). Do NOT query CaseMaster unless cases are explicitly requested.\n"
+        f"- When asking about 'cases assigned to me' or 'my cases', query CaseMaster: `WHERE CaseMaster.PolicePersonID = {employee_id}`.\n"
+        f"- When asking about 'cases at my station', query CaseMaster: `WHERE CaseMaster.PoliceStationID = {unit_id}`.\n"
+        "If the question names a DIFFERENT person (e.g. \"cases handled by Harish Kumar\"), IGNORE this officer ID and match that person by name instead (e.g. `WHERE e.FirstName LIKE '%Harish Kumar%'`)."
     )
 
 
