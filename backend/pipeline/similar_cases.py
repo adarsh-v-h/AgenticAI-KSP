@@ -12,7 +12,25 @@ Similarity signals:
   - Filed within 90 days: +15
   - Shares an accused (name match across cases): +20
 """
+from datetime import date, datetime
 from db.connection import execute_query
+
+def parse_date(val) -> date | None:
+    if not val:
+        return None
+    if isinstance(val, (date, datetime)):
+        return val.date() if isinstance(val, datetime) else val
+    if isinstance(val, str):
+        try:
+            if "T" in val:
+                val = val.split("T")[0]
+            elif " " in val:
+                val = val.split(" ")[0]
+            return date.fromisoformat(val)
+        except Exception:
+            return None
+    return None
+
 
 
 # CONTRACT
@@ -72,8 +90,10 @@ async def find_similar_cases(case_master_id: int, limit: int = 5) -> list[dict]:
             score += 25
             reasons.append("Same police station")
 
-        if source.get("CrimeRegisteredDate") and c.get("CrimeRegisteredDate"):
-            delta = abs((c["CrimeRegisteredDate"] - source["CrimeRegisteredDate"]).days)
+        src_date = parse_date(source.get("CrimeRegisteredDate"))
+        cand_date = parse_date(c.get("CrimeRegisteredDate"))
+        if src_date and cand_date:
+            delta = abs((cand_date - src_date).days)
             if delta <= 90:
                 score += 15
                 reasons.append("Filed within 90 days")

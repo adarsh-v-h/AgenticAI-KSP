@@ -17,8 +17,25 @@ official KSP schema -- both are derived live:
 """
 import asyncio
 import orjson
-from datetime import date
+from datetime import date, datetime
 from db.connection import execute_query, execute_write
+
+def parse_date(val) -> date | None:
+    if not val:
+        return None
+    if isinstance(val, (date, datetime)):
+        return val.date() if isinstance(val, datetime) else val
+    if isinstance(val, str):
+        try:
+            if "T" in val:
+                val = val.split("T")[0]
+            elif " " in val:
+                val = val.split(" ")[0]
+            return date.fromisoformat(val)
+        except Exception:
+            return None
+    return None
+
 
 WEIGHTS = {
     "prior_case_count": 30,
@@ -62,8 +79,12 @@ async def compute_risk_for_accused(accused_id: int) -> dict:
         stations = {r["UnitName"] for r in case_rows if r["UnitName"]}
         geo_spread = len(stations)
 
-        dates = [r["CrimeRegisteredDate"] for r in case_rows if r["CrimeRegisteredDate"]]
-        most_recent = max(dates) if dates else None
+        parsed_dates = []
+        for r in case_rows:
+            d = parse_date(r.get("CrimeRegisteredDate"))
+            if d:
+                parsed_dates.append(d)
+        most_recent = max(parsed_dates) if parsed_dates else None
         days_since = (date.today() - most_recent).days if most_recent else 9999
 
         case_ids = [r["CaseMasterID"] for r in case_rows]

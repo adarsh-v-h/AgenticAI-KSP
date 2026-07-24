@@ -79,18 +79,22 @@ export default function CaseDetailPanel({ caseId, onClose, onAuthExpired }) {
         )}
 
         {!loading[activeTab] && !error[activeTab] && activeTab === 'Similar Cases' && (
-          <table className="analytics-table">
-            <thead><tr><th>Crime No</th><th>Score</th><th>Reasons</th></tr></thead>
-            <tbody>
-              {(cache['Similar Cases'] || []).map((c, i) => (
-                <tr key={i}>
-                  <td>{c.crime_no}</td>
-                  <td>{c.match_score}</td>
-                  <td>{(c.match_reasons || []).join(', ')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          cache['Similar Cases'] && cache['Similar Cases'].length > 0 ? (
+            <table className="analytics-table">
+              <thead><tr><th>Crime No</th><th>Score</th><th>Reasons</th></tr></thead>
+              <tbody>
+                {cache['Similar Cases'].map((c, i) => (
+                  <tr key={i}>
+                    <td>{c.crime_no}</td>
+                    <td>{c.match_score}</td>
+                    <td>{(c.match_reasons || []).join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="analytics-panel__state">No similar cases found in your station's DB or crime records</div>
+          )
         )}
       </div>
     </div>
