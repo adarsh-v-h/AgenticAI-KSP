@@ -52,8 +52,10 @@ from dataclasses import dataclass
 from config.settings import get
 from db.cache_client import get_value, put_value, CacheError
 
+import os
+
 # ── Tunables ────────────────────────────────────────────────────────────────
-PER_OFFICER_QUOTA = 25          # requests per officer per window
+PER_OFFICER_QUOTA = int(os.getenv("PER_OFFICER_QUOTA", "500")) # requests per officer per window
 WINDOW_SECONDS = 6 * 60 * 60    # 6-hour tumbling window
 SYNC_INTERVAL_SECONDS = 30      # background flush/refresh cadence
 CACHE_EXPIRY_HOURS = 7          # > 6h window so the key survives the whole window
