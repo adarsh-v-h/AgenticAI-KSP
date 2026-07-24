@@ -2939,13 +2939,23 @@ textarea {
 
 .evidence-trail__row {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   padding: 3px 0;
   color: var(--text-secondary);
 }
 
 .evidence-trail__row span:first-child {
   font-weight: 500;
+  white-space: nowrap;
+}
+
+.evidence-trail__row span:last-child {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
+  text-align: right;
 }
 
 .evidence-trail__sql {
