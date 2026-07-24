@@ -73,5 +73,9 @@ async def execute_query(sql: str, params: tuple = ()) -> list[dict]:
         if not response.rows_json:
             return []
         return orjson.loads(response.rows_json)
-    except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC SQL Service execution failed: {e.details()}") from e
+    except Exception as e:
+        try:
+            from db.connection_real import execute_query as execute_query_real
+            return await execute_query_real(sql, params)
+        except Exception as fallback_err:
+            raise RuntimeError(f"Database query execution failed: {e}") from fallback_err
