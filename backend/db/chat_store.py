@@ -72,7 +72,19 @@ def clear_caches():
 
 def _invalidate_officer_sessions(officer_id: int):
     """Evict all cached session lists for a given officer."""
-    keys_to_delete = [k for k in _officer_sessions_cache.keys() if isinstance(k, tuple) and k[0] == officer_id]
+    try:
+        oid_int = int(officer_id)
+    except (ValueError, TypeError):
+        oid_int = None
+    oid_str = str(officer_id)
+
+    keys_to_delete = []
+    for k in _officer_sessions_cache.keys():
+        if isinstance(k, tuple):
+            k_owner = k[0]
+            if str(k_owner) == oid_str or (oid_int is not None and (isinstance(k_owner, int) or str(k_owner).isdigit()) and int(k_owner) == oid_int):
+                keys_to_delete.append(k)
+
     for key in keys_to_delete:
         _officer_sessions_cache.delete(key)
 
@@ -216,7 +228,11 @@ async def update_session_timestamp(session_id: str, increment_count: bool = True
 # returns: (list[dict]) — list of session metadata dicts ordered by most recently updated
 # raises:  nothing (catches all exceptions, returns empty list on failure)
 async def get_sessions_for_officer(officer_id: int, limit: int = 30) -> list[dict]:
-    cache_key = (officer_id, limit)
+    try:
+        oid = int(officer_id)
+    except (ValueError, TypeError):
+        oid = officer_id
+    cache_key = (oid, limit)
     cached = _officer_sessions_cache.get(cache_key)
     if cached is not None:
         return cached
