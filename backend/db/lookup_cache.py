@@ -1,6 +1,6 @@
 import sys
 import re
-from db.connection import execute_query
+from db.connection_real import execute_query
 
 _units = {}
 _crime_sub_heads = {}
