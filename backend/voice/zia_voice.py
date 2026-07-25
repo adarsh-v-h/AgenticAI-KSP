@@ -262,27 +262,60 @@ def _normalize_for_speech(text: str) -> str:
         text = re.sub(pattern, replacement, text)
     return text
 
+_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+         "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+         "seventeen", "eighteen", "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+def _int_to_words(n: int) -> str:
+    if n < 0:
+        return "minus " + _int_to_words(-n)
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        tens_part = _TENS[n // 10]
+        rem = n % 10
+        return f"{tens_part}-{_ONES[rem]}" if rem else tens_part
+    if n < 1000:
+        hundreds = _ONES[n // 100] + " hundred"
+        rem = n % 100
+        return f"{hundreds} {_int_to_words(rem)}" if rem else hundreds
+    if n < 1000000:
+        thousands = _int_to_words(n // 1000) + " thousand"
+        rem = n % 1000
+        return f"{thousands} {_int_to_words(rem)}" if rem else thousands
+    return str(n)
+
+def _number_match_to_natural_words(match) -> str:
+    num_str = match.group(0)
+    try:
+        n = int(num_str)
+    except ValueError:
+        return num_str
+
+    # Spoken years (e.g. 2024 -> "twenty twenty-four", 2026 -> "twenty twenty-six")
+    if 1900 <= n <= 2099:
+        if n == 2000:
+            return "two thousand"
+        if 2001 <= n <= 2009:
+            return f"two thousand {_ONES[n - 2000]}"
+        first_two = n // 100
+        last_two = n % 100
+        return f"{_int_to_words(first_two)} {_int_to_words(last_two)}"
+
+    return _int_to_words(n)
+
 # CONTRACT
-# takes:  text (str) — text containing standalone digit sequences
-# returns: (str) — text with digits replaced by spoken English words
+# takes:  text (str) — text containing numbers
+# returns: (str) — text with numbers converted to natural spoken English words (e.g. 47 -> forty-seven, 2024 -> twenty twenty-four)
 # raises:  nothing
 def _numbers_to_words(text: str) -> str:
     """
-    Convert standalone digits to spoken-out English words so the TTS engine
-    doesn't route them through a different language's number-pronunciation
-    rules (observed: digits being read in Hindi/Kannada despite English speaker).
+    Convert numbers into natural spoken English words (e.g. 47 -> "forty-seven",
+    2024 -> "twenty twenty-four") so text-to-speech sounds natural and fluent.
     """
     import re
-
-    ones = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
-
-    def replace_number(match):
-        num_str = match.group()
-        if len(num_str) == 1:
-            return ones[int(num_str)]
-        return ' '.join(ones[int(d)] for d in num_str)
-
-    return re.sub(r'\b\d+\b', replace_number, text)
+    return re.sub(r'\b\d+\b', _number_match_to_natural_words, text)
 
 # CONTRACT
 # takes:  text (str) — text to synthesize into speech, language (str) — language code for TTS
@@ -297,7 +330,7 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
     enhancement, so the route turns this into a quiet 502 and the UI simply
     doesn't play audio. Timeout 20s.
     """
-    clipped = _normalize_for_speech(_strip_markdown_for_speech((text or "").strip()))[:_TTS_MAX_CHARS]
+    clipped = _normalize_for_speech(_numbers_to_words(_strip_markdown_for_speech((text or "").strip())))[:_TTS_MAX_CHARS]
     if not clipped:
         raise VoiceError("No text to synthesize.")
 

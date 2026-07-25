@@ -423,7 +423,7 @@ class TestVoiceHelpers:
         assert "*" not in out
 
     def test_numbers_to_words(self):
-        assert zv._numbers_to_words("42 cases") == "four two cases"
+        assert zv._numbers_to_words("42 cases") == "forty-two cases"
 
 
 class TestVoiceTranscribe:
