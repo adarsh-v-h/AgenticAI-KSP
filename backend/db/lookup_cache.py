@@ -106,6 +106,9 @@ def intercept_lookup_query(sql: str, params: tuple = ()) -> list[dict] | None:
 
     # 1. Simple Unit Table Queries
     if "FROM UNIT" in sql_clean:
+        if not _units_list:
+            return None
+
         # Match: SELECT UnitID FROM Unit WHERE UnitID = %s
         if "WHERE UNITID =" in sql_clean and len(params) == 1:
             u_id = params[0]
@@ -131,11 +134,15 @@ def intercept_lookup_query(sql: str, params: tuple = ()) -> list[dict] | None:
 
     # 2. Simple CaseStatusMaster Table Queries
     if "FROM CASESTATUSMASTER" in sql_clean:
+        if not _case_status_master_list:
+            return None
         if "SELECT CASESTATUSID, CASESTATUSNAME" in sql_clean and "WHERE" not in sql_clean:
             return [{"CaseStatusID": s["CaseStatusID"], "CaseStatusName": s["CaseStatusName"]} for s in _case_status_master_list]
 
     # 3. Simple CrimeSubHead Table Queries
     if "FROM CRIMESUBHEAD" in sql_clean:
+        if not _crime_sub_heads_list:
+            return None
         # Match: SELECT CrimeSubHeadID FROM CrimeSubHead LIMIT 1 (commonly used in tests)
         if "LIMIT 1" in sql_clean and "WHERE" not in sql_clean:
             if _crime_sub_heads_list:
