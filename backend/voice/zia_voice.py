@@ -317,6 +317,8 @@ def _numbers_to_words(text: str) -> str:
     import re
     return re.sub(r'\b\d+\b', _number_match_to_natural_words, text)
 
+_TTS_MAX_CHARS = 200
+
 # CONTRACT
 # takes:  text (str) — text to synthesize into speech, language (str) — language code for TTS
 # returns: (bytes) — raw audio bytes (MP3/WAV)
@@ -324,13 +326,17 @@ def _numbers_to_words(text: str) -> str:
 async def synthesize_speech(text: str, language: str = "en") -> bytes:
     """
     Convert `text` to speech audio via Zia TTS. Returns raw audio bytes
-    (format set by Zia — typically MP3/WAV; the route serves it as audio/mpeg).
+    (format set by Zia — typically MP3/WAV; the route serves it as audio/wav).
 
     Truncates to _TTS_MAX_CHARS first. Raises VoiceError on failure — TTS is an
     enhancement, so the route turns this into a quiet 502 and the UI simply
-    doesn't play audio. Timeout 20s.
+    doesn't play audio. Timeout 30s.
     """
-    clipped = _normalize_for_speech(_numbers_to_words(_strip_markdown_for_speech((text or "").strip())))[:_TTS_MAX_CHARS]
+    raw_text = (text or "").strip()
+    if language == "kn" and raw_text:
+        raw_text = await translate_to_english(raw_text, source_language="kn")
+
+    clipped = _normalize_for_speech(_numbers_to_words(_strip_markdown_for_speech(raw_text)))[:_TTS_MAX_CHARS]
     if not clipped:
         raise VoiceError("No text to synthesize.")
 
@@ -339,13 +345,11 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
     except ValueError as e:
         raise VoiceError(f"TTS not configured: {e}") from e
 
-    # Zia TTS requires speaker/pitch/speed/emotion in addition to text/language —
-    # confirmed via Catalyst console sample request. Without these it 400s with
-    # LESS_THAN_MIN_OCCURANCE ("zoho-inputstream" parameter error).
+    # Zia QuickML TTS only supports English speaker 'Mary'.
     payload = {
         "text": clipped,
-        "language": language,
-        "speaker": "Mary",      # default voice — Zia requires a named speaker
+        "language": "en",
+        "speaker": "Mary",
         "pitch": "moderate",
         "speed": "moderate",
         "emotion": "neutral",
@@ -357,7 +361,7 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
             url,
             headers=await _zia_headers({"Content-Type": "application/json"}),
             json=payload,
-            timeout=20.0,
+            timeout=30.0,
         )
     except httpx.HTTPError as e:
         raise VoiceError(f"TTS request failed: {e}") from e
