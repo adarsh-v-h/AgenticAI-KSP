@@ -52,7 +52,13 @@ export default function VoiceInput({ onTranscript, language = 'en', disabled = f
       return
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
       streamRef.current = stream
       const recorder = new MediaRecorder(stream)
       chunksRef.current = []

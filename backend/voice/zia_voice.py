@@ -71,18 +71,22 @@ def _unwrap(data: dict) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+_STT_HALLUCINATIONS = {"you", "you.", "you!", "thank you", "thank you.", "thanks", "subtitles by", "."}
+
 # CONTRACT
 # takes:  payload (dict) — raw STT API response
-# returns: (str) — extracted transcript text, or empty string if not found
+# returns: (str) — extracted transcript text, or empty string if not found or hallucinated silence
 # raises:  nothing
 def _extract_transcript(payload: dict) -> str:
-    """Pull the transcript text from a STT response, tolerating a few likely
-    field names so a minor contract difference doesn't break us."""
+    """Pull the transcript text from a STT response, filtering out known silence hallucination tokens."""
     inner = _unwrap(payload)
     for key in ("transcript", "text", "transcription", "result"):
         val = inner.get(key)
         if isinstance(val, str) and val.strip():
-            return val.strip()
+            cleaned = val.strip()
+            if cleaned.lower().strip() in _STT_HALLUCINATIONS:
+                return ""
+            return cleaned
     return ""
 
 
