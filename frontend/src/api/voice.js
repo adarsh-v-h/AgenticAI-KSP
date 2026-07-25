@@ -141,6 +141,8 @@ export async function recordAndTranscribe(audioBlob, language = 'en') {
 // takes:  text (string) — text to synthesize into speech, language ('en'|'kn') — target language
 // returns: (Promise<boolean>) — true if audio played successfully, false otherwise
 // throws:  never
+const _audioCache = new Map()
+
 /**
  * Synthesize speech for `text` and play it. Best-effort: resolves to true when
  * audio played, false when synthesis was unavailable. Never throws — TTS is an
@@ -153,6 +155,18 @@ export async function recordAndTranscribe(audioBlob, language = 'en') {
  * @returns {Promise<boolean>}
  */
 export async function speakText(text, language = 'en') {
+  const cacheKey = `${language}:${text}`
+  if (_audioCache.has(cacheKey)) {
+    try {
+      const url = _audioCache.get(cacheKey)
+      const audio = new Audio(url)
+      await audio.play()
+      return true
+    } catch {
+      _audioCache.delete(cacheKey)
+    }
+  }
+
   const token = getToken()
   try {
     const res = await fetch(`${API_BASE}/api/voice/speak`, {
@@ -167,9 +181,9 @@ export async function speakText(text, language = 'en') {
 
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
+    _audioCache.set(cacheKey, url)
+
     const audio = new Audio(url)
-    // Revoke the object URL once playback ends to avoid leaking blob memory.
-    audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true })
     await audio.play()
     return true
   } catch (err) {
