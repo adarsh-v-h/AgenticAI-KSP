@@ -297,7 +297,7 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
     enhancement, so the route turns this into a quiet 502 and the UI simply
     doesn't play audio. Timeout 20s.
     """
-    clipped = _normalize_for_speech(_numbers_to_words(_strip_markdown_for_speech((text or "").strip())))[:_TTS_MAX_CHARS]
+    clipped = _normalize_for_speech(_strip_markdown_for_speech((text or "").strip()))[:_TTS_MAX_CHARS]
     if not clipped:
         raise VoiceError("No text to synthesize.")
 
