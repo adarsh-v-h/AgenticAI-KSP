@@ -13,8 +13,7 @@ not play audio for TTS) rather than breaking the composer.
 import io
 import sys
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from auth.simple_auth import get_current_officer
@@ -93,7 +92,7 @@ async def speak(
     officer: dict = Depends(get_current_officer),
 ):
     """
-    Synthesize `text` to speech via Zia TTS and stream the audio back.
+    Synthesize `text` to speech via Zia TTS and return the audio bytes (audio/wav).
     HTTP 502 on Zia failure — the frontend simply doesn't play audio (TTS is an
     enhancement, not core functionality), so no user-facing error is required.
     """
@@ -103,4 +102,4 @@ async def speak(
         _log(f"speak failed: {e}")
         raise HTTPException(status_code=502, detail="Speech synthesis unavailable.") from e
 
-    return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
+    return Response(content=audio_bytes, media_type="audio/wav")
