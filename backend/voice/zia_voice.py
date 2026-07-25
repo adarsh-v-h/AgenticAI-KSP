@@ -99,6 +99,25 @@ def _extract_translation(payload: dict) -> str:
     return ""
 
 
+async def _ensure_wav(audio_bytes: bytes) -> bytes:
+    """Ensure audio bytes are in standard 16kHz mono WAV format. Converts via ffmpeg if needed."""
+    if audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:16]:
+        return audio_bytes
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", "pipe:0", "-f", "wav", "-ac", "1", "-ar", "16000", "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate(input=audio_bytes)
+        if proc.returncode == 0 and stdout.startswith(b"RIFF"):
+            return stdout
+    except Exception as e:
+        _log(f"ffmpeg conversion to wav failed: {e}")
+    return audio_bytes
+
+
 # CONTRACT
 # takes:  audio_bytes (bytes) — recorded audio data, language (str) — language code of the audio
 # returns: (str) — transcription text
@@ -106,7 +125,7 @@ def _extract_translation(payload: dict) -> str:
 async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     """
     Send recorded audio to Zia STT as multipart/form-data and return the
-    transcript string.
+    transcript string. Auto-converts WebM/Ogg/MP3 audio to WAV via ffmpeg if needed.
 
     Raises VoiceError on transport error, non-200, or an empty/unparseable
     transcript — the caller (router) turns that into a graceful 502 so the UI
@@ -117,7 +136,8 @@ async def transcribe_audio(audio_bytes: bytes, language: str = "en") -> str:
     except ValueError as e:
         raise VoiceError(f"STT not configured: {e}") from e
 
-    files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+    wav_bytes = await _ensure_wav(audio_bytes)
+    files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
     data = {"language": language}
 
     try:

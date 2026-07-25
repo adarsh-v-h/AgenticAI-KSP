@@ -13,8 +13,16 @@ async function convertWebmToWav(webmBlob) {
   if (!AudioContextClass) return webmBlob
 
   const audioContext = new AudioContextClass()
-  const arrayBuffer = await webmBlob.arrayBuffer()
-  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume()
+  }
+  let audioBuffer
+  try {
+    const arrayBuffer = await webmBlob.arrayBuffer()
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+  } finally {
+    audioContext.close().catch(() => {})
+  }
 
   const numOfChan = audioBuffer.numberOfChannels
   const sampleRate = audioBuffer.sampleRate
