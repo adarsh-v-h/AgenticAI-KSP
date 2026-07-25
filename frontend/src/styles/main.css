@@ -10,40 +10,43 @@
 :root {
   --font-size-base: 16px;
 
-  /* Brand */
-  --primary: #cc785c;
-  --primary-active: #a9583e;
-  --primary-disabled: #e6dfd8;
+  /* Brand - Vibrant energetic coral */
+  --primary: #d9532f;
+  --primary-active: #b83a19;
+  --primary-disabled: #eddccf;
+  --primary-glow: rgba(217, 83, 47, 0.25);
 
-  /* Ink + body */
-  --ink: #141413;
-  --body-strong: #252523;
-  --body: #3d3d3a;
-  --muted: #6c6a64;
-  --muted-soft: #8e8b82;
+  /* Ink + body — Deep high-contrast typography */
+  --ink: #0d0d0c;
+  --body-strong: #1a1a18;
+  --body: #2e2d2a;
+  --muted: #54524c;
+  --muted-soft: #7a7770;
 
-  /* Surfaces */
-  --canvas: #faf9f5;
-  --surface-soft: #f5f0e8;
-  --surface-card: #efe9de;
-  --surface-cream-strong: #e8e0d2;
-  --surface-dark: #181715;
-  --surface-dark-soft: #1f1e1b;
-  --surface-dark-elevated: #252320;
+  /* Surfaces — Rich warm cream and crisp cards */
+  --canvas: #faf7f2;
+  --surface-soft: #f4ece1;
+  --surface-card: #eadecd;
+  --surface-cream-strong: #e2d2be;
+  --surface-dark: #141312;
+  --surface-dark-soft: #1c1b18;
+  --surface-dark-elevated: #24221f;
 
-  /* Lines */
-  --hairline: #e6dfd8;
-  --hairline-soft: #ebe6df;
+  /* Lines & Borders — Crisp definition */
+  --hairline: #d8c7b3;
+  --hairline-soft: #e2d4c3;
 
   /* On dark */
-  --on-dark: #faf9f5;
-  --on-dark-soft: #a09d96;
+  --on-dark: #faf7f2;
+  --on-dark-soft: #b0ad06;
 
-  /* Semantic */
-  --error: #c64545;
-  --success: #5db872;
-  --accent-teal: #5db8a6;
-  --accent-amber: #e8a55a;
+  /* Semantic & Vivid Accents */
+  --error: #dc2626;
+  --success: #16a34a;
+  --accent-teal: #0891b2;
+  --accent-amber: #d97706;
+  --accent-purple: #7c3aed;
+  --accent-blue: #2563eb;
 
   /* Type */
   --font-display: 'EB Garamond', 'Tiempos Headline', Georgia, serif;
@@ -56,10 +59,9 @@
   --r-xl: 16px;
   --r-pill: 9999px;
 
-  /* Layout aliases used by the redesigned shell (map onto the brand palette
-     above so the two-panel layout stays consistent with the existing theme). */
+  /* Layout aliases */
   --border: var(--hairline);
-  --surface-hover: rgba(20, 20, 19, 0.05);
+  --surface-hover: rgba(217, 83, 47, 0.08);
   --text-primary: var(--ink);
   --text-secondary: var(--muted);
   --text-tertiary: var(--muted-soft);
