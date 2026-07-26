@@ -25,7 +25,7 @@ import httpx
 from config.settings import get
 from config.catalyst_token import get_access_token
 from http_client import get_http_client
-
+import asyncio
 
 class VoiceError(Exception):
     """Raised when a Zia STT/TTS call fails or returns an unusable response."""
