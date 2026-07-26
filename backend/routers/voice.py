@@ -10,7 +10,6 @@ Both are auth-protected. Voice is an enhancement layer: failures return a clear
 not play audio for TTS) rather than breaking the composer.
 """
 
-import io
 import sys
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile
